@@ -1,0 +1,59 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+build/
+dist/
+*.egg-info/
+
+# Audio files (except resources)
+*.wav
+*.mp3
+*.aiff
+*.flac
+*.ogg
+!resources/**/*.wav
+!resources/**/*.mp3
+!resources/**/*.aiff
+!resources/**/*.flac
+!resources/**/*.ogg
+
+# Video files
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node modules (if using JavaScript/Node)
+node_modules/
+
+# Python virtual environments
+venv/
+env/
+ENV/
