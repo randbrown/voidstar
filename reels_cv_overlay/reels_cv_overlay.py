@@ -123,6 +123,40 @@ def apply_scanlines(frame, strength=0.06):
 
 
 # =========================
+# CODE OVERLAY
+# =========================
+def render_code_overlay(lines, w, h, font_scale=0.6, line_spacing=1.45):
+    base_line_h = int(22 * font_scale)
+    line_advance = max(1, int(base_line_h * line_spacing))
+
+    img_h = max(h * 2, len(lines) * line_advance + h)
+    img = np.zeros((img_h, w, 3), np.uint8)
+
+    y = 30  # ✅ start code at top (no dead space)
+    for line in lines:
+        cv2.putText(
+            img,
+            line.rstrip(),
+            (20, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            (200, 200, 200),
+            1,
+            cv2.LINE_AA
+        )
+        y += line_advance
+
+    return img
+
+
+def overlay_code(frame, code_img, yoff, alpha=0.85):
+    h, w = frame.shape[:2]
+    yoff = int(max(0, min(yoff, code_img.shape[0] - h)))
+    src = code_img[yoff:yoff + h]
+    return cv2.addWeighted(frame, 1.0, src, alpha, 0)
+
+
+# =========================
 # VELOCITY COLORING
 # =========================
 def velocity_to_color(v, v_min=0.0, v_max=800.0):
@@ -148,7 +182,6 @@ def draw_landmark_id(frame, x, y, idx, color):
     x0 = x + 4
     y0 = y - th - 4
 
-    # Outline-only box (always)
     cv2.rectangle(
         frame,
         (x0 - pad, y0 - pad),
@@ -170,7 +203,7 @@ def draw_landmark_id(frame, x, y, idx, color):
 
 
 # =========================
-# FFMPEG CFR
+# CFR INTERMEDIATE
 # =========================
 def make_cfr_intermediate(src, dst, fps, start, duration):
     ffmpeg = shutil.which("ffmpeg")
@@ -203,6 +236,7 @@ def make_cfr_intermediate(src, dst, fps, start, duration):
 # =========================
 def main():
     ap = argparse.ArgumentParser()
+
     ap.add_argument("input")
     ap.add_argument("-o", "--output")
 
@@ -214,7 +248,14 @@ def main():
     ap.add_argument("--duration", type=float, default=DEFAULT_DURATION)
 
     ap.add_argument("--audio-wav")
-    ap.add_argument("--code-overlay")
+
+    ap.add_argument(
+        "--code-overlay",
+        nargs="?",
+        const=True,
+        default=False,
+        help="Overlay scrolling code. If true, defaults to this script. If a path is given, uses that file."
+    )
     ap.add_argument("--code-overlay-order", choices=["before", "after"], default="after")
 
     ap.add_argument("--model-complexity", type=int, default=DEFAULT_MODEL_COMPLEXITY)
@@ -239,6 +280,8 @@ def main():
     src = Path(args.input)
     outp = Path(args.output) if args.output else build_output_name(src, args)
 
+    full_duration = ffprobe_duration_seconds(src)
+
     tmp_cfr = outp.with_suffix(".cfr.tmp.mp4")
     make_cfr_intermediate(src, tmp_cfr, args.fps, args.start, args.duration)
 
@@ -250,10 +293,26 @@ def main():
         (args.width, args.height)
     )
 
+    # --- Code overlay setup ---
+    code_img = None
+    code_scroll_range = 0
+    if args.code_overlay:
+        code_path = Path(__file__).resolve() if args.code_overlay is True else Path(args.code_overlay)
+        if not code_path.exists():
+            raise FileNotFoundError(code_path)
+
+        lines = code_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        code_img = render_code_overlay(lines, args.width, args.height)
+
+        # ✅ cap scroll range so short clips don't hyper-scroll
+        max_scroll = code_img.shape[0] - args.height
+        code_scroll_range = max(1, min(max_scroll, args.height * 2))
+
     mp_pose = mp.solutions.pose
     prev_landmarks = None
     trail_buf = None
-    fps = args.fps
+    fps = float(args.fps)
+    frame_idx = 0
 
     with mp_pose.Pose(
         model_complexity=args.model_complexity,
@@ -267,14 +326,17 @@ def main():
                 break
 
             frame = fit_to_reels(frame, args.width, args.height)
+
+            if code_img is not None and args.code_overlay_order == "before":
+                t = args.start + frame_idx / fps
+                yoff = (t / full_duration) * code_scroll_range
+                frame = overlay_code(frame, code_img, yoff)
+
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             res = pose.process(rgb)
 
             if args.trail:
-                if trail_buf is None:
-                    trail_buf = np.zeros_like(frame)
-                else:
-                    trail_buf = (trail_buf.astype(np.float32) * args.trail_alpha).astype(np.uint8)
+                trail_buf = np.zeros_like(frame) if trail_buf is None else (trail_buf * args.trail_alpha).astype(np.uint8)
 
             if res.pose_landmarks:
                 h, w = frame.shape[:2]
@@ -284,43 +346,36 @@ def main():
                 for i, lm in enumerate(res.pose_landmarks.landmark):
                     x, y = int(lm.x * w), int(lm.y * h)
                     curr_landmarks.append((x, y))
-                    if prev_landmarks:
-                        px, py = prev_landmarks[i]
-                        velocities[i] = ((x - px) ** 2 + (y - py) ** 2) ** 0.5 * fps
-                    else:
-                        velocities[i] = 0.0
+                    velocities[i] = 0.0 if not prev_landmarks else (
+                        ((x - prev_landmarks[i][0]) ** 2 + (y - prev_landmarks[i][1]) ** 2) ** 0.5 * fps
+                    )
 
                 draw_target = trail_buf if args.trail else frame
 
                 for a, b in mp_pose.POSE_CONNECTIONS:
-                    xa, ya = curr_landmarks[a]
-                    xb, yb = curr_landmarks[b]
-
-                    if args.velocity_color:
-                        color = velocity_to_color(max(velocities[a], velocities[b]))
-                    else:
-                        color = (255, 255, 255)
-
-                    cv2.line(draw_target, (xa, ya), (xb, yb), color, 1)
+                    color = velocity_to_color(max(velocities[a], velocities[b])) if args.velocity_color else (255, 255, 255)
+                    cv2.line(draw_target, curr_landmarks[a], curr_landmarks[b], color, 1)
 
                 if args.draw_ids:
-                    for idx, (x, y) in enumerate(curr_landmarks):
-                        if args.velocity_color:
-                            color = velocity_to_color(velocities[idx])
-                        else:
-                            color = (255, 255, 255)
-
-                        draw_landmark_id(frame, x, y, idx, color)
+                    for i, (x, y) in enumerate(curr_landmarks):
+                        color = velocity_to_color(velocities[i]) if args.velocity_color else (255, 255, 255)
+                        draw_landmark_id(frame, x, y, i, color)
 
                 prev_landmarks = curr_landmarks
 
             if args.trail:
                 frame = cv2.addWeighted(frame, 1.0, trail_buf, 1.0, 0)
 
+            if code_img is not None and args.code_overlay_order == "after":
+                t = args.start + frame_idx / fps
+                yoff = (t / full_duration) * code_scroll_range
+                frame = overlay_code(frame, code_img, yoff)
+
             if args.scanlines:
                 frame = apply_scanlines(frame, args.scanline_strength)
 
             out.write(frame)
+            frame_idx += 1
 
     cap.release()
     out.release()
