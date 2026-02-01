@@ -1,6 +1,9 @@
 import argparse
 import subprocess
 import shutil
+import tempfile
+import wave
+from collections import deque
 from pathlib import Path
 
 import cv2
@@ -21,6 +24,7 @@ DEFAULT_MIN_TRK_CONF = 0.5
 
 DEFAULT_TRAIL = True
 DEFAULT_TRAIL_ALPHA = 0.9
+DEFAULT_TRAIL_LINES_ONLY = True
 
 DEFAULT_SCANLINES = True
 DEFAULT_SCANLINE_STRENGTH = 0.06
@@ -31,6 +35,35 @@ DEFAULT_AUDIO_BITRATE = "320k"
 
 DEFAULT_START = 0.0
 DEFAULT_DURATION = None
+
+# Code overlay defaults
+DEFAULT_CODE_ALPHA = 0.85
+DEFAULT_CODE_FONT_SCALE = 0.40
+DEFAULT_CODE_LINE_SPACING = 1.45
+DEFAULT_CODE_TOP_MARGIN = 30
+DEFAULT_CODE_SCROLL_CAP_SCREENS = 2.0  # cap to ~2 screen-heights by default
+
+DEFAULT_AUDIO_OFFSET = 0.0  # seconds (can be negative)
+
+# Reactive defaults (all OFF unless enabled)
+DEFAULT_BEAT_SYNC = False
+DEFAULT_BEAT_GAIN = 2.0
+DEFAULT_BEAT_SMOOTH = 0.88
+DEFAULT_BEAT_PULSE_THRESHOLD = 0.65
+DEFAULT_BEAT_PULSE_BOOST = 0.9
+
+DEFAULT_SMEAR = False
+DEFAULT_SMEAR_FRAMES = 10
+DEFAULT_SMEAR_DECAY = 0.86
+DEFAULT_SMEAR_MODE = "lerp"  # lerp|add|screen|max
+DEFAULT_SMEAR_ON_POSE_ONLY = True
+
+DEFAULT_GLITCH = False
+DEFAULT_GLITCH_STRENGTH = 0.22
+DEFAULT_GLITCH_RATE = 0.9
+DEFAULT_GLITCH_RGB_SPLIT = 8
+DEFAULT_GLITCH_SCAN_JITTER = 14
+DEFAULT_GLITCH_DROPOUT = 0.02  # occasional band dropout probability
 
 
 # =========================
@@ -45,25 +78,31 @@ def bool_flag(v: str) -> bool:
     raise argparse.ArgumentTypeError(f"Invalid boolean: {v}")
 
 
-def run(cmd):
+def run(cmd: list[str]) -> None:
     print("▶", " ".join(str(x) for x in cmd))
     subprocess.run(cmd, check=True)
 
 
+def require_ffmpeg(tool: str) -> str:
+    p = shutil.which(tool)
+    if not p:
+        raise RuntimeError(f"{tool} not found. Install ffmpeg package.")
+    return p
+
+
 def ffprobe_duration_seconds(video_path: Path) -> float:
-    ffprobe = shutil.which("ffprobe")
-    if not ffprobe:
-        raise RuntimeError("ffprobe not found")
-    r = subprocess.run(
-        [ffprobe, "-v", "error",
-         "-show_entries", "format=duration",
-         "-of", "default=nw=1:nk=1",
-         str(video_path)],
-        stdout=subprocess.PIPE,
-        text=True,
-        check=True
-    )
-    return float(r.stdout.strip())
+    ffprobe = require_ffmpeg("ffprobe")
+    cmd = [
+        ffprobe, "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=nw=1:nk=1",
+        str(video_path)
+    ]
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+    s = r.stdout.strip()
+    if not s:
+        raise RuntimeError("ffprobe could not read duration.")
+    return float(s)
 
 
 def fmt_float(x: float) -> str:
@@ -73,30 +112,48 @@ def fmt_float(x: float) -> str:
 def build_output_name(src: Path, args) -> Path:
     parts = []
 
+    # timing
     if args.fps:
         parts.append(f"fps{int(args.fps)}")
-    if args.start > 0:
+    if args.start and args.start > 0:
         parts.append(f"s{fmt_float(args.start)}")
     if args.duration is not None:
         parts.append(f"d{fmt_float(args.duration)}")
 
-    parts += [
-        f"mc{args.model_complexity}",
-        f"det{fmt_float(args.min_det_conf)}",
-        f"trk{fmt_float(args.min_trk_conf)}",
-        f"trail{int(args.trail)}",
-        f"ta{fmt_float(args.trail_alpha)}",
-        f"scan{int(args.scanlines)}",
-    ]
+    # pose params
+    parts.append(f"mc{args.model_complexity}")
+    parts.append(f"det{fmt_float(args.min_det_conf)}")
+    parts.append(f"trk{fmt_float(args.min_trk_conf)}")
 
+    # visuals
+    parts.append(f"trail{int(args.trail)}")
+    if args.trail:
+        parts.append(f"ta{fmt_float(args.trail_alpha)}")
+        parts.append(f"tlo{str(args.trail_lines_only).lower()}")
+
+    parts.append(f"scan{int(args.scanlines)}")
+
+    # ids/color
     if args.velocity_color:
         parts.append("velcolor")
     if args.draw_ids:
         parts.append("ids")
+
+    # code overlay
     if args.code_overlay:
         parts.append(f"code{args.code_overlay_order}")
+        parts.append(f"ca{fmt_float(args.code_alpha)}")
 
-    return src.with_name(f"{src.stem}_{'_'.join(parts)}.mp4")
+    # reactive toggles
+    if args.beat_sync:
+        parts.append("beatsync")
+    if args.smear:
+        parts.append("smear")
+    if args.glitch:
+        parts.append("glitch")
+
+    suffix = "_" + "_".join(parts) if parts else ""
+    return src.with_name(f"{src.stem}{suffix}.mp4")
 
 
 def fit_to_reels(frame, out_w, out_h):
@@ -118,42 +175,8 @@ def fit_to_reels(frame, out_w, out_h):
 
 def apply_scanlines(frame, strength=0.06):
     out = frame.astype(np.float32)
-    out[::2] *= (1.0 - strength)
+    out[::2, :, :] *= (1.0 - strength)
     return np.clip(out, 0, 255).astype(np.uint8)
-
-
-# =========================
-# CODE OVERLAY
-# =========================
-def render_code_overlay(lines, w, h, font_scale=0.6, line_spacing=1.45):
-    base_line_h = int(22 * font_scale)
-    line_advance = max(1, int(base_line_h * line_spacing))
-
-    img_h = max(h * 2, len(lines) * line_advance + h)
-    img = np.zeros((img_h, w, 3), np.uint8)
-
-    y = 30  # ✅ start code at top (no dead space)
-    for line in lines:
-        cv2.putText(
-            img,
-            line.rstrip(),
-            (20, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
-            (200, 200, 200),
-            1,
-            cv2.LINE_AA
-        )
-        y += line_advance
-
-    return img
-
-
-def overlay_code(frame, code_img, yoff, alpha=0.85):
-    h, w = frame.shape[:2]
-    yoff = int(max(0, min(yoff, code_img.shape[0] - h)))
-    src = code_img[yoff:yoff + h]
-    return cv2.addWeighted(frame, 1.0, src, alpha, 0)
 
 
 # =========================
@@ -163,6 +186,7 @@ def velocity_to_color(v, v_min=0.0, v_max=800.0):
     t = (v - v_min) / max(1e-6, (v_max - v_min))
     t = max(0.0, min(1.0, t))
 
+    # BGR ramp: blue->green->red
     if t < 0.5:
         a = t / 0.5
         return (int(255 * (1 - a)), int(255 * a), 0)
@@ -182,6 +206,7 @@ def draw_landmark_id(frame, x, y, idx, color):
     x0 = x + 4
     y0 = y - th - 4
 
+    # Outline-only box (no fill)
     cv2.rectangle(
         frame,
         (x0 - pad, y0 - pad),
@@ -203,15 +228,93 @@ def draw_landmark_id(frame, x, y, idx, color):
 
 
 # =========================
-# CFR INTERMEDIATE
+# CODE OVERLAY
 # =========================
-def make_cfr_intermediate(src, dst, fps, start, duration):
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        raise RuntimeError("ffmpeg not found")
+def resolve_code_overlay_path(code_overlay_arg) -> Path | None:
+    """
+    --code-overlay can be:
+      - not provided / false -> None
+      - provided as flag (const=True) -> True
+      - provided with 'true'/'false' string
+      - provided with a filepath
+    """
+    if not code_overlay_arg:
+        return None
 
-    cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-i", str(src)]
-    if start > 0:
+    if code_overlay_arg is True:
+        return Path(__file__).resolve()
+
+    if isinstance(code_overlay_arg, str):
+        s = code_overlay_arg.strip().lower()
+        if s in ("1", "true", "t", "yes", "y", "on"):
+            return Path(__file__).resolve()
+        if s in ("0", "false", "f", "no", "n", "off"):
+            return None
+        return Path(code_overlay_arg)
+
+    return None
+
+
+def render_code_overlay(
+    lines,
+    w,
+    h,
+    font_scale=0.40,
+    line_spacing=1.45,
+    top_margin=30
+):
+    base_line_h = int(22 * font_scale)
+    line_advance = max(1, int(base_line_h * line_spacing))
+
+    img_h = max(h * 2, len(lines) * line_advance + h + top_margin)
+    img = np.zeros((img_h, w, 3), np.uint8)
+
+    # Start at top immediately (no dead space)
+    y = int(top_margin)
+    for line in lines:
+        cv2.putText(
+            img,
+            line.rstrip("\n"),
+            (20, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            (200, 200, 200),
+            1,
+            cv2.LINE_AA
+        )
+        y += line_advance
+
+    return img
+
+
+def overlay_code(frame, code_img, yoff, alpha=0.85):
+    h, w = frame.shape[:2]
+    yoff = int(yoff)
+    yoff = max(0, min(yoff, max(0, code_img.shape[0] - h)))
+    src = code_img[yoff:yoff + h]
+    return cv2.addWeighted(frame, 1.0, src, float(alpha), 0)
+
+
+# =========================
+# FFMPEG CFR + AUDIO MUX
+# =========================
+def make_cfr_intermediate(
+    src: Path,
+    dst: Path,
+    fps: float,
+    start: float,
+    duration: float | None,
+):
+    """
+    Converts (likely VFR) phone video to true CFR before OpenCV processing.
+    Put -ss AFTER -i for accurate trimming.
+    """
+    ffmpeg = require_ffmpeg("ffmpeg")
+
+    cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
+    cmd += ["-i", str(src)]
+
+    if start and start > 0:
         cmd += ["-ss", str(start)]
     if duration is not None:
         cmd += ["-t", str(duration)]
@@ -219,51 +322,351 @@ def make_cfr_intermediate(src, dst, fps, start, duration):
     cmd += [
         "-vf", f"fps={fps}:round=near",
         "-fps_mode", "cfr",
-        "-an",
+        "-an",  # video-only intermediate
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         "-profile:v", "baseline",
+        "-level", "4.1",
         "-crf", "18",
         "-preset", "veryfast",
         str(dst)
     ]
-
     run(cmd)
+
+
+def mux_audio_player_safe(
+    video_noaudio: Path,
+    src_video: Path,
+    audio_wav: Path | None,
+    out_mp4: Path,
+    audio_start: float,
+    audio_duration: float | None,
+    crf: int,
+    preset: str,
+    audio_bitrate: str,
+):
+    """
+    Mux audio back in (external WAV preferred, else source video audio).
+    Sample-accurate trim using atrim + asetpts.
+    """
+    ffmpeg = require_ffmpeg("ffmpeg")
+
+    cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
+
+    # processed video
+    cmd += ["-i", str(video_noaudio)]
+
+    # audio source
+    if audio_wav:
+        cmd += ["-i", str(audio_wav)]
+        audio_input_idx = 1
+    else:
+        cmd += ["-i", str(src_video)]
+        audio_input_idx = 1
+
+    af = []
+    if audio_start > 0:
+        af.append(f"atrim=start={audio_start}")
+    if audio_duration is not None:
+        af.append(f"atrim=duration={audio_duration}")
+    af.append("asetpts=PTS-STARTPTS")
+
+    cmd += ["-filter_complex", f"[{audio_input_idx}:a]{','.join(af)}[a]"]
+    cmd += ["-map", "0:v:0", "-map", "[a]"]
+
+    cmd += [
+        "-movflags", "+faststart",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-profile:v", "baseline",
+        "-level", "4.1",
+        "-crf", str(crf),
+        "-preset", preset,
+        "-c:a", "aac",
+        "-b:a", str(audio_bitrate),
+        "-ar", "48000",
+        "-shortest",
+        str(out_mp4),
+    ]
+    run(cmd)
+
+
+# =========================
+# AUDIO ANALYSIS (beat-sync)
+# =========================
+def extract_audio_wav_segment(
+    src_media: Path,
+    dst_wav: Path,
+    start: float,
+    duration: float | None,
+    sr: int = 48000,
+):
+    """
+    Extract a mono 48k PCM wav segment using ffmpeg.
+    Works for input video OR wav files (re-encodes to consistent format).
+    """
+    ffmpeg = require_ffmpeg("ffmpeg")
+    cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
+
+    # Accurate trim: -ss after -i
+    cmd += ["-i", str(src_media)]
+    if start and start > 0:
+        cmd += ["-ss", str(start)]
+    if duration is not None:
+        cmd += ["-t", str(duration)]
+
+    cmd += [
+        "-vn",
+        "-ac", "1",
+        "-ar", str(sr),
+        "-f", "wav",
+        str(dst_wav)
+    ]
+    run(cmd)
+
+
+def read_wav_mono_int16(wav_path: Path) -> tuple[np.ndarray, int]:
+    """
+    Read WAV (PCM) into float32 [-1,1], returns (samples, sample_rate).
+    """
+    with wave.open(str(wav_path), "rb") as wf:
+        nch = wf.getnchannels()
+        sr = wf.getframerate()
+        sampwidth = wf.getsampwidth()
+        nframes = wf.getnframes()
+        raw = wf.readframes(nframes)
+
+    if sampwidth != 2:
+        # enforce 16-bit output from ffmpeg; if something slips through, fail loud
+        raise RuntimeError(f"WAV sample width {sampwidth} bytes not supported; expected 16-bit PCM.")
+
+    data = np.frombuffer(raw, dtype=np.int16)
+
+    if nch > 1:
+        data = data.reshape(-1, nch)
+        data = data[:, 0]
+
+    x = data.astype(np.float32) / 32768.0
+    return x, sr
+
+
+def build_envelope_at_fps(
+    wav_samples: np.ndarray,
+    sr: int,
+    fps: float,
+    n_frames: int,
+    smooth: float,
+    gain: float,
+) -> np.ndarray:
+    """
+    Build an RMS envelope aligned to frame count.
+    Returns array length n_frames, roughly in [0..1+] after gain.
+    """
+    if n_frames <= 0:
+        return np.zeros((0,), dtype=np.float32)
+
+    # RMS per frame window
+    spf = sr / float(fps)  # samples per frame
+    env = np.zeros((n_frames,), dtype=np.float32)
+
+    for i in range(n_frames):
+        a = int(i * spf)
+        b = int((i + 1) * spf)
+        if a >= len(wav_samples):
+            break
+        chunk = wav_samples[a:min(b, len(wav_samples))]
+        if chunk.size == 0:
+            v = 0.0
+        else:
+            v = float(np.sqrt(np.mean(chunk * chunk)))
+        env[i] = v
+
+    # Normalize (robust) then apply gain
+    p95 = float(np.percentile(env, 95)) if env.size else 0.0
+    norm = max(1e-6, p95)
+    env = env / norm
+    env = env * float(gain)
+
+    # Exponential smoothing
+    s = np.zeros_like(env)
+    a = float(np.clip(smooth, 0.0, 0.9999))
+    prev = 0.0
+    for i in range(env.size):
+        prev = a * prev + (1.0 - a) * float(env[i])
+        s[i] = prev
+
+    return s
+
+
+def pulse_from_env(env_val: float, threshold: float) -> float:
+    """
+    Convert envelope value to a 0..1 pulse scalar above threshold.
+    """
+    th = float(threshold)
+    if env_val <= th:
+        return 0.0
+    return float(np.clip((env_val - th) / max(1e-6, (1.0 - th)), 0.0, 1.0))
+
+
+# =========================
+# TEMPORAL SMEAR
+# =========================
+def blend_temporal(buffer: deque[np.ndarray], current: np.ndarray, decay: float, mode: str) -> np.ndarray:
+    """
+    Blend current with previous frames in buffer using given mode.
+    buffer: previous frames (most recent at right)
+    """
+    if not buffer:
+        return current
+
+    mode = (mode or "lerp").lower()
+    decay = float(np.clip(decay, 0.0, 0.9999))
+
+    # Build weights: newer frames contribute more
+    # buffer order: oldest..newest
+    weights = []
+    for i in range(len(buffer)):
+        # i=0 oldest, i=len-1 newest
+        age = len(buffer) - i
+        weights.append(decay ** age)
+
+    w_cur = 1.0
+    w_hist = float(np.sum(weights))
+    denom = w_cur + w_hist if mode == "lerp" else 1.0
+
+    cur = current.astype(np.float32)
+
+    if mode == "max":
+        out = cur.copy()
+        for fr in buffer:
+            out = np.maximum(out, fr.astype(np.float32))
+        return np.clip(out, 0, 255).astype(np.uint8)
+
+    if mode == "add":
+        out = cur.copy()
+        for fr, w in zip(buffer, weights):
+            out += fr.astype(np.float32) * w
+        return np.clip(out, 0, 255).astype(np.uint8)
+
+    if mode == "screen":
+        # screen: 1 - (1-a)(1-b) in [0..1]
+        out = cur / 255.0
+        for fr, w in zip(buffer, weights):
+            b = (fr.astype(np.float32) / 255.0) * w
+            out = 1.0 - (1.0 - out) * (1.0 - np.clip(b, 0.0, 1.0))
+        return np.clip(out * 255.0, 0, 255).astype(np.uint8)
+
+    # default: lerp weighted average
+    out = cur * w_cur
+    for fr, w in zip(buffer, weights):
+        out += fr.astype(np.float32) * w
+    out /= float(denom)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+# =========================
+# GLITCH
+# =========================
+def apply_glitch(
+    frame: np.ndarray,
+    t: float,
+    strength: float,
+    rate: float,
+    rgb_split_px: int,
+    scan_jitter_px: int,
+    dropout_prob: float,
+) -> np.ndarray:
+    """
+    Fast glitch pass:
+      - RGB split (animated)
+      - random scanline jitter bands
+      - occasional dropout band
+    """
+    strength = float(np.clip(strength, 0.0, 1.0))
+    if strength <= 0.0:
+        return frame
+
+    h, w = frame.shape[:2]
+    out = frame.copy()
+
+    # Animated phase
+    phase = np.sin(2.0 * np.pi * float(rate) * float(t))
+    dx = int(phase * rgb_split_px * strength)
+
+    b, g, r = cv2.split(out)
+    # Slightly different offsets for channels
+    r2 = np.roll(r, dx, axis=1)
+    b2 = np.roll(b, -dx, axis=1)
+    g2 = g
+    out = cv2.merge([b2, g2, r2])
+
+    # Scanline jitter bands
+    n_bands = int(1 + 6 * strength)
+    for _ in range(n_bands):
+        if np.random.rand() > (0.35 * strength + 0.05):
+            continue
+        y0 = np.random.randint(0, h)
+        band_h = np.random.randint(2, max(3, int(20 * strength)))
+        y1 = min(h, y0 + band_h)
+        jitter = int(np.random.randint(-scan_jitter_px, scan_jitter_px + 1) * strength)
+        out[y0:y1, :, :] = np.roll(out[y0:y1, :, :], jitter, axis=1)
+
+    # Occasional dropout band
+    if np.random.rand() < float(dropout_prob) * strength:
+        y0 = np.random.randint(0, h)
+        band_h = np.random.randint(8, max(10, int(80 * strength)))
+        y1 = min(h, y0 + band_h)
+        val = 0 if np.random.rand() < 0.5 else 255
+        out[y0:y1, :, :] = val
+
+    return out
 
 
 # =========================
 # MAIN
 # =========================
 def main():
-    ap = argparse.ArgumentParser()
-
-    ap.add_argument("input")
-    ap.add_argument("-o", "--output")
+    ap = argparse.ArgumentParser(
+        description="Pose overlay + optional code overlay with CFR pipeline + v1.1 reactive (beat-sync, smear, glitch)."
+    )
+    ap.add_argument("input", help="Input phone video")
+    ap.add_argument("-o", "--output", default=None, help="Output mp4 path")
 
     ap.add_argument("--width", type=int, default=DEFAULT_OUT_W)
     ap.add_argument("--height", type=int, default=DEFAULT_OUT_H)
     ap.add_argument("--fps", type=float, default=DEFAULT_FPS)
 
-    ap.add_argument("--start", type=float, default=DEFAULT_START)
-    ap.add_argument("--duration", type=float, default=DEFAULT_DURATION)
+    ap.add_argument("--start", type=float, default=DEFAULT_START, help="Start time in seconds (relative to FULL source)")
+    ap.add_argument("--duration", type=float, default=DEFAULT_DURATION, help="Duration in seconds")
 
-    ap.add_argument("--audio-wav")
+    ap.add_argument("--audio-wav", default=None, help="Optional external WAV to mux (overrides input audio).")
+    ap.add_argument("--audio-offset", type=float, default=DEFAULT_AUDIO_OFFSET,
+                    help="Seconds to offset audio relative to video trim (negative starts audio earlier).")
 
     ap.add_argument(
         "--code-overlay",
         nargs="?",
         const=True,
         default=False,
-        help="Overlay scrolling code. If true, defaults to this script. If a path is given, uses that file."
+        help="Overlay scrolling code. If true/flag, defaults to this script. If a path is given, uses that file."
     )
     ap.add_argument("--code-overlay-order", choices=["before", "after"], default="after")
 
-    ap.add_argument("--model-complexity", type=int, default=DEFAULT_MODEL_COMPLEXITY)
+    # code overlay tuning
+    ap.add_argument("--code-alpha", type=float, default=DEFAULT_CODE_ALPHA)
+    ap.add_argument("--code-font-scale", type=float, default=DEFAULT_CODE_FONT_SCALE)
+    ap.add_argument("--code-line-spacing", type=float, default=DEFAULT_CODE_LINE_SPACING)
+    ap.add_argument("--code-top-margin", type=int, default=DEFAULT_CODE_TOP_MARGIN)
+    ap.add_argument("--code-scroll-cap-screens", type=float, default=DEFAULT_CODE_SCROLL_CAP_SCREENS,
+                    help="Caps code scroll distance to N screen-heights (helps short clips). 0 disables cap.")
+
+    ap.add_argument("--model-complexity", type=int, choices=[0, 1, 2], default=DEFAULT_MODEL_COMPLEXITY)
     ap.add_argument("--min-det-conf", type=float, default=DEFAULT_MIN_DET_CONF)
     ap.add_argument("--min-trk-conf", type=float, default=DEFAULT_MIN_TRK_CONF)
 
     ap.add_argument("--trail", type=bool_flag, default=DEFAULT_TRAIL)
     ap.add_argument("--trail-alpha", type=float, default=DEFAULT_TRAIL_ALPHA)
+    ap.add_argument("--trail-lines-only", type=bool_flag, default=DEFAULT_TRAIL_LINES_ONLY)
 
     ap.add_argument("--draw-ids", type=bool_flag, default=False)
     ap.add_argument("--velocity-color", type=bool_flag, default=False)
@@ -272,50 +675,141 @@ def main():
     ap.add_argument("--scanline-strength", type=float, default=DEFAULT_SCANLINE_STRENGTH)
 
     ap.add_argument("--crf", type=int, default=DEFAULT_CRF)
-    ap.add_argument("--preset", default=DEFAULT_PRESET)
-    ap.add_argument("--audio-bitrate", default=DEFAULT_AUDIO_BITRATE)
+    ap.add_argument("--preset", type=str, default=DEFAULT_PRESET)
+    ap.add_argument("--audio-bitrate", type=str, default=DEFAULT_AUDIO_BITRATE)
+
+    # v1.1 reactive flags
+    ap.add_argument("--beat-sync", type=bool_flag, default=DEFAULT_BEAT_SYNC,
+                    help="Enable audio-reactive modulation (envelope follower).")
+    ap.add_argument("--beat-gain", type=float, default=DEFAULT_BEAT_GAIN)
+    ap.add_argument("--beat-smooth", type=float, default=DEFAULT_BEAT_SMOOTH)
+    ap.add_argument("--beat-pulse-threshold", type=float, default=DEFAULT_BEAT_PULSE_THRESHOLD)
+    ap.add_argument("--beat-pulse-boost", type=float, default=DEFAULT_BEAT_PULSE_BOOST)
+
+    ap.add_argument("--smear", type=bool_flag, default=DEFAULT_SMEAR)
+    ap.add_argument("--smear-frames", type=int, default=DEFAULT_SMEAR_FRAMES)
+    ap.add_argument("--smear-decay", type=float, default=DEFAULT_SMEAR_DECAY)
+    ap.add_argument("--smear-mode", choices=["lerp", "add", "screen", "max"], default=DEFAULT_SMEAR_MODE)
+    ap.add_argument("--smear-on-pose-only", type=bool_flag, default=DEFAULT_SMEAR_ON_POSE_ONLY)
+
+    ap.add_argument("--glitch", type=bool_flag, default=DEFAULT_GLITCH)
+    ap.add_argument("--glitch-strength", type=float, default=DEFAULT_GLITCH_STRENGTH)
+    ap.add_argument("--glitch-rate", type=float, default=DEFAULT_GLITCH_RATE)
+    ap.add_argument("--glitch-rgb-split", type=int, default=DEFAULT_GLITCH_RGB_SPLIT)
+    ap.add_argument("--glitch-scan-jitter", type=int, default=DEFAULT_GLITCH_SCAN_JITTER)
+    ap.add_argument("--glitch-dropout", type=float, default=DEFAULT_GLITCH_DROPOUT)
 
     args = ap.parse_args()
 
     src = Path(args.input)
+    if not src.exists():
+        raise FileNotFoundError(src)
+
     outp = Path(args.output) if args.output else build_output_name(src, args)
 
+    # Full-source duration for code scroll normalization
     full_duration = ffprobe_duration_seconds(src)
 
+    # --- Determine audio start for mux and for analysis (matches what you will hear) ---
+    audio_start = float(args.start) + float(args.audio_offset)
+    if audio_start < 0:
+        audio_start = 0.0
+
+    # 1) CFR intermediate (ffmpeg clock master)
     tmp_cfr = outp.with_suffix(".cfr.tmp.mp4")
-    make_cfr_intermediate(src, tmp_cfr, args.fps, args.start, args.duration)
+    make_cfr_intermediate(
+        src=src,
+        dst=tmp_cfr,
+        fps=args.fps,
+        start=args.start,
+        duration=args.duration,
+    )
 
     cap = cv2.VideoCapture(str(tmp_cfr))
+    if not cap.isOpened():
+        raise RuntimeError("Could not open CFR intermediate.")
+
+    fps = float(args.fps)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if frame_count <= 0:
+        # fallback
+        frame_count = int(round((args.duration or 0.0) * fps)) if args.duration else 0
+
+    tmp_noaudio = outp.with_suffix(".noaudio.tmp.mp4")
     out = cv2.VideoWriter(
-        str(outp),
+        str(tmp_noaudio),
         cv2.VideoWriter_fourcc(*"mp4v"),
-        args.fps,
+        fps,
         (args.width, args.height)
     )
 
     # --- Code overlay setup ---
     code_img = None
     code_scroll_range = 0
-    if args.code_overlay:
-        code_path = Path(__file__).resolve() if args.code_overlay is True else Path(args.code_overlay)
+    code_path = resolve_code_overlay_path(args.code_overlay)
+    if code_path is not None:
         if not code_path.exists():
             raise FileNotFoundError(code_path)
 
         lines = code_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        code_img = render_code_overlay(lines, args.width, args.height)
+        code_img = render_code_overlay(
+            lines,
+            args.width,
+            args.height,
+            font_scale=args.code_font_scale,
+            line_spacing=args.code_line_spacing,
+            top_margin=args.code_top_margin,
+        )
 
-        # ✅ cap scroll range so short clips don't hyper-scroll
-        max_scroll = code_img.shape[0] - args.height
-        code_scroll_range = max(1, min(max_scroll, args.height * 2))
+        max_scroll = max(0, code_img.shape[0] - args.height)
+        if args.code_scroll_cap_screens and args.code_scroll_cap_screens > 0:
+            cap_px = int(args.height * float(args.code_scroll_cap_screens))
+            code_scroll_range = max(1, min(max_scroll, cap_px))
+        else:
+            code_scroll_range = max(1, max_scroll)
+
+    # --- Beat-sync envelope (optional) ---
+    env = None
+    tmp_env_wav = None
+    if args.beat_sync:
+        # Default to input video audio; override with --audio-wav
+        analysis_src = Path(args.audio_wav) if args.audio_wav else src
+        if not analysis_src.exists():
+            raise FileNotFoundError(analysis_src)
+
+        # Extract trimmed segment to a consistent wav for analysis
+        tmp_env_wav = Path(tempfile.mkstemp(prefix="voidstar_env_", suffix=".wav")[1])
+        extract_audio_wav_segment(
+            src_media=analysis_src,
+            dst_wav=tmp_env_wav,
+            start=audio_start,              # match mux timing
+            duration=args.duration,         # match clip length
+            sr=48000,
+        )
+
+        samples, sr = read_wav_mono_int16(tmp_env_wav)
+        env = build_envelope_at_fps(
+            wav_samples=samples,
+            sr=sr,
+            fps=fps,
+            n_frames=frame_count if frame_count > 0 else max(1, int(round((args.duration or 0) * fps))),
+            smooth=float(args.beat_smooth),
+            gain=float(args.beat_gain),
+        )
+
+    # --- Temporal buffers (optional) ---
+    smear_buf = deque(maxlen=max(0, int(args.smear_frames))) if args.smear else None
 
     mp_pose = mp.solutions.pose
-    prev_landmarks = None
     trail_buf = None
-    fps = float(args.fps)
+    prev_landmarks = None
     frame_idx = 0
+    start_time_full = float(args.start)
 
     with mp_pose.Pose(
+        static_image_mode=False,
         model_complexity=args.model_complexity,
+        enable_segmentation=False,
         min_detection_confidence=args.min_det_conf,
         min_tracking_confidence=args.min_trk_conf
     ) as pose:
@@ -327,16 +821,38 @@ def main():
 
             frame = fit_to_reels(frame, args.width, args.height)
 
+            # Beat modulation scalar for this frame
+            mod = float(env[frame_idx]) if (env is not None and frame_idx < len(env)) else 0.0
+            pulse = pulse_from_env(mod, args.beat_pulse_threshold) if args.beat_sync else 0.0
+
+            # code overlay BEFORE pose drawing
             if code_img is not None and args.code_overlay_order == "before":
-                t = args.start + frame_idx / fps
-                yoff = (t / full_duration) * code_scroll_range
-                frame = overlay_code(frame, code_img, yoff)
+                t_full = start_time_full + (frame_idx / fps)
+                progress = 0.0 if full_duration <= 0 else (t_full / full_duration)
+                progress = max(0.0, min(1.0, progress))
+                yoff = progress * code_scroll_range
+                # subtle code "breathing" if beat-sync is on
+                code_alpha_eff = float(args.code_alpha) * (1.0 + 0.15 * pulse)
+                frame = overlay_code(frame, code_img, yoff, alpha=code_alpha_eff)
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             res = pose.process(rgb)
 
+            # Trails buffer
             if args.trail:
-                trail_buf = np.zeros_like(frame) if trail_buf is None else (trail_buf * args.trail_alpha).astype(np.uint8)
+                if trail_buf is None:
+                    trail_buf = np.zeros_like(frame)
+                else:
+                    # reactive: smear/trail breathes slightly on pulse
+                    alpha_eff = float(args.trail_alpha)
+                    if args.beat_sync:
+                        alpha_eff = float(np.clip(alpha_eff - 0.15 * pulse, 0.0, 0.999))
+                    trail_buf = (trail_buf.astype(np.float32) * alpha_eff).astype(np.uint8)
+
+            # We'll build a "pose layer" if we need pose-only smear
+            pose_layer = None
+            if args.smear and args.smear_on_pose_only:
+                pose_layer = np.zeros_like(frame)
 
             if res.pose_landmarks:
                 h, w = frame.shape[:2]
@@ -346,40 +862,137 @@ def main():
                 for i, lm in enumerate(res.pose_landmarks.landmark):
                     x, y = int(lm.x * w), int(lm.y * h)
                     curr_landmarks.append((x, y))
-                    velocities[i] = 0.0 if not prev_landmarks else (
-                        ((x - prev_landmarks[i][0]) ** 2 + (y - prev_landmarks[i][1]) ** 2) ** 0.5 * fps
-                    )
+                    if prev_landmarks:
+                        px, py = prev_landmarks[i]
+                        velocities[i] = ((x - px) ** 2 + (y - py) ** 2) ** 0.5 * fps
+                    else:
+                        velocities[i] = 0.0
 
-                draw_target = trail_buf if args.trail else frame
+                # Choose draw targets
+                # Lines go to trail buffer (if enabled) else to frame
+                draw_target = trail_buf if (args.trail and trail_buf is not None) else frame
 
+                # Beat-synced line thickness modulation
+                # base 1, pulse adds up to +2 (1..3)
+                thickness = 1 + (2 if pulse > 0.75 else (1 if pulse > 0.35 else 0))
+
+                # connections
                 for a, b in mp_pose.POSE_CONNECTIONS:
-                    color = velocity_to_color(max(velocities[a], velocities[b])) if args.velocity_color else (255, 255, 255)
-                    cv2.line(draw_target, curr_landmarks[a], curr_landmarks[b], color, 1)
+                    xa, ya = curr_landmarks[a]
+                    xb, yb = curr_landmarks[b]
+                    if args.velocity_color:
+                        color = velocity_to_color(max(velocities[a], velocities[b]))
+                    else:
+                        color = (255, 255, 255)
 
+                    cv2.line(draw_target, (xa, ya), (xb, yb), color, thickness)
+
+                    if pose_layer is not None:
+                        cv2.line(pose_layer, (xa, ya), (xb, yb), color, thickness)
+
+                # joints when not lines-only
+                if not args.trail_lines_only:
+                    for i, (x, y) in enumerate(curr_landmarks):
+                        if args.velocity_color:
+                            color = velocity_to_color(velocities[i])
+                        else:
+                            color = (255, 255, 255)
+                        cv2.circle(draw_target, (x, y), 2 + (1 if pulse > 0.6 else 0), color, -1, lineType=cv2.LINE_AA)
+                        if pose_layer is not None:
+                            cv2.circle(pose_layer, (x, y), 2 + (1 if pulse > 0.6 else 0), color, -1, lineType=cv2.LINE_AA)
+
+                # ids on the main frame (not on trail buffer)
                 if args.draw_ids:
                     for i, (x, y) in enumerate(curr_landmarks):
-                        color = velocity_to_color(velocities[i]) if args.velocity_color else (255, 255, 255)
+                        if args.velocity_color:
+                            color = velocity_to_color(velocities[i])
+                        else:
+                            color = (255, 255, 255)
                         draw_landmark_id(frame, x, y, i, color)
 
                 prev_landmarks = curr_landmarks
 
-            if args.trail:
-                frame = cv2.addWeighted(frame, 1.0, trail_buf, 1.0, 0)
+            # Composite trail (optionally through pose-only smear)
+            if args.trail and trail_buf is not None:
+                if args.smear and args.smear_on_pose_only and smear_buf is not None:
+                    # feed pose-ish layer: prefer pose_layer, else trail_buf
+                    layer = pose_layer if pose_layer is not None else trail_buf
+                    # push and blend
+                    smear_buf.append(layer.copy())
+                    smeared = blend_temporal(smear_buf, layer, decay=args.smear_decay, mode=args.smear_mode)
+                    frame = cv2.addWeighted(frame, 1.0, smeared, 1.0, 0)
+                else:
+                    frame = cv2.addWeighted(frame, 1.0, trail_buf, 1.0, 0)
 
+            # code overlay AFTER pose drawing
             if code_img is not None and args.code_overlay_order == "after":
-                t = args.start + frame_idx / fps
-                yoff = (t / full_duration) * code_scroll_range
-                frame = overlay_code(frame, code_img, yoff)
+                t_full = start_time_full + (frame_idx / fps)
+                progress = 0.0 if full_duration <= 0 else (t_full / full_duration)
+                progress = max(0.0, min(1.0, progress))
+                yoff = progress * code_scroll_range
+                code_alpha_eff = float(args.code_alpha) * (1.0 + 0.15 * pulse)
+                frame = overlay_code(frame, code_img, yoff, alpha=code_alpha_eff)
 
+            # Full-frame temporal smear (if enabled and NOT pose-only)
+            if args.smear and not args.smear_on_pose_only and smear_buf is not None:
+                smear_buf.append(frame.copy())
+                # reactive: more smear on pulse by reducing decay
+                decay_eff = float(args.smear_decay)
+                if args.beat_sync:
+                    decay_eff = float(np.clip(decay_eff - 0.25 * pulse, 0.0, 0.999))
+                frame = blend_temporal(smear_buf, frame, decay=decay_eff, mode=args.smear_mode)
+
+            # Glitch (reactive burst on pulse)
+            if args.glitch:
+                t_clip = frame_idx / fps
+                strength_eff = float(args.glitch_strength)
+                if args.beat_sync:
+                    strength_eff = float(np.clip(strength_eff + float(args.beat_pulse_boost) * pulse, 0.0, 1.0))
+                frame = apply_glitch(
+                    frame=frame,
+                    t=t_clip,
+                    strength=strength_eff,
+                    rate=float(args.glitch_rate),
+                    rgb_split_px=int(args.glitch_rgb_split),
+                    scan_jitter_px=int(args.glitch_scan_jitter),
+                    dropout_prob=float(args.glitch_dropout),
+                )
+
+            # Scanlines (breathes slightly on pulse)
             if args.scanlines:
-                frame = apply_scanlines(frame, args.scanline_strength)
+                scan_eff = float(args.scanline_strength)
+                if args.beat_sync:
+                    scan_eff = float(np.clip(scan_eff + 0.08 * pulse, 0.0, 0.25))
+                frame = apply_scanlines(frame, scan_eff)
 
             out.write(frame)
             frame_idx += 1
 
     cap.release()
     out.release()
+
+    # 3) Mux audio (external WAV preferred) with offset
+    audio_wav = Path(args.audio_wav) if args.audio_wav else None
+    if audio_wav and not audio_wav.exists():
+        raise FileNotFoundError(audio_wav)
+
+    mux_audio_player_safe(
+        video_noaudio=tmp_noaudio,
+        src_video=src,
+        audio_wav=audio_wav,
+        out_mp4=outp,
+        audio_start=audio_start,
+        audio_duration=args.duration,
+        crf=args.crf,
+        preset=args.preset,
+        audio_bitrate=args.audio_bitrate,
+    )
+
+    # cleanup
     tmp_cfr.unlink(missing_ok=True)
+    tmp_noaudio.unlink(missing_ok=True)
+    if tmp_env_wav is not None:
+        tmp_env_wav.unlink(missing_ok=True)
 
     print("✅ Saved:", outp)
 
