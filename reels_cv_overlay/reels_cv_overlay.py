@@ -45,6 +45,8 @@ DEFAULT_CODE_SCROLL_CAP_SCREENS = 2.0  # cap to ~2 screen-heights by default
 
 DEFAULT_AUDIO_OFFSET = 0.0  # seconds (can be negative)
 
+DEFAULT_USE_TEMP_FILES = True
+
 # Reactive defaults (all OFF unless enabled)
 DEFAULT_BEAT_SYNC = False
 DEFAULT_BEAT_GAIN = 2.0
@@ -643,6 +645,10 @@ def main():
     ap.add_argument("--audio-offset", type=float, default=DEFAULT_AUDIO_OFFSET,
                     help="Seconds to offset audio relative to video trim (negative starts audio earlier).")
 
+    ap.add_argument("--use-temp-files", type=bool_flag, default=DEFAULT_USE_TEMP_FILES,
+                    help="Use WSL-native temp folder for intermediates for better performance (default true).")
+
+
     ap.add_argument(
         "--code-overlay",
         nargs="?",
@@ -715,8 +721,19 @@ def main():
     if audio_start < 0:
         audio_start = 0.0
 
+
+    # ---- Temp file location logic ----
+    if args.use_temp_files:
+        temp_root = Path(tempfile.gettempdir()) / "reels_cv_overlay_tmp"
+        temp_root.mkdir(parents=True, exist_ok=True)
+
+        tmp_cfr = temp_root / f"{outp.stem}.cfr.tmp.mp4"
+        tmp_noaudio = temp_root / f"{outp.stem}.noaudio.tmp.mp4"
+    else:
+        tmp_cfr = outp.with_suffix(".cfr.tmp.mp4")
+        tmp_noaudio = outp.with_suffix(".noaudio.tmp.mp4")
+
     # 1) CFR intermediate (ffmpeg clock master)
-    tmp_cfr = outp.with_suffix(".cfr.tmp.mp4")
     make_cfr_intermediate(
         src=src,
         dst=tmp_cfr,
@@ -726,6 +743,7 @@ def main():
     )
 
     cap = cv2.VideoCapture(str(tmp_cfr))
+
     if not cap.isOpened():
         raise RuntimeError("Could not open CFR intermediate.")
 
@@ -735,7 +753,6 @@ def main():
         # fallback
         frame_count = int(round((args.duration or 0.0) * fps)) if args.duration else 0
 
-    tmp_noaudio = outp.with_suffix(".noaudio.tmp.mp4")
     out = cv2.VideoWriter(
         str(tmp_noaudio),
         cv2.VideoWriter_fourcc(*"mp4v"),
@@ -980,7 +997,7 @@ def main():
         video_noaudio=tmp_noaudio,
         src_video=src,
         audio_wav=audio_wav,
-        out_mp4=outp,
+        out_mp4=(temp_root / outp.name if args.use_temp_files else outp),
         audio_start=audio_start,
         audio_duration=args.duration,
         crf=args.crf,
@@ -989,12 +1006,24 @@ def main():
     )
 
     # cleanup
+    # cleanup intermediates
     tmp_cfr.unlink(missing_ok=True)
     tmp_noaudio.unlink(missing_ok=True)
     if tmp_env_wav is not None:
         tmp_env_wav.unlink(missing_ok=True)
 
+    # if temp mode was used, copy final result back
+    if args.use_temp_files:
+        final_temp = temp_root / outp.name
+        if final_temp.exists():
+            shutil.copy2(str(final_temp), str(outp))
+            try:
+                final_temp.unlink()
+            except Exception:
+                pass
+
     print("✅ Saved:", outp)
+
 
 
 if __name__ == "__main__":
