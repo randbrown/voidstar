@@ -155,6 +155,36 @@ def get_nvenc_codec() -> str | None:
     return None
 
 
+def detect_input_codec(video_path: Path) -> tuple[str, int]:
+    """
+    Detect the video codec of input file.
+    Returns (codec_name, bitrate_kbps) or defaults to ('h264', 5000) if detection fails.
+    """
+    ffprobe = require_ffmpeg("ffprobe")
+    try:
+        cmd = [
+            ffprobe, "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,bit_rate",
+            "-of", "default=noprint_wrappers=1:nokey=1:nk=1",
+            str(video_path)
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+        lines = result.stdout.strip().split('\n')
+        
+        if len(lines) >= 2:
+            codec = lines[0].strip() or "h264"
+            try:
+                bitrate = int(lines[1].strip()) // 1000 if lines[1].strip() else 5000
+            except (ValueError, IndexError):
+                bitrate = 5000
+            return (codec, bitrate)
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, IndexError):
+        pass
+    
+    return ("h264", 5000)
+
+
 def ffprobe_duration_seconds(video_path: Path) -> float:
     ffprobe = require_ffmpeg("ffprobe")
     cmd = [
@@ -430,14 +460,18 @@ def mux_audio_player_safe(
     preset: str,
     audio_bitrate: str,
     use_gpu: bool = False,
+    input_codec: str = "h264",
+    input_bitrate: int = 5000,
 ):
     """
     Mux audio back in (external WAV preferred, else source video audio).
     Sample-accurate trim using atrim + asetpts.
+    Encodes output using same codec/bitrate as input for similar file size.
     """
     audio_src = "external WAV" if audio_wav else "source video"
     print(f"🎵 Muxing audio from {audio_src}...")
-    print(f"   Audio offset: {audio_start}s, CRF: {crf}, Preset: {preset}")
+    print(f"   Audio offset: {audio_start}s")
+    print(f"   Output codec: {input_codec} @ {input_bitrate}kbps (matched to input)")
     ffmpeg = require_ffmpeg("ffmpeg")
 
     cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -463,26 +497,37 @@ def mux_audio_player_safe(
     cmd += ["-filter_complex", f"[{audio_input_idx}:a]{','.join(af)}[a]"]
     cmd += ["-map", "0:v:0", "-map", "[a]"]
 
-    cmd += [
-        "-movflags", "+faststart",
-    ]
+    cmd += ["-movflags", "+faststart"]
     
-    # Try hardware encoder first if GPU available
+    # Select encoder based on input codec
     encoder_used = "CPU"
+    
+    # Try GPU first if available
     if use_gpu:
         nvenc_codec = get_nvenc_codec()
-        if nvenc_codec:
+        if nvenc_codec and ("hevc" in input_codec.lower() or "h264" in input_codec.lower()):
             print(f"   Using GPU encoder: {nvenc_codec}")
             cmd += ["-c:v", nvenc_codec]
-            if nvenc_codec.startswith("hevc"):
-                cmd += ["-preset", "fast", "-rc", "vbr", "-cq", str(crf)]
+            if "hevc" in nvenc_codec.lower():
+                cmd += ["-preset", "fast", "-rc", "vbr", "-cq", str(max(18, min(28, 23)))]  # Match quality to input
             else:
-                cmd += ["-preset", "fast", "-rc", "vbr", "-cq", str(crf)]
+                cmd += ["-preset", "fast", "-rc", "vbr", "-cq", str(max(18, min(28, 23)))]
+            cmd += ["-b:v", f"{input_bitrate}k"]
             encoder_used = "GPU (NVENC)"
         else:
-            cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.1", "-crf", str(crf), "-preset", preset]
+            # Fall back to CPU - match input codec
+            if "hevc" in input_codec.lower():
+                cmd += ["-c:v", "libx265", "-preset", "fast", "-crf", str(max(18, min(28, 23)))]
+            else:
+                cmd += ["-c:v", "libx264", "-preset", preset, "-crf", str(max(18, min(28, 23)))]
+            cmd += ["-pix_fmt", "yuv420p", "-b:v", f"{input_bitrate}k"]
     else:
-        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.1", "-crf", str(crf), "-preset", preset]
+        # CPU mode - match input codec
+        if "hevc" in input_codec.lower():
+            cmd += ["-c:v", "libx265", "-preset", "fast"]
+        else:
+            cmd += ["-c:v", "libx264", "-preset", preset]
+        cmd += ["-pix_fmt", "yuv420p", "-b:v", f"{input_bitrate}k"]
     
     cmd += [
         "-c:a", "aac",
@@ -800,6 +845,8 @@ def main():
     ap.add_argument("--crf", type=int, default=DEFAULT_CRF)
     ap.add_argument("--preset", type=str, default=DEFAULT_PRESET)
     ap.add_argument("--audio-bitrate", type=str, default=DEFAULT_AUDIO_BITRATE)
+    ap.add_argument("--match-input-codec", type=bool_flag, default=True,
+                    help="Match output codec/bitrate to input for similar file size (default true).")
 
     # v1.1 reactive flags
     ap.add_argument("--beat-sync", type=bool_flag, default=DEFAULT_BEAT_SYNC,
@@ -871,6 +918,10 @@ def main():
     print(f"\n🔍 Analyzing source video...")
     full_duration = ffprobe_duration_seconds(src)
     print(f"   Source duration: {full_duration:.2f}s")
+    
+    # Detect input codec to match output file size
+    input_codec, input_bitrate = detect_input_codec(src)
+    print(f"   Input codec: {input_codec} @ {input_bitrate}kbps")
 
     # --- Determine audio start for mux and for analysis (matches what you will hear) ---
     audio_start = float(args.start) + float(args.audio_offset)
@@ -1241,6 +1292,8 @@ def main():
         preset=args.preset,
         audio_bitrate=args.audio_bitrate,
         use_gpu=use_gpu,
+        input_codec=input_codec if args.match_input_codec else "h264",
+        input_bitrate=input_bitrate if args.match_input_codec else 5000,
     )
 
     # cleanup
