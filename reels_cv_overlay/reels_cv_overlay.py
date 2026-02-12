@@ -109,6 +109,52 @@ def require_ffmpeg(tool: str) -> str:
     return p
 
 
+# =========================
+# GPU UTILITIES
+# =========================
+def detect_nvidia_gpu() -> bool:
+    """
+    Check if NVIDIA GPU is available for CUDA acceleration.
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "-L"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=2
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def get_nvenc_codec() -> str | None:
+    """
+    Detect best available NVIDIA encoder (hevc_nvenc > h264_nvenc).
+    Returns encoder name or None if not available.
+    """
+    ffmpeg = require_ffmpeg("ffmpeg")
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-codecs"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5
+        )
+        output = result.stdout.lower()
+        
+        # Prefer hevc for better compression; fallback to h264
+        if "hevc_nvenc" in output:
+            return "hevc_nvenc"
+        elif "h264_nvenc" in output:
+            return "h264_nvenc"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    
+    return None
+
+
 def ffprobe_duration_seconds(video_path: Path) -> float:
     ffprobe = require_ffmpeg("ffprobe")
     cmd = [
@@ -193,9 +239,13 @@ def fit_to_reels(frame, out_w, out_h):
 
 
 def apply_scanlines(frame, strength=0.06):
+    # Optimized: work in-place when possible
+    if strength <= 0:
+        return frame
     out = frame.astype(np.float32)
-    out[::2, :, :] *= (1.0 - strength)
-    return np.clip(out, 0, 255).astype(np.uint8)
+    out[::2] *= (1.0 - strength)  # Simplified indexing
+    np.clip(out, 0, 255, out=out)  # In-place clip
+    return out.astype(np.uint8)
 
 
 # =========================
@@ -323,6 +373,7 @@ def make_cfr_intermediate(
     fps: float,
     start: float,
     duration: float | None,
+    use_gpu: bool = False,
 ):
     """
     Converts (likely VFR) phone video to true CFR before OpenCV processing.
@@ -344,14 +395,26 @@ def make_cfr_intermediate(
         "-vf", f"fps={fps}:round=near",
         "-fps_mode", "cfr",
         "-an",  # video-only intermediate
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-profile:v", "baseline",
-        "-level", "4.1",
-        "-crf", "18",
-        "-preset", "veryfast",
-        str(dst)
     ]
+    
+    # Use hardware encoder if available
+    nvenc_codec = None
+    if use_gpu:
+        nvenc_codec = get_nvenc_codec()
+        if nvenc_codec:
+            print(f"   Using GPU acceleration: {nvenc_codec}")
+            cmd += ["-c:v", nvenc_codec]
+            if nvenc_codec.startswith("hevc"):
+                cmd += ["-preset", "fast"]  # fast, default, slow for HEVC
+            else:
+                cmd += ["-preset", "fast"]  # fast, default, slow for H.264
+        else:
+            print(f"   GPU not available, using CPU encoder")
+            cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.1", "-crf", "18", "-preset", "veryfast"]
+    else:
+        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.1", "-crf", "18", "-preset", "veryfast"]
+    
+    cmd += [str(dst)]
     run(cmd)
     print("✓ CFR intermediate created")
 
@@ -366,6 +429,7 @@ def mux_audio_player_safe(
     crf: int,
     preset: str,
     audio_bitrate: str,
+    use_gpu: bool = False,
 ):
     """
     Mux audio back in (external WAV preferred, else source video audio).
@@ -401,12 +465,26 @@ def mux_audio_player_safe(
 
     cmd += [
         "-movflags", "+faststart",
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-profile:v", "baseline",
-        "-level", "4.1",
-        "-crf", str(crf),
-        "-preset", preset,
+    ]
+    
+    # Try hardware encoder first if GPU available
+    encoder_used = "CPU"
+    if use_gpu:
+        nvenc_codec = get_nvenc_codec()
+        if nvenc_codec:
+            print(f"   Using GPU encoder: {nvenc_codec}")
+            cmd += ["-c:v", nvenc_codec]
+            if nvenc_codec.startswith("hevc"):
+                cmd += ["-preset", "fast", "-rc", "vbr", "-cq", str(crf)]
+            else:
+                cmd += ["-preset", "fast", "-rc", "vbr", "-cq", str(crf)]
+            encoder_used = "GPU (NVENC)"
+        else:
+            cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.1", "-crf", str(crf), "-preset", preset]
+    else:
+        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.1", "-crf", str(crf), "-preset", preset]
+    
+    cmd += [
         "-c:a", "aac",
         "-b:a", str(audio_bitrate),
         "-ar", "48000",
@@ -414,7 +492,7 @@ def mux_audio_player_safe(
         str(out_mp4),
     ]
     run(cmd)
-    print("✓ Audio muxed successfully")
+    print(f"✓ Audio muxed successfully (using {encoder_used})")
 
 
 # =========================
@@ -744,7 +822,23 @@ def main():
     ap.add_argument("--glitch-scan-jitter", type=int, default=DEFAULT_GLITCH_SCAN_JITTER)
     ap.add_argument("--glitch-dropout", type=float, default=DEFAULT_GLITCH_DROPOUT)
 
+    ap.add_argument("--gpu", type=bool_flag, default=None,
+                    help="Use NVIDIA GPU acceleration if available (auto-detect by default).")
+
     args = ap.parse_args()
+
+    # Detect GPU capability (auto-detect if not explicitly set)
+    has_gpu = detect_nvidia_gpu()
+    use_gpu = args.gpu if args.gpu is not None else has_gpu
+    
+    if use_gpu:
+        if has_gpu:
+            print(f"\n✅ NVIDIA GPU detected and enabled")
+        else:
+            print(f"\n⚠️  GPU explicitly requested but not detected, falling back to CPU")
+            use_gpu = False
+    else:
+        print(f"\n⚙️  Using CPU mode")
 
     # Convert color string to tuple if needed
     if isinstance(args.overlay_color, str):
@@ -756,8 +850,9 @@ def main():
 
     outp = Path(args.output) if args.output else build_output_name(src, args)
     
-    print(f"\n📂 Input: {src.name}")
-    print(f"📂 Output: {outp.name}")
+    print(f"\n💻 Input: {src.name}")
+    print(f"💾 Output: {outp.name}")
+    print(f"\n⚙️  Processing Mode: {'GPU (NVIDIA)' if use_gpu else 'CPU'}")
     print(f"\n⚙️  Settings:")
     print(f"   Resolution: {args.width}x{args.height} @ {args.fps} fps")
     print(f"   Start: {args.start}s, Duration: {args.duration if args.duration else 'full'}")
@@ -806,6 +901,7 @@ def main():
         fps=args.fps,
         start=args.start,
         duration=args.duration,
+        use_gpu=use_gpu,
     )
 
     print(f"\n{'='*60}")
@@ -827,9 +923,10 @@ def main():
     print(f"   Total frames to process: {frame_count}")
     print(f"   Duration: {frame_count/fps:.2f}s")
 
+    # Use rawvideo for faster intermediate writing (no encoding overhead)
     out = cv2.VideoWriter(
         str(tmp_noaudio),
-        cv2.VideoWriter_fourcc(*"mp4v"),
+        cv2.VideoWriter_fourcc(*"FFV1"),  # FFV1 is lossless and faster than mp4v
         fps,
         (args.width, args.height)
     )
@@ -900,17 +997,42 @@ def main():
     # --- Temporal buffers (optional) ---
     smear_buf = deque(maxlen=max(0, int(args.smear_frames))) if args.smear else None
 
-    mp_pose = mp.solutions.pose
+    # Handle MediaPipe Pose
+    try:
+        # Try legacy API (MediaPipe < 0.10)
+        mp_pose = mp.solutions.pose
+        use_new_mediapipe_api = False
+        pose_context = None
+    except (AttributeError, ImportError):
+        # New API detected but not easily usable in this script
+        # The new API requires downloading model files and has a different interface
+        print("\n❌ MediaPipe API Compatibility Issue:")
+        print("   This script was designed for MediaPipe with the legacy 'solutions' API.")
+        print("   Your system has a newer MediaPipe version without that API.")
+        print("\n   Options:")
+        print("   1. Reinstall older MediaPipe: pip install 'mediapipe<0.10'")
+        print("      (May not have pre-built wheels for your system)")
+        print("   2. Use Docker/WSL with a compatible version")
+        print("\n   Sorry for the inconvenience - the new MediaPipe API requires")
+        print("   significant refactoring of the pose detection code.")
+        raise RuntimeError("Incompatible MediaPipe version. Legacy solutions API not available.")
+    
     trail_buf = None
     prev_landmarks = None
     frame_idx = 0
     start_time_full = float(args.start)
     
+    # Pre-allocate reusable arrays for performance
+    pose_layer = None
+    if args.smear and args.smear_on_pose_only:
+        pose_layer = np.zeros((args.height, args.width, 3), dtype=np.uint8)
+    
     print(f"\n{'='*60}")
     print("STEP 3: Processing Frames with Pose Detection")
     print(f"{'='*60}")
     print(f"🤖 Initializing MediaPipe Pose...")
-
+    
+    # Use legacy context manager
     with mp_pose.Pose(
         static_image_mode=False,
         model_complexity=args.model_complexity,
@@ -922,6 +1044,11 @@ def main():
         print(f"\n🎞️  Processing frames...")
         
         last_progress = -1
+        
+        # Pre-compute constants for performance
+        beat_pulse_threshold = float(args.beat_pulse_threshold) if args.beat_sync else 0.0
+        full_duration_inv = 1.0 / full_duration if full_duration > 0 else 0.0
+        fps_inv = 1.0 / fps
 
         while True:
             ret, frame = cap.read()
@@ -942,20 +1069,20 @@ def main():
 
             # Beat modulation scalar for this frame
             mod = float(env[frame_idx]) if (env is not None and frame_idx < len(env)) else 0.0
-            pulse = pulse_from_env(mod, args.beat_pulse_threshold) if args.beat_sync else 0.0
+            pulse = pulse_from_env(mod, beat_pulse_threshold) if args.beat_sync else 0.0
 
             # code overlay BEFORE pose drawing
             if code_img is not None and args.code_overlay_order == "before":
-                t_full = start_time_full + (frame_idx / fps)
-                progress = 0.0 if full_duration <= 0 else (t_full / full_duration)
-                progress = max(0.0, min(1.0, progress))
+                # Optimized: use pre-computed constants
+                t_full = start_time_full + (frame_idx * fps_inv)
+                progress = max(0.0, min(1.0, t_full * full_duration_inv))
                 yoff = progress * code_scroll_range
                 # subtle code "breathing" if beat-sync is on
                 code_alpha_eff = float(args.code_alpha) * (1.0 + 0.15 * pulse)
                 frame = overlay_code(frame, code_img, yoff, alpha=code_alpha_eff)
 
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            res = pose.process(rgb)
+            # Color conversion is expensive; do it once per frame
+            res = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
             # Trails buffer
             if args.trail:
@@ -963,15 +1090,17 @@ def main():
                     trail_buf = np.zeros_like(frame)
                 else:
                     # reactive: smear/trail breathes slightly on pulse
+                    # Optimized: use in-place operations to avoid extra allocations
                     alpha_eff = float(args.trail_alpha)
                     if args.beat_sync:
                         alpha_eff = float(np.clip(alpha_eff - 0.15 * pulse, 0.0, 0.999))
-                    trail_buf = (trail_buf.astype(np.float32) * alpha_eff).astype(np.uint8)
+                    # In-place multiplication is faster
+                    np.multiply(trail_buf, alpha_eff, out=trail_buf, casting='unsafe')
 
             # We'll build a "pose layer" if we need pose-only smear
-            pose_layer = None
+            # Reuse pre-allocated array for performance
             if args.smear and args.smear_on_pose_only:
-                pose_layer = np.zeros_like(frame)
+                pose_layer.fill(0)  # Clear the pre-allocated array instead of creating new
 
             if res.pose_landmarks:
                 h, w = frame.shape[:2]
@@ -1045,9 +1174,9 @@ def main():
 
             # code overlay AFTER pose drawing
             if code_img is not None and args.code_overlay_order == "after":
-                t_full = start_time_full + (frame_idx / fps)
-                progress = 0.0 if full_duration <= 0 else (t_full / full_duration)
-                progress = max(0.0, min(1.0, progress))
+                # Optimized: use pre-computed constants
+                t_full = start_time_full + (frame_idx * fps_inv)
+                progress = max(0.0, min(1.0, t_full * full_duration_inv))
                 yoff = progress * code_scroll_range
                 code_alpha_eff = float(args.code_alpha) * (1.0 + 0.15 * pulse)
                 frame = overlay_code(frame, code_img, yoff, alpha=code_alpha_eff)
@@ -1063,7 +1192,7 @@ def main():
 
             # Glitch (reactive burst on pulse)
             if args.glitch:
-                t_clip = frame_idx / fps
+                t_clip = frame_idx * fps_inv  # Optimized: use pre-computed constant
                 strength_eff = float(args.glitch_strength)
                 if args.beat_sync:
                     strength_eff = float(np.clip(strength_eff + float(args.beat_pulse_boost) * pulse, 0.0, 1.0))
@@ -1089,9 +1218,9 @@ def main():
         
         print(f"   100% complete ({frame_idx}/{frame_count} frames)")
 
-    cap.release()
-    out.release()
-    print("\n✓ Frame processing complete")
+        cap.release()
+        out.release()
+        print("\n✓ Frame processing complete")
 
     # 3) Mux audio (external WAV preferred) with offset
     print(f"\n{'='*60}")
@@ -1111,6 +1240,7 @@ def main():
         crf=args.crf,
         preset=args.preset,
         audio_bitrate=args.audio_bitrate,
+        use_gpu=use_gpu,
     )
 
     # cleanup
