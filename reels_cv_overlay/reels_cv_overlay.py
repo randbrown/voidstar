@@ -55,6 +55,8 @@ DEFAULT_BEAT_SMOOTH = 0.88
 DEFAULT_BEAT_PULSE_THRESHOLD = 0.65
 DEFAULT_BEAT_PULSE_BOOST = 0.9
 
+DEFAULT_VELOCITY_COLOR_MULT = 1.0  # Multiplier for color intensity with beat-sync
+
 DEFAULT_SMEAR = False
 DEFAULT_SMEAR_FRAMES = 10
 DEFAULT_SMEAR_DECAY = 0.86
@@ -281,17 +283,28 @@ def apply_scanlines(frame, strength=0.06):
 # =========================
 # VELOCITY COLORING
 # =========================
-def velocity_to_color(v, v_min=0.0, v_max=800.0):
+def velocity_to_color(v, v_min=0.0, v_max=800.0, color_mult=1.0):
+    """
+    Convert velocity to BGR color.
+    color_mult: multiplier to boost color brightness (>1.0 brighter, <1.0 dimmer).
+    """
     t = (v - v_min) / max(1e-6, (v_max - v_min))
     t = max(0.0, min(1.0, t))
 
     # BGR ramp: blue->green->red
     if t < 0.5:
         a = t / 0.5
-        return (int(255 * (1 - a)), int(255 * a), 0)
+        b, g, r = (int(255 * (1 - a)), int(255 * a), 0)
     else:
         a = (t - 0.5) / 0.5
-        return (0, int(255 * (1 - a)), int(255 * a))
+        b, g, r = (0, int(255 * (1 - a)), int(255 * a))
+
+    # Apply brightness multiplier for stronger visual pop
+    m = float(max(0.0, color_mult))
+    b = int(min(255, b * m))
+    g = int(min(255, g * m))
+    r = int(min(255, r * m))
+    return (b, g, r)
 
 
 def draw_landmark_id(frame, x, y, idx, color):
@@ -869,6 +882,9 @@ def main():
     ap.add_argument("--glitch-scan-jitter", type=int, default=DEFAULT_GLITCH_SCAN_JITTER)
     ap.add_argument("--glitch-dropout", type=float, default=DEFAULT_GLITCH_DROPOUT)
 
+    ap.add_argument("--velocity-color-mult", type=float, default=DEFAULT_VELOCITY_COLOR_MULT,
+                    help="Multiplier for velocity color intensity when beat-sync is active (1.0=normal, 2.0=double saturation).")
+
     ap.add_argument("--gpu", type=bool_flag, default=None,
                     help="Use NVIDIA GPU acceleration if available (auto-detect by default).")
 
@@ -1175,12 +1191,22 @@ def main():
                 # base 1, pulse adds up to +2 (1..3)
                 thickness = 1 + (2 if pulse > 0.75 else (1 if pulse > 0.35 else 0))
 
+                # Color multiplier: boost when beat-sync is active to make pose stand out
+                if args.beat_sync and args.velocity_color:
+                    base_mult = max(1.0, float(args.velocity_color_mult))
+                    color_mult = 1.0 + (base_mult - 1.0) * (1.0 + 0.75 * pulse)
+                    # Extra thickness when using velocity colors + beat-sync
+                    thickness = int(round(thickness * (1.0 + 0.6 * (base_mult - 1.0) * (0.5 + 0.5 * pulse))))
+                    thickness = max(1, min(6, thickness))
+                else:
+                    color_mult = 1.0
+
                 # connections
                 for a, b in mp_pose.POSE_CONNECTIONS:
                     xa, ya = curr_landmarks[a]
                     xb, yb = curr_landmarks[b]
                     if args.velocity_color:
-                        color = velocity_to_color(max(velocities[a], velocities[b]))
+                        color = velocity_to_color(max(velocities[a], velocities[b]), color_mult=color_mult)
                     else:
                         color = args.overlay_color
 
@@ -1193,7 +1219,7 @@ def main():
                 if not args.trail_lines_only:
                     for i, (x, y) in enumerate(curr_landmarks):
                         if args.velocity_color:
-                            color = velocity_to_color(velocities[i])
+                            color = velocity_to_color(velocities[i], color_mult=color_mult)
                         else:
                             color = args.overlay_color
                         cv2.circle(draw_target, (x, y), 2 + (1 if pulse > 0.6 else 0), color, -1, lineType=cv2.LINE_AA)
@@ -1204,7 +1230,7 @@ def main():
                 if args.draw_ids:
                     for i, (x, y) in enumerate(curr_landmarks):
                         if args.velocity_color:
-                            color = velocity_to_color(velocities[i])
+                            color = velocity_to_color(velocities[i], color_mult=color_mult)
                         else:
                             color = args.overlay_color
                         draw_landmark_id(frame, x, y, i, color)
