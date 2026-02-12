@@ -328,6 +328,8 @@ def make_cfr_intermediate(
     Converts (likely VFR) phone video to true CFR before OpenCV processing.
     Put -ss AFTER -i for accurate trimming.
     """
+    print(f"📹 Creating CFR intermediate from {src.name}...")
+    print(f"   FPS: {fps}, Start: {start}s, Duration: {duration if duration else 'full'}")
     ffmpeg = require_ffmpeg("ffmpeg")
 
     cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -351,6 +353,7 @@ def make_cfr_intermediate(
         str(dst)
     ]
     run(cmd)
+    print("✓ CFR intermediate created")
 
 
 def mux_audio_player_safe(
@@ -368,6 +371,9 @@ def mux_audio_player_safe(
     Mux audio back in (external WAV preferred, else source video audio).
     Sample-accurate trim using atrim + asetpts.
     """
+    audio_src = "external WAV" if audio_wav else "source video"
+    print(f"🎵 Muxing audio from {audio_src}...")
+    print(f"   Audio offset: {audio_start}s, CRF: {crf}, Preset: {preset}")
     ffmpeg = require_ffmpeg("ffmpeg")
 
     cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
@@ -408,6 +414,7 @@ def mux_audio_player_safe(
         str(out_mp4),
     ]
     run(cmd)
+    print("✓ Audio muxed successfully")
 
 
 # =========================
@@ -424,6 +431,7 @@ def extract_audio_wav_segment(
     Extract a mono 48k PCM wav segment using ffmpeg.
     Works for input video OR wav files (re-encodes to consistent format).
     """
+    print(f"🎧 Extracting audio segment for beat-sync analysis...")
     ffmpeg = require_ffmpeg("ffmpeg")
     cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
 
@@ -646,6 +654,10 @@ def apply_glitch(
 # =========================
 def main():
     start_wall_time = time.time()
+    
+    print("="*60)
+    print("🎬 REELS CV OVERLAY - Starting Processing")
+    print("="*60)
 
     ap = argparse.ArgumentParser(
         description="Pose overlay + optional code overlay with CFR pipeline + v1.1 reactive (beat-sync, smear, glitch)."
@@ -743,9 +755,27 @@ def main():
         raise FileNotFoundError(src)
 
     outp = Path(args.output) if args.output else build_output_name(src, args)
+    
+    print(f"\n📂 Input: {src.name}")
+    print(f"📂 Output: {outp.name}")
+    print(f"\n⚙️  Settings:")
+    print(f"   Resolution: {args.width}x{args.height} @ {args.fps} fps")
+    print(f"   Start: {args.start}s, Duration: {args.duration if args.duration else 'full'}")
+    print(f"   Model complexity: {args.model_complexity}")
+    print(f"   Trail: {args.trail}, Scanlines: {args.scanlines}")
+    if args.code_overlay:
+        print(f"   Code overlay: ON ({args.code_overlay_order})")
+    if args.beat_sync:
+        print(f"   Beat-sync: ON")
+    if args.smear:
+        print(f"   Smear: ON ({args.smear_mode}, {args.smear_frames} frames)")
+    if args.glitch:
+        print(f"   Glitch: ON")
 
     # Full-source duration for code scroll normalization
+    print(f"\n🔍 Analyzing source video...")
     full_duration = ffprobe_duration_seconds(src)
+    print(f"   Source duration: {full_duration:.2f}s")
 
     # --- Determine audio start for mux and for analysis (matches what you will hear) ---
     audio_start = float(args.start) + float(args.audio_offset)
@@ -757,14 +787,19 @@ def main():
     if args.use_temp_files:
         temp_root = Path(tempfile.gettempdir()) / "reels_cv_overlay_tmp"
         temp_root.mkdir(parents=True, exist_ok=True)
+        print(f"\n📁 Using temp directory: {temp_root}")
 
         tmp_cfr = temp_root / f"{outp.stem}.cfr.tmp.mp4"
         tmp_noaudio = temp_root / f"{outp.stem}.noaudio.tmp.mp4"
     else:
+        print(f"\n📁 Using local directory for temp files")
         tmp_cfr = outp.with_suffix(".cfr.tmp.mp4")
         tmp_noaudio = outp.with_suffix(".noaudio.tmp.mp4")
 
     # 1) CFR intermediate (ffmpeg clock master)
+    print(f"\n{'='*60}")
+    print("STEP 1: Creating CFR Intermediate")
+    print(f"{'='*60}")
     make_cfr_intermediate(
         src=src,
         dst=tmp_cfr,
@@ -773,6 +808,10 @@ def main():
         duration=args.duration,
     )
 
+    print(f"\n{'='*60}")
+    print("STEP 2: Initializing Video Processing")
+    print(f"{'='*60}")
+    print(f"📹 Opening CFR intermediate...")
     cap = cv2.VideoCapture(str(tmp_cfr))
 
     if not cap.isOpened():
@@ -783,6 +822,10 @@ def main():
     if frame_count <= 0:
         # fallback
         frame_count = int(round((args.duration or 0.0) * fps)) if args.duration else 0
+    
+    print(f"✓ Video opened successfully")
+    print(f"   Total frames to process: {frame_count}")
+    print(f"   Duration: {frame_count/fps:.2f}s")
 
     out = cv2.VideoWriter(
         str(tmp_noaudio),
@@ -799,7 +842,9 @@ def main():
         if not code_path.exists():
             raise FileNotFoundError(code_path)
 
+        print(f"\n📝 Setting up code overlay from {code_path.name}...")
         lines = code_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        print(f"   Lines of code: {len(lines)}")
         code_img = render_code_overlay(
             lines,
             args.width,
@@ -815,11 +860,15 @@ def main():
             code_scroll_range = max(1, min(max_scroll, cap_px))
         else:
             code_scroll_range = max(1, max_scroll)
+        print(f"   Code overlay image: {code_img.shape[0]}x{code_img.shape[1]}")
+        print(f"   Scroll range: {code_scroll_range}px")
+        print("✓ Code overlay ready")
 
     # --- Beat-sync envelope (optional) ---
     env = None
     tmp_env_wav = None
     if args.beat_sync:
+        print(f"\n🎵 Setting up beat-sync envelope...")
         # Default to input video audio; override with --audio-wav
         analysis_src = Path(args.audio_wav) if args.audio_wav else src
         if not analysis_src.exists():
@@ -835,6 +884,7 @@ def main():
             sr=48000,
         )
 
+        print(f"   Building audio envelope...")
         samples, sr = read_wav_mono_int16(tmp_env_wav)
         env = build_envelope_at_fps(
             wav_samples=samples,
@@ -844,6 +894,8 @@ def main():
             smooth=float(args.beat_smooth),
             gain=float(args.beat_gain),
         )
+        print(f"   Envelope frames: {len(env)}")
+        print("✓ Beat-sync envelope ready")
 
     # --- Temporal buffers (optional) ---
     smear_buf = deque(maxlen=max(0, int(args.smear_frames))) if args.smear else None
@@ -853,6 +905,11 @@ def main():
     prev_landmarks = None
     frame_idx = 0
     start_time_full = float(args.start)
+    
+    print(f"\n{'='*60}")
+    print("STEP 3: Processing Frames with Pose Detection")
+    print(f"{'='*60}")
+    print(f"🤖 Initializing MediaPipe Pose...")
 
     with mp_pose.Pose(
         static_image_mode=False,
@@ -861,11 +918,25 @@ def main():
         min_detection_confidence=args.min_det_conf,
         min_tracking_confidence=args.min_trk_conf
     ) as pose:
+        print("✓ Pose estimator initialized")
+        print(f"\n🎞️  Processing frames...")
+        
+        last_progress = -1
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
+            
+            # Progress indicator every 10%
+            if frame_count > 0:
+                progress = int((frame_idx / frame_count) * 10)
+                if progress > last_progress:
+                    pct = progress * 10
+                    elapsed = time.time() - start_wall_time
+                    fps_actual = frame_idx / elapsed if elapsed > 0 else 0
+                    print(f"   {pct}% complete ({frame_idx}/{frame_count} frames, {fps_actual:.1f} fps)")
+                    last_progress = progress
 
             frame = fit_to_reels(frame, args.width, args.height)
 
@@ -1015,11 +1086,17 @@ def main():
 
             out.write(frame)
             frame_idx += 1
+        
+        print(f"   100% complete ({frame_idx}/{frame_count} frames)")
 
     cap.release()
     out.release()
+    print("\n✓ Frame processing complete")
 
     # 3) Mux audio (external WAV preferred) with offset
+    print(f"\n{'='*60}")
+    print("STEP 4: Final Audio Muxing")
+    print(f"{'='*60}")
     audio_wav = Path(args.audio_wav) if args.audio_wav else None
     if audio_wav and not audio_wav.exists():
         raise FileNotFoundError(audio_wav)
@@ -1037,6 +1114,7 @@ def main():
     )
 
     # cleanup
+    print(f"\n🧹 Cleaning up temporary files...")
     # cleanup intermediates
     tmp_cfr.unlink(missing_ok=True)
     tmp_noaudio.unlink(missing_ok=True)
@@ -1047,6 +1125,7 @@ def main():
     if args.use_temp_files:
         final_temp = temp_root / outp.name
         if final_temp.exists():
+            print(f"📦 Copying final output to {outp}...")
             shutil.copy2(str(final_temp), str(outp))
             try:
                 final_temp.unlink()
@@ -1057,8 +1136,16 @@ def main():
     mins = int(elapsed // 60)
     secs = elapsed % 60
 
-    print("✅ Saved:", outp)
-    print(f"⏱ Total runtime: {mins}m {secs:.1f}s")
+    print(f"\n{'='*60}")
+    print("✅ PROCESSING COMPLETE")
+    print(f"{'='*60}")
+    print(f"📂 Output file: {outp}")
+    print(f"📊 Processed {frame_idx} frames")
+    print(f"⏱️  Total runtime: {mins}m {secs:.1f}s")
+    if frame_idx > 0:
+        avg_fps = frame_idx / elapsed
+        print(f"⚡ Average processing speed: {avg_fps:.2f} fps")
+    print(f"{'='*60}")
 
 
 if __name__ == "__main__":
