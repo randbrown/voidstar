@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import mediapipe as mp
+import time
 
 
 # =========================
@@ -78,6 +79,22 @@ def bool_flag(v: str) -> bool:
     if v in ("0", "false", "f", "no", "n", "off"):
         return False
     raise argparse.ArgumentTypeError(f"Invalid boolean: {v}")
+
+def parse_bgr_color(s: str) -> tuple[int, int, int]:
+    try:
+        parts = [int(x.strip()) for x in s.split(",")]
+        if len(parts) != 3:
+            raise ValueError
+        b, g, r = parts
+        return (
+            max(0, min(255, b)),
+            max(0, min(255, g)),
+            max(0, min(255, r))
+        )
+    except Exception:
+        raise argparse.ArgumentTypeError(
+            "Color must be B,G,R format like 255,255,255"
+        )
 
 
 def run(cmd: list[str]) -> None:
@@ -628,9 +645,12 @@ def apply_glitch(
 # MAIN
 # =========================
 def main():
+    start_wall_time = time.time()
+
     ap = argparse.ArgumentParser(
         description="Pose overlay + optional code overlay with CFR pipeline + v1.1 reactive (beat-sync, smear, glitch)."
     )
+    
     ap.add_argument("input", help="Input phone video")
     ap.add_argument("-o", "--output", default=None, help="Output mp4 path")
 
@@ -677,6 +697,13 @@ def main():
     ap.add_argument("--draw-ids", type=bool_flag, default=False)
     ap.add_argument("--velocity-color", type=bool_flag, default=False)
 
+    ap.add_argument(
+        "--overlay-color",
+        type=parse_bgr_color,
+        default="255,255,255",
+        help="Overlay color as B,G,R when velocity-color is false (default 255,255,255)"
+    )
+
     ap.add_argument("--scanlines", type=bool_flag, default=DEFAULT_SCANLINES)
     ap.add_argument("--scanline-strength", type=float, default=DEFAULT_SCANLINE_STRENGTH)
 
@@ -706,6 +733,10 @@ def main():
     ap.add_argument("--glitch-dropout", type=float, default=DEFAULT_GLITCH_DROPOUT)
 
     args = ap.parse_args()
+
+    # Convert color string to tuple if needed
+    if isinstance(args.overlay_color, str):
+        args.overlay_color = parse_bgr_color(args.overlay_color)
 
     src = Path(args.input)
     if not src.exists():
@@ -900,7 +931,7 @@ def main():
                     if args.velocity_color:
                         color = velocity_to_color(max(velocities[a], velocities[b]))
                     else:
-                        color = (255, 255, 255)
+                        color = args.overlay_color
 
                     cv2.line(draw_target, (xa, ya), (xb, yb), color, thickness)
 
@@ -913,7 +944,7 @@ def main():
                         if args.velocity_color:
                             color = velocity_to_color(velocities[i])
                         else:
-                            color = (255, 255, 255)
+                            color = args.overlay_color
                         cv2.circle(draw_target, (x, y), 2 + (1 if pulse > 0.6 else 0), color, -1, lineType=cv2.LINE_AA)
                         if pose_layer is not None:
                             cv2.circle(pose_layer, (x, y), 2 + (1 if pulse > 0.6 else 0), color, -1, lineType=cv2.LINE_AA)
@@ -924,7 +955,7 @@ def main():
                         if args.velocity_color:
                             color = velocity_to_color(velocities[i])
                         else:
-                            color = (255, 255, 255)
+                            color = args.overlay_color
                         draw_landmark_id(frame, x, y, i, color)
 
                 prev_landmarks = curr_landmarks
@@ -1022,8 +1053,12 @@ def main():
             except Exception:
                 pass
 
-    print("✅ Saved:", outp)
+    elapsed = time.time() - start_wall_time
+    mins = int(elapsed // 60)
+    secs = elapsed % 60
 
+    print("✅ Saved:", outp)
+    print(f"⏱ Total runtime: {mins}m {secs:.1f}s")
 
 
 if __name__ == "__main__":
