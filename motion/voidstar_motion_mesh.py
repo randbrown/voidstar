@@ -234,20 +234,61 @@ def draw_delaunay_lines(
     if len(points) < 3:
         return overlay
 
+    # Filter + sanitize points (avoid NaN/Inf that crash Subdiv2D.insert)
+    cleaned: List[Tuple[float, float]] = []
+    seen = set()
+
+    for (x, y) in points:
+        # ensure python float
+        try:
+            x = float(x)
+            y = float(y)
+        except Exception:
+            continue
+
+        # drop NaN/Inf
+        if not (math.isfinite(x) and math.isfinite(y)):
+            continue
+
+        # drop out of bounds
+        if x < 0.0 or x >= (w - 1) or y < 0.0 or y >= (h - 1):
+            continue
+
+        # optional dedupe by pixel (Subdiv can be temperamental with duplicates)
+        xi = int(round(x))
+        yi = int(round(y))
+        key = (xi, yi)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        cleaned.append((x, y))
+
+    if len(cleaned) < 3:
+        return overlay
+
     rect = (0, 0, w, h)
     subdiv = cv2.Subdiv2D(rect)
 
-    for (x, y) in points:
-        # Subdiv2D can throw if points are out-of-bounds; clamp them
-        xx = max(0.0, min(float(w - 1), float(x)))
-        yy = max(0.0, min(float(h - 1), float(y)))
-        subdiv.insert((xx, yy))
+    # Insert points safely
+    dropped = 0
+    for (x, y) in cleaned:
+        try:
+            subdiv.insert((x, y))
+        except cv2.error:
+            dropped += 1
+
+    if dropped and dropped > 10:
+        # only chatter if it's significant
+        log(f"warn: dropped {dropped} bad points for subdiv")
 
     tris = subdiv.getTriangleList()
-    # Each tri is [x1,y1,x2,y2,x3,y3]
     for t in tris:
         x1, y1, x2, y2, x3, y3 = map(float, t)
-        if not (0 <= x1 < w and 0 <= x2 < w and 0 <= x3 < w and 0 <= y1 < h and 0 <= y2 < h and 0 <= y3 < h):
+        if not (
+            0 <= x1 < w and 0 <= x2 < w and 0 <= x3 < w and
+            0 <= y1 < h and 0 <= y2 < h and 0 <= y3 < h
+        ):
             continue
         p1 = (int(round(x1)), int(round(y1)))
         p2 = (int(round(x2)), int(round(y2)))
