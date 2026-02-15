@@ -195,6 +195,8 @@ class CinematicCam:
         # continuous slow rotation + bounce-induced kick
         self.base_rot_vel = math.radians(self.args.rotation_speed) * (1 if rng.random() > 0.5 else -1)
         self.rot_vel = self.base_rot_vel
+        self.rot_bounce_target = 0.0
+        self.rot_bounce_applied = 0.0
         self.last_bounce = "-"
 
     def _pan_bounds(self):
@@ -388,11 +390,12 @@ class CinematicCam:
         if self.args.rotation_mode == "continuous":
             if bounced:
                 if self.args.bounce_style == "physical":
-                    # Deterministic "physical" kick from actual heading change.
+                    # Physical mode: keep billiard translation and set a target
+                    # bounce-induced orientation change (applied smoothly below).
                     h0 = math.atan2(old_vy, old_vx)
                     h1 = math.atan2(float(self.vel[1]), float(self.vel[0]))
                     dtheta = (h1 - h0 + math.pi) % (2 * math.pi) - math.pi
-                    self.rot_vel += dtheta * self.args.bounce_rot_kick * 0.35
+                    self.rot_bounce_target += dtheta * self.args.bounce_rot_kick
                 else:
                     # DVD mode: still specular translation, but add a gentle,
                     # deterministic spin response to wall contact.
@@ -405,6 +408,15 @@ class CinematicCam:
                         self.rot_vel -= math.copysign(kick_mag, float(self.vel[0]) if abs(self.vel[0]) > 1e-9 else 1.0)
                     else:  # corner hit
                         self.rot_vel = -self.rot_vel
+
+            # Smoothly apply bounce-induced orientation target (physical mode).
+            if self.args.bounce_style == "physical":
+                e = self.rot_bounce_target - self.rot_bounce_applied
+                k = max(0.01, self.args.bounce_rot_ease)
+                alpha = 1.0 - math.exp(-k * dt)
+                step = e * alpha
+                self.rot_bounce_applied += step
+                self.state[3] += step
 
             # ease back to base spin so it's always slow/continuous
             self.rot_vel += (self.base_rot_vel - self.rot_vel) * (1.0 - math.exp(-self.args.rot_return * dt))
@@ -462,6 +474,7 @@ def build_output_name(input_path,args):
         f"zc{args.zoom_chase:.2f}",
         f"rr{args.rot_return:.2f}",
         f"rk{args.bounce_rot_kick:.2f}",
+        f"re{args.bounce_rot_ease:.2f}",
         f"bs{args.bounce_style}",
         f"rs{args.rotation_speed:.2f}",
     ]
@@ -497,10 +510,12 @@ def main():
     ap.add_argument("--zoom-chase",type=float,default=1.8,
                     help="Zoom chase response rate")
     ap.add_argument("--bounce-rot-kick",type=float,default=0.9,
-                    help="Rotation velocity kick strength on edge bounce")
+                    help="Bounce angle to rotation coupling (higher = bigger turn on bounce)")
+    ap.add_argument("--bounce-rot-ease",type=float,default=4.0,
+                    help="How quickly bounce-induced rotation target is eased in (physical mode)")
     ap.add_argument("--bounce-style",default="dvd",
                     choices=["dvd","physical"],
-                    help="dvd = strict screensaver reflections; physical = add heading-based rotation kick")
+                    help="dvd = strict screensaver reflections + gentle spin response; physical = billiard reflection + angle-coupled rotation")
     ap.add_argument("--rot-return",type=float,default=2.2,
                     help="How quickly rotation velocity returns to base spin")
 
