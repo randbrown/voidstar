@@ -224,6 +224,8 @@ def make_output_filename(input_path: Path, args: argparse.Namespace) -> str:
         parts.append(f"ars{args.audio_reactive_scale:.2f}")
     if args.voidstar_energy > 0:
         parts.append(f"ve{args.voidstar_energy:.2f}")
+    if args.voidstar_preset != "custom":
+        parts.append(f"vp{args.voidstar_preset}")
 
     safe = "_".join(parts).replace("/", "-").replace(" ", "")
     return f"{safe}{input_path.suffix}"
@@ -429,6 +431,9 @@ def main() -> None:
     ap.add_argument("--voidstar-chroma", type=float, default=3.0, help="Chromatic split amount in pixels for VoidStar FX.")
     ap.add_argument("--voidstar-jitter", type=float, default=1.2, help="Jitter amount in pixels for VoidStar FX.")
     ap.add_argument("--voidstar-bloom", type=float, default=0.55, help="Bloom strength [0..2] for VoidStar FX.")
+    ap.add_argument("--voidstar-strobe", type=float, default=0.35, help="Beat-hit strobe intensity [0..2].")
+    ap.add_argument("--voidstar-glitch-hit", type=float, default=0.45, help="Beat-hit glitch intensity [0..2].")
+    ap.add_argument("--voidstar-preset", choices=["custom", "subtle", "wild", "insane"], default="custom", help="Convenience preset for VoidStar energy stack.")
     ap.add_argument("--reels-local-overlay", type=bool_flag, default=False, help="Run reels_cv_overlay on a local region around logo only, then composite back.")
     ap.add_argument("--reels-script-path", default=None, help="Optional path to reels_cv_overlay.py (default: auto-detect in sibling folder)")
     ap.add_argument("--reels-local-pad-px", type=int, default=120, help="Padding around logo motion bounds for local reels processing")
@@ -447,6 +452,39 @@ def main() -> None:
 
     if args.angle_deg is None:
         args.angle_deg = random.uniform(0.0, 360.0)
+
+    if args.voidstar_preset != "custom":
+        presets = {
+            "subtle": {
+                "voidstar_energy": 0.7,
+                "voidstar_hue_rate": 14.0,
+                "voidstar_chroma": 1.6,
+                "voidstar_jitter": 0.6,
+                "voidstar_bloom": 0.35,
+                "voidstar_strobe": 0.18,
+                "voidstar_glitch_hit": 0.20,
+            },
+            "wild": {
+                "voidstar_energy": 1.6,
+                "voidstar_hue_rate": 24.0,
+                "voidstar_chroma": 4.0,
+                "voidstar_jitter": 1.5,
+                "voidstar_bloom": 0.75,
+                "voidstar_strobe": 0.45,
+                "voidstar_glitch_hit": 0.55,
+            },
+            "insane": {
+                "voidstar_energy": 2.5,
+                "voidstar_hue_rate": 36.0,
+                "voidstar_chroma": 7.0,
+                "voidstar_jitter": 2.4,
+                "voidstar_bloom": 1.15,
+                "voidstar_strobe": 0.85,
+                "voidstar_glitch_hit": 0.95,
+            },
+        }
+        for k, v in presets[args.voidstar_preset].items():
+            setattr(args, k, v)
 
     videos_dir = default_videos_dir()
     logo_path = resolve_media_path(args.logo, videos_dir)
@@ -554,6 +592,8 @@ def main() -> None:
     reactive_glow_strength = clamp(float(args.audio_reactive_glow), 0.0, 2.0)
     reactive_scale_strength = clamp(float(args.audio_reactive_scale), 0.0, 0.5)
     voidstar_energy = clamp(float(args.voidstar_energy), 0.0, 3.0)
+    voidstar_strobe = clamp(float(args.voidstar_strobe), 0.0, 2.0)
+    voidstar_glitch_hit = clamp(float(args.voidstar_glitch_hit), 0.0, 2.0)
     trail_decay = 0.80 + 0.18 * trails_strength
     trail_opacity = 0.10 + 0.30 * trails_strength
     trail_bgr = None
@@ -617,6 +657,9 @@ def main() -> None:
     t0 = time.time()
     last_log = t0
     processed = 0
+    last_pulse = 0.0
+    last_peak_frame = -10**9
+    peak_cooldown_frames = max(1, int(round(0.12 * fps)))
 
     while True:
         if total_frames > 0 and processed >= total_frames:
@@ -674,6 +717,14 @@ def main() -> None:
         pulse = 0.0
         if bass_env is not None and phase_idx < len(bass_env):
             pulse = float(np.clip(bass_env[phase_idx], 0.0, 1.0))
+        beat_peak = (
+            pulse > 0.72
+            and (pulse - last_pulse) > 0.05
+            and (processed - last_peak_frame) >= peak_cooldown_frames
+        )
+        if beat_peak:
+            last_peak_frame = processed
+        last_pulse = pulse
 
         if local_reels_enabled:
             x0 = max(0, draw_x - local_pad)
@@ -760,6 +811,24 @@ def main() -> None:
                 overlay_tinted_rgba(frame, logo_bgr, bloom_alpha, draw_x + jx, draw_y + jy, tint_a, 1.0)
 
         overlay_rgba(frame, logo_bgr, logo_alpha, draw_x, draw_y, overlay_opacity)
+
+        if beat_peak and voidstar_strobe > 0.0:
+            boost = 1.0 + 0.35 * voidstar_strobe
+            frame[:, :, :] = np.clip(frame.astype(np.float32) * boost, 0, 255).astype(np.uint8)
+
+        if beat_peak and voidstar_glitch_hit > 0.0:
+            dx = int(round(np.random.uniform(-1.0, 1.0) * (2.0 + 6.0 * voidstar_glitch_hit)))
+            if dx != 0:
+                b, g, r = cv2.split(frame)
+                r = np.roll(r, dx, axis=1)
+                b = np.roll(b, -dx, axis=1)
+                frame = cv2.merge([b, g, r])
+            if np.random.rand() < min(1.0, 0.45 + 0.25 * voidstar_glitch_hit):
+                y0 = int(np.random.randint(0, frame_h))
+                bh = int(np.random.randint(8, max(10, int(60 * voidstar_glitch_hit))))
+                y1 = min(frame_h, y0 + bh)
+                band_shift = int(np.random.randint(-18, 19))
+                frame[y0:y1, :, :] = np.roll(frame[y0:y1, :, :], band_shift, axis=1)
 
         if enc_proc.stdin is None:
             raise RuntimeError("Encoder stdin is unavailable.")
