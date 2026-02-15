@@ -405,6 +405,7 @@ def main() -> None:
 
     ap.add_argument("--start", type=float, default=0.0, help="Start time in seconds")
     ap.add_argument("--duration", type=float, default=0.0, help="Duration in seconds (0 = to end)")
+    ap.add_argument("--perfect-loop", type=bool_flag, default=True, help="Force final frame logo position to match start for seamless loops.")
 
     ap.add_argument("--codec", default="auto", help="Output video encoder (auto/libx264/libx265/mpeg4/libvpx-vp9/libsvtav1)")
     ap.add_argument("--preset", default="medium", help="Encoder preset")
@@ -500,6 +501,8 @@ def main() -> None:
     cy0 = clamp(args.start_y, 0.0, 1.0) * frame_h
     cx = clamp(cx0, logo_w * 0.5, max(logo_w * 0.5, frame_w - logo_w * 0.5))
     cy = clamp(cy0, logo_h * 0.5, max(logo_h * 0.5, frame_h - logo_h * 0.5))
+    loop_start_cx = cx
+    loop_start_cy = cy
 
     theta = math.radians(args.angle_deg)
     if args.end_x is not None and args.end_y is not None:
@@ -591,14 +594,17 @@ def main() -> None:
         if not ok:
             break
 
+        is_last_loop_frame = bool(args.perfect_loop and total_frames > 0 and processed == (total_frames - 1))
+        phase_idx = 0 if is_last_loop_frame else processed
+
         if abs(args.logo_rotate_speed) > 1e-9 or abs(args.logo_rotate_start_deg) > 1e-9:
-            angle = args.logo_rotate_start_deg + args.logo_rotate_speed * (processed / max(1e-9, fps))
+            angle = args.logo_rotate_start_deg + args.logo_rotate_speed * (phase_idx / max(1e-9, fps))
             logo_bgr, logo_alpha = rotate_logo_rgba(logo_resized, angle)
         else:
             logo_bgr, logo_alpha = base_logo_bgr, base_logo_alpha
 
-        if bass_env is not None and processed < len(bass_env) and reactive_scale_strength > 0.0:
-            bass_level = float(np.clip(bass_env[processed], 0.0, 1.0))
+        if bass_env is not None and phase_idx < len(bass_env) and reactive_scale_strength > 0.0:
+            bass_level = float(np.clip(bass_env[phase_idx], 0.0, 1.0))
             scale_mult = 1.0 + (reactive_scale_strength * bass_level)
             if abs(scale_mult - 1.0) > 1e-5:
                 scaled_w = max(1, int(round(logo_bgr.shape[1] * scale_mult)))
@@ -617,13 +623,18 @@ def main() -> None:
         lo_y = half_h + margin_px
         hi_y = frame_h - half_h - margin_px
 
-        # Keep center valid for this frame's rotated dimensions.
-        cx = clamp(cx, lo_x, max(lo_x, hi_x))
-        cy = clamp(cy, lo_y, max(lo_y, hi_y))
+        if is_last_loop_frame:
+            # Force endpoint to starting center for seamless loop wrap.
+            cx = clamp(loop_start_cx, lo_x, max(lo_x, hi_x))
+            cy = clamp(loop_start_cy, lo_y, max(lo_y, hi_y))
+        else:
+            # Keep center valid for this frame's rotated dimensions.
+            cx = clamp(cx, lo_x, max(lo_x, hi_x))
+            cy = clamp(cy, lo_y, max(lo_y, hi_y))
 
-        # Move + reflect using current frame's true logo bounds.
-        cx, vx = reflect_1d_interval(cx, vx, lo_x, hi_x)
-        cy, vy = reflect_1d_interval(cy, vy, lo_y, hi_y)
+            # Move + reflect using current frame's true logo bounds.
+            cx, vx = reflect_1d_interval(cx, vx, lo_x, hi_x)
+            cy, vy = reflect_1d_interval(cy, vy, lo_y, hi_y)
 
         draw_x = int(round(cx - half_w))
         draw_y = int(round(cy - half_h))
@@ -656,8 +667,8 @@ def main() -> None:
             )
             blend_layer_onto_frame(frame, trail_bgr, trail_alpha)
 
-        if audio_env is not None and processed < len(audio_env):
-            level = float(np.clip(audio_env[processed], 0.0, 1.0))
+        if audio_env is not None and phase_idx < len(audio_env):
+            level = float(np.clip(audio_env[phase_idx], 0.0, 1.0))
             if level > 1e-4:
                 sigma = max(0.5, float(args.audio_glow_blur))
                 glow_alpha = cv2.GaussianBlur(logo_alpha, (0, 0), sigmaX=sigma, sigmaY=sigma)
