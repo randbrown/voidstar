@@ -61,11 +61,10 @@ def offset_tag(seconds: float, int_width: int, ms_digits: int = 3) -> str:
 	return f"{sec_int:0{int_width}d}_{frac:0{ms_digits}d}"
 
 
-def make_output_name(input_path: Path, idx: int, parts: int, start: float, end: float, int_width: int) -> str:
-	idx_width = len(str(parts))
+def make_output_name(input_path: Path, start: float, end: float, int_width: int) -> str:
 	s_tag = offset_tag(start, int_width)
 	e_tag = offset_tag(end, int_width)
-	return f"{input_path.stem}__p{idx:0{idx_width}d}_s{s_tag}_e{e_tag}{input_path.suffix}"
+	return f"{input_path.stem}__{s_tag}-{e_tag}{input_path.suffix}"
 
 
 def run_segment_with_progress(
@@ -216,7 +215,7 @@ def main() -> None:
 		end = (total_duration * (i + 1)) / parts
 		seg_dur = max(0.0, end - start)
 
-		out_name = make_output_name(input_path, idx, parts, start, end, width_int)
+		out_name = make_output_name(input_path, start, end, width_int)
 		out_path = out_dir / out_name
 
 		cmd = [
