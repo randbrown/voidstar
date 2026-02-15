@@ -12,6 +12,7 @@ import glob
 import json
 import math
 import os
+import shlex
 import random
 import subprocess
 import sys
@@ -22,6 +23,15 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+
+
+def bool_flag(v: str) -> bool:
+    v = v.strip().lower()
+    if v in ("1", "true", "t", "yes", "y", "on"):
+        return True
+    if v in ("0", "false", "f", "no", "n", "off"):
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean: {v}")
 
 
 def get_username() -> str:
@@ -355,6 +365,11 @@ def format_eta(seconds: float) -> str:
     return f"{hh:02d}:{mm:02d}:{ss:02d}"
 
 
+def run_checked(cmd: list[str]) -> None:
+    print("[voidstar] ▶", " ".join(str(x) for x in cmd))
+    subprocess.run(cmd, check=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Overlay bouncing PNG logo on a source video.")
     ap.add_argument("input", help="Input video path (bare names resolve under /mnt/c/users/<user>/Videos; ./ and ../ resolve from cwd)")
@@ -383,6 +398,10 @@ def main() -> None:
     ap.add_argument("--audio-reactive-smooth", type=float, default=0.88, help="Audio envelope smoothing [0..0.9999].")
     ap.add_argument("--audio-reactive-bass-hz", type=float, default=300.0, help="Upper frequency (Hz) for bass-triggered scaling.")
     ap.add_argument("--audio-glow-blur", type=float, default=8.0, help="Glow blur sigma in pixels.")
+    ap.add_argument("--reels-local-overlay", type=bool_flag, default=False, help="Run reels_cv_overlay on a local region around logo only, then composite back.")
+    ap.add_argument("--reels-script-path", default=None, help="Optional path to reels_cv_overlay.py (default: auto-detect in sibling folder)")
+    ap.add_argument("--reels-local-pad-px", type=int, default=120, help="Padding around logo motion bounds for local reels processing")
+    ap.add_argument("--reels-local-args", default="", help="Extra args string passed to reels_cv_overlay.py")
 
     ap.add_argument("--start", type=float, default=0.0, help="Start time in seconds")
     ap.add_argument("--duration", type=float, default=0.0, help="Duration in seconds (0 = to end)")
@@ -505,6 +524,13 @@ def main() -> None:
     trail_bgr = None
     trail_alpha = None
 
+    local_reels_enabled = bool(args.reels_local_overlay)
+    roi_min_x = frame_w
+    roi_min_y = frame_h
+    roi_max_x = 0
+    roi_max_y = 0
+    local_pad = max(0, int(args.reels_local_pad_px))
+
     audio_env = None
     bass_env = None
     if reactive_glow_strength > 0.0 or reactive_scale_strength > 0.0:
@@ -602,6 +628,17 @@ def main() -> None:
         draw_x = int(round(cx - half_w))
         draw_y = int(round(cy - half_h))
 
+        if local_reels_enabled:
+            x0 = max(0, draw_x - local_pad)
+            y0 = max(0, draw_y - local_pad)
+            x1 = min(frame_w, draw_x + cur_w + local_pad)
+            y1 = min(frame_h, draw_y + cur_h + local_pad)
+            if x1 > x0 and y1 > y0:
+                roi_min_x = min(roi_min_x, x0)
+                roi_min_y = min(roi_min_y, y0)
+                roi_max_x = max(roi_max_x, x1)
+                roi_max_y = max(roi_max_y, y1)
+
         if trails_strength > 0.0:
             if trail_bgr is None or trail_alpha is None:
                 trail_bgr = np.zeros((frame_h, frame_w, 3), dtype=np.float32)
@@ -682,6 +719,89 @@ def main() -> None:
     subprocess.run(mux_cmd, check=True)
 
     tmp_video.unlink(missing_ok=True)
+
+    if local_reels_enabled and roi_max_x > roi_min_x and roi_max_y > roi_min_y:
+        if args.reels_script_path:
+            reels_script = resolve_media_path(args.reels_script_path, Path.cwd())
+        else:
+            reels_script = Path(__file__).resolve().parents[1] / "reels_cv_overlay" / "reels_cv_overlay.py"
+
+        if not reels_script.exists():
+            raise FileNotFoundError(f"reels_cv_overlay script not found: {reels_script}")
+
+        crop_w = roi_max_x - roi_min_x
+        crop_h = roi_max_y - roi_min_y
+
+        local_in = output_path.with_name(output_path.stem + "__reels_local_in.mp4")
+        local_out = output_path.with_name(output_path.stem + "__reels_local_out.mp4")
+        final_out = output_path.with_name(output_path.stem + "__reels_local_final.mp4")
+
+        print(
+            f"[voidstar] local reels region x={roi_min_x} y={roi_min_y} "
+            f"w={crop_w} h={crop_h}"
+        )
+
+        run_checked([
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(output_path),
+            "-vf",
+            f"crop={crop_w}:{crop_h}:{roi_min_x}:{roi_min_y}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            str(args.crf),
+            "-c:a",
+            "copy",
+            str(local_in),
+        ])
+
+        reels_extra = shlex.split(args.reels_local_args) if args.reels_local_args else []
+        run_checked([
+            sys.executable,
+            str(reels_script),
+            str(local_in),
+            "-o",
+            str(local_out),
+            *reels_extra,
+        ])
+
+        run_checked([
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(output_path),
+            "-i",
+            str(local_out),
+            "-filter_complex",
+            f"[0:v][1:v]overlay={roi_min_x}:{roi_min_y}:shortest=1[v]",
+            "-map",
+            "[v]",
+            "-map",
+            "0:a:0?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            args.preset,
+            "-crf",
+            str(args.crf),
+            "-c:a",
+            "copy",
+            str(final_out),
+        ])
+
+        final_out.replace(output_path)
+        local_in.unlink(missing_ok=True)
+        local_out.unlink(missing_ok=True)
 
     elapsed = time.time() - t0
     print(f"[voidstar] done={output_path}")
