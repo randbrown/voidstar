@@ -1,4 +1,5 @@
 import argparse
+import os
 import subprocess
 import shutil
 import tempfile
@@ -15,8 +16,8 @@ import time
 # =========================
 # DEFAULTS
 # =========================
-DEFAULT_OUT_W = 1080
-DEFAULT_OUT_H = 1920
+DEFAULT_OUT_W = None
+DEFAULT_OUT_H = None
 DEFAULT_FPS = 30.0
 
 DEFAULT_MODEL_COMPLEXITY = 2
@@ -202,8 +203,32 @@ def ffprobe_duration_seconds(video_path: Path) -> float:
     return float(s)
 
 
+def detect_input_dimensions(video_path: Path) -> tuple[int, int]:
+    cap = cv2.VideoCapture(str(video_path))
+    try:
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open video for dimension probe: {video_path}")
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        if w <= 0 or h <= 0:
+            raise RuntimeError(f"Could not detect input dimensions for: {video_path}")
+        return w, h
+    finally:
+        cap.release()
+
+
 def fmt_float(x: float) -> str:
     return f"{x:.2f}".replace(".", "p")
+
+
+def format_eta(seconds: float) -> str:
+    if not np.isfinite(seconds) or seconds < 0:
+        return "--:--:--"
+    s = int(seconds)
+    hh = s // 3600
+    mm = (s % 3600) // 60
+    ss = s % 60
+    return f"{hh:02d}:{mm:02d}:{ss:02d}"
 
 
 def build_output_name(src: Path, args) -> Path:
@@ -268,6 +293,40 @@ def fit_to_reels(frame, out_w, out_h):
         crop = frame[y0:y0 + new_h, :]
 
     return cv2.resize(crop, (out_w, out_h), interpolation=cv2.INTER_AREA)
+
+
+def compute_reels_crop(src_w: int, src_h: int, out_w: int, out_h: int) -> tuple[int, int, int, int]:
+    """
+    Compute a fixed center-crop rectangle for a constant-resolution source.
+    Returns (x0, y0, crop_w, crop_h).
+    """
+    target_aspect = out_w / out_h
+    src_aspect = src_w / src_h
+
+    if src_aspect > target_aspect:
+        crop_w = int(src_h * target_aspect)
+        x0 = (src_w - crop_w) // 2
+        return x0, 0, crop_w, src_h
+
+    crop_h = int(src_w / target_aspect)
+    y0 = (src_h - crop_h) // 2
+    return 0, y0, src_w, crop_h
+
+
+def configure_runtime_optimizations() -> None:
+    """
+    Enable safe runtime optimizations that do not alter processing behavior.
+    """
+    try:
+        cv2.setUseOptimized(True)
+    except Exception:
+        pass
+
+    try:
+        cpu_count = os.cpu_count() or 1
+        cv2.setNumThreads(max(1, cpu_count - 1))
+    except Exception:
+        pass
 
 
 def apply_scanlines(frame, strength=0.06):
@@ -790,6 +849,7 @@ def apply_glitch(
 # =========================
 def main():
     start_wall_time = time.time()
+    configure_runtime_optimizations()
     
     print("="*60)
     print("🎬 REELS CV OVERLAY - Starting Processing")
@@ -802,8 +862,10 @@ def main():
     ap.add_argument("input", help="Input phone video")
     ap.add_argument("-o", "--output", default=None, help="Output mp4 path")
 
-    ap.add_argument("--width", type=int, default=DEFAULT_OUT_W)
-    ap.add_argument("--height", type=int, default=DEFAULT_OUT_H)
+    ap.add_argument("--width", type=int, default=DEFAULT_OUT_W,
+                    help="Output width in pixels (default: input video width)")
+    ap.add_argument("--height", type=int, default=DEFAULT_OUT_H,
+                    help="Output height in pixels (default: input video height)")
     ap.add_argument("--fps", type=float, default=DEFAULT_FPS)
 
     ap.add_argument("--start", type=float, default=DEFAULT_START, help="Start time in seconds (relative to FULL source)")
@@ -911,6 +973,15 @@ def main():
     if not src.exists():
         raise FileNotFoundError(src)
 
+    in_w, in_h = detect_input_dimensions(src)
+    if args.width is None and args.height is None:
+        args.width = in_w
+        args.height = in_h
+    elif args.width is None:
+        args.width = max(1, int(round(in_w * (args.height / in_h))))
+    elif args.height is None:
+        args.height = max(1, int(round(in_h * (args.width / in_w))))
+
     outp = Path(args.output) if args.output else build_output_name(src, args)
     
     print(f"\n💻 Input: {src.name}")
@@ -982,9 +1053,17 @@ def main():
 
     fps = float(args.fps)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
     if frame_count <= 0:
         # fallback
         frame_count = int(round((args.duration or 0.0) * fps)) if args.duration else 0
+
+    if src_w <= 0 or src_h <= 0:
+        raise RuntimeError("Could not read source frame dimensions from CFR intermediate.")
+
+    crop_x, crop_y, crop_w, crop_h = compute_reels_crop(src_w, src_h, args.width, args.height)
+    rgb_frame = np.empty((args.height, args.width, 3), dtype=np.uint8)
     
     print(f"✓ Video opened successfully")
     print(f"   Total frames to process: {frame_count}")
@@ -1129,10 +1208,16 @@ def main():
                     pct = progress * 10
                     elapsed = time.time() - start_wall_time
                     fps_actual = frame_idx / elapsed if elapsed > 0 else 0
-                    print(f"   {pct}% complete ({frame_idx}/{frame_count} frames, {fps_actual:.1f} fps)")
+                    remaining = max(0, frame_count - frame_idx)
+                    eta_s = (remaining / fps_actual) if fps_actual > 1e-9 else float("inf")
+                    print(
+                        f"   {pct}% complete ({frame_idx}/{frame_count} frames, "
+                        f"{fps_actual:.1f} fps, ETA {format_eta(eta_s)})"
+                    )
                     last_progress = progress
 
-            frame = fit_to_reels(frame, args.width, args.height)
+            frame = frame[crop_y:crop_y + crop_h, crop_x:crop_x + crop_w]
+            frame = cv2.resize(frame, (args.width, args.height), interpolation=cv2.INTER_AREA)
 
             # Beat modulation scalar for this frame
             mod = float(env[frame_idx]) if (env is not None and frame_idx < len(env)) else 0.0
@@ -1148,8 +1233,9 @@ def main():
                 code_alpha_eff = float(args.code_alpha) * (1.0 + 0.15 * pulse)
                 frame = overlay_code(frame, code_img, yoff, alpha=code_alpha_eff)
 
-            # Color conversion is expensive; do it once per frame
-            res = pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            # Color conversion is expensive; reuse a pre-allocated RGB buffer.
+            cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=rgb_frame)
+            res = pose.process(rgb_frame)
 
             # Trails buffer
             if args.trail:
