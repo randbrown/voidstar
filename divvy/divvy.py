@@ -12,6 +12,7 @@ Default mode uses stream copy (`-c copy`) to preserve encoded streams/quality.
 import argparse
 import json
 import math
+import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -51,6 +52,70 @@ def choose_num_parts(total_duration: float, target_seconds: float, rounding_mode
 	else:
 		parts = int(math.floor(ratio + 0.5))
 	return max(1, parts)
+
+
+def nearest_int_distance(x: float) -> float:
+	return abs(x - round(x))
+
+
+def choose_num_parts_bpm_quantized(
+	total_duration: float,
+	target_seconds: float,
+	rounding_mode: str,
+	bpm: float,
+	beats_per_bar: float,
+	search_radius: int,
+) -> tuple[int, float, float]:
+	base_parts = choose_num_parts(total_duration, target_seconds, rounding_mode)
+	if bpm <= 0:
+		part_len = total_duration / max(1, base_parts)
+		beats = part_len * bpm / 60.0 if bpm > 0 else 0.0
+		bars = beats / max(1e-9, beats_per_bar) if bpm > 0 else 0.0
+		return base_parts, beats, bars
+
+	best_parts = base_parts
+	best_score = float("inf")
+	best_beats = 0.0
+	best_bars = 0.0
+
+	lo = max(1, base_parts - max(0, search_radius))
+	hi = max(lo, base_parts + max(0, search_radius))
+
+	for parts in range(lo, hi + 1):
+		part_len = total_duration / parts
+		beats = part_len * bpm / 60.0
+		bars = beats / max(1e-9, beats_per_bar)
+
+		beat_err = nearest_int_distance(beats)
+		bar_err = nearest_int_distance(bars)
+		len_err = abs(part_len - target_seconds) / max(1e-9, target_seconds)
+		part_bias = abs(parts - base_parts) / max(1, base_parts)
+
+		# Prioritize musical grid lock first, then target duration closeness.
+		score = (beat_err * 1000.0) + (bar_err * 120.0) + (len_err * 10.0) + part_bias
+		if score < best_score:
+			best_score = score
+			best_parts = parts
+			best_beats = beats
+			best_bars = bars
+
+	return best_parts, best_beats, best_bars
+
+
+def has_nvenc_encoder() -> bool:
+	try:
+		out = subprocess.check_output(["ffmpeg", "-hide_banner", "-encoders"], text=True, stderr=subprocess.STDOUT)
+	except Exception:
+		return False
+	return "h264_nvenc" in out
+
+
+def choose_video_encoder(user_encoder: str) -> str:
+	if user_encoder != "auto":
+		return user_encoder
+	if has_nvenc_encoder():
+		return "h264_nvenc"
+	return "libx264"
 
 
 def offset_tag(seconds: float, int_width: int, ms_digits: int = 3) -> str:
@@ -167,6 +232,56 @@ def main() -> None:
 		default="",
 		help="Optional extra ffmpeg args appended to each segment command",
 	)
+	ap.add_argument(
+		"--cut-accuracy",
+		choices=["accurate", "copy"],
+		default="accurate",
+		help="accurate=re-encode for exact boundaries (default), copy=stream copy faster but less exact",
+	)
+	ap.add_argument(
+		"--bpm-quantize",
+		choices=["auto", "off", "on"],
+		default="auto",
+		help="Adjust number of parts to better land on BPM beat/bar grid (default: auto=on when --bpm > 0)",
+	)
+	ap.add_argument(
+		"--bpm-search-radius",
+		type=int,
+		default=12,
+		help="How far around target part count to search when BPM quantization is enabled",
+	)
+	ap.add_argument(
+		"--video-encoder",
+		default="auto",
+		help="Video encoder for accurate mode (auto/libx264/h264_nvenc/libx265/hevc_nvenc)",
+	)
+	ap.add_argument(
+		"--preset",
+		default="p5",
+		help="Encoder preset (e.g. p5 for nvenc, medium for libx264)",
+	)
+	ap.add_argument(
+		"--crf",
+		type=int,
+		default=18,
+		help="CRF for libx264/libx265 accurate mode",
+	)
+	ap.add_argument(
+		"--nvenc-cq",
+		type=int,
+		default=19,
+		help="CQ value for NVENC accurate mode (lower=better quality)",
+	)
+	ap.add_argument(
+		"--audio-codec",
+		default="aac",
+		help="Audio codec for accurate mode",
+	)
+	ap.add_argument(
+		"--audio-bitrate",
+		default="320k",
+		help="Audio bitrate for accurate mode",
+	)
 	args = ap.parse_args()
 
 	input_path = Path(args.input).expanduser().resolve()
@@ -184,7 +299,20 @@ def main() -> None:
 	if total_duration <= 0:
 		raise RuntimeError("Could not determine input duration from ffprobe")
 
-	parts = choose_num_parts(total_duration, args.target_seconds, args.rounding)
+	quant_enabled = (args.bpm_quantize == "on") or (args.bpm_quantize == "auto" and args.bpm > 0)
+	if quant_enabled and args.bpm > 0:
+		parts, quant_beats_per_part, quant_bars_per_part = choose_num_parts_bpm_quantized(
+			total_duration=total_duration,
+			target_seconds=args.target_seconds,
+			rounding_mode=args.rounding,
+			bpm=args.bpm,
+			beats_per_bar=args.beats_per_bar,
+			search_radius=args.bpm_search_radius,
+		)
+	else:
+		parts = choose_num_parts(total_duration, args.target_seconds, args.rounding)
+		quant_beats_per_part = 0.0
+		quant_bars_per_part = 0.0
 	actual_part_len = total_duration / parts
 
 	width_int = max(2, len(str(int(math.ceil(total_duration)))))
@@ -202,9 +330,23 @@ def main() -> None:
 	print(f"[voidstar] input={input_path}")
 	print(f"[voidstar] duration={total_duration:.6f}s target={args.target_seconds:.6f}s")
 	print(f"[voidstar] parts={parts} actual_part_len={actual_part_len:.6f}s{beat_info}")
-	print("[voidstar] mode=stream-copy (preserves encoded streams / no re-encode)")
+	if quant_enabled and args.bpm > 0:
+		print(
+			f"[voidstar] bpm_quantized=on beats/part={quant_beats_per_part:.6f} "
+			f"bars/part={quant_bars_per_part:.6f}"
+		)
+	else:
+		print("[voidstar] bpm_quantized=off")
 
-	extra_args = args.ffmpeg_extra.split() if args.ffmpeg_extra.strip() else []
+	print(f"[voidstar] cut_accuracy={args.cut_accuracy}")
+    
+	enc = choose_video_encoder(args.video_encoder)
+	if args.cut_accuracy == "accurate":
+		print(f"[voidstar] accurate_encoder={enc} audio={args.audio_codec}@{args.audio_bitrate}")
+	else:
+		print("[voidstar] mode=stream-copy (faster, but boundaries may drift from requested times)")
+
+	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
 
 	started = time.time()
 	created_files: list[Path] = []
@@ -218,30 +360,70 @@ def main() -> None:
 		out_name = make_output_name(input_path, start, end, width_int)
 		out_path = out_dir / out_name
 
-		cmd = [
-			"ffmpeg",
-			"-hide_banner",
-			"-loglevel",
-			"error",
-			"-nostats",
-			"-progress",
-			"pipe:1",
-			"-y",
-			"-ss",
-			f"{start:.6f}",
-			"-t",
-			f"{seg_dur:.6f}",
-			"-i",
-			str(input_path),
-			"-map",
-			"0",
-			"-c",
-			"copy",
-			"-avoid_negative_ts",
-			"make_zero",
-			*extra_args,
-			str(out_path),
-		]
+		if args.cut_accuracy == "copy":
+			cmd = [
+				"ffmpeg",
+				"-hide_banner",
+				"-loglevel",
+				"error",
+				"-nostats",
+				"-progress",
+				"pipe:1",
+				"-y",
+				"-ss",
+				f"{start:.6f}",
+				"-t",
+				f"{seg_dur:.6f}",
+				"-i",
+				str(input_path),
+				"-map",
+				"0",
+				"-c",
+				"copy",
+				"-avoid_negative_ts",
+				"make_zero",
+				*extra_args,
+				str(out_path),
+			]
+		else:
+			cmd = [
+				"ffmpeg",
+				"-hide_banner",
+				"-loglevel",
+				"error",
+				"-nostats",
+				"-progress",
+				"pipe:1",
+				"-y",
+				"-ss",
+				f"{start:.6f}",
+				"-i",
+				str(input_path),
+				"-t",
+				f"{seg_dur:.6f}",
+				"-map",
+				"0:v:0",
+				"-map",
+				"0:a:0?",
+				"-c:v",
+				enc,
+			]
+
+			if enc in {"h264_nvenc", "hevc_nvenc"}:
+				cmd += ["-preset", args.preset, "-rc", "vbr", "-cq", str(args.nvenc_cq), "-b:v", "0"]
+			elif enc in {"libx264", "libx265"}:
+				cmd += ["-preset", args.preset, "-crf", str(args.crf)]
+
+			cmd += [
+				"-c:a",
+				args.audio_codec,
+				"-b:a",
+				args.audio_bitrate,
+				"-movflags",
+				"+faststart",
+				*extra_args,
+				str(out_path),
+			]
 
 		print(
 			f"[voidstar] start part={idx}/{parts} "
@@ -279,6 +461,11 @@ def main() -> None:
 	print(f"[voidstar] input_duration={total_duration:.6f}s")
 	print(f"[voidstar] parts={parts}")
 	print(f"[voidstar] part_duration={actual_part_len:.6f}s")
+	if quant_enabled and args.bpm > 0:
+		print(
+			f"[voidstar] quant_beats_per_part={quant_beats_per_part:.6f} "
+			f"quant_bars_per_part={quant_bars_per_part:.6f}"
+		)
 	if args.bpm > 0:
 		beat_sec = 60.0 / args.bpm
 		beats_per_part = actual_part_len / beat_sec
