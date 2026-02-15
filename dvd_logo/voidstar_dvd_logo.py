@@ -224,6 +224,8 @@ def make_output_filename(input_path: Path, args: argparse.Namespace) -> str:
         parts.append(f"ars{args.audio_reactive_scale:.2f}")
     if args.voidstar_energy > 0:
         parts.append(f"ve{args.voidstar_energy:.2f}")
+    if args.local_point_track:
+        parts.append("lpt")
     if args.voidstar_preset != "custom":
         parts.append(f"vp{args.voidstar_preset}")
 
@@ -393,6 +395,18 @@ def hue_to_bgr_tint(hue_deg: float) -> np.ndarray:
     return np.clip(bgr / 255.0, 0.0, 1.0)
 
 
+def alpha_content_bbox(alpha: np.ndarray, threshold: float) -> tuple[int, int, int, int]:
+    """Return tight bbox (x0, y0, x1, y1) for non-transparent logo content."""
+    if alpha.size == 0:
+        return 0, 0, 1, 1
+    m = alpha > threshold
+    if not np.any(m):
+        h, w = alpha.shape[:2]
+        return 0, 0, max(1, w), max(1, h)
+    ys, xs = np.where(m)
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
 def run_checked(cmd: list[str]) -> None:
     print("[voidstar] ▶", " ".join(str(x) for x in cmd))
     subprocess.run(cmd, check=True)
@@ -434,6 +448,21 @@ def main() -> None:
     ap.add_argument("--voidstar-strobe", type=float, default=0.35, help="Beat-hit strobe intensity [0..2].")
     ap.add_argument("--voidstar-glitch-hit", type=float, default=0.45, help="Beat-hit glitch intensity [0..2].")
     ap.add_argument("--voidstar-preset", choices=["custom", "subtle", "cinema", "wild", "insane"], default="custom", help="Convenience preset for VoidStar energy stack.")
+    ap.add_argument("--local-point-track", type=bool_flag, default=False, help="Track moving feature points only within a logo-centered local bbox.")
+    ap.add_argument("--content-bbox-for-local", type=bool_flag, default=True, help="Use non-transparent logo-content bbox (alpha) for local tracking/reels ROI calculations.")
+    ap.add_argument("--content-bbox-alpha-threshold", type=float, default=0.02, help="Alpha threshold [0..1] to define visible logo-content bbox.")
+    ap.add_argument("--local-point-track-scale", type=float, default=2.0, help="Scale factor for local tracking bbox around logo.")
+    ap.add_argument("--local-point-track-pad-px", type=float, default=0.0, help="Signed pixel padding added to local tracking bbox after scaling (negative tightens, positive expands).")
+    ap.add_argument("--local-point-track-max-points", type=int, default=90, help="Max number of tracked feature points.")
+    ap.add_argument("--local-point-track-quality", type=float, default=0.01, help="Corner quality level for local feature detection.")
+    ap.add_argument("--local-point-track-min-distance", type=float, default=7.0, help="Minimum tracked-point spacing in pixels.")
+    ap.add_argument("--local-point-track-refresh", type=int, default=6, help="Frames between local feature reseeding.")
+    ap.add_argument("--local-point-track-radius", type=float, default=80.0, help="Connection radius for constellation links.")
+    ap.add_argument("--local-point-track-link-neighbors", type=int, default=3, help="Max nearest neighbors to connect per point.")
+    ap.add_argument("--local-point-track-link-thickness", type=int, default=1, help="Line thickness for point connections.")
+    ap.add_argument("--local-point-track-link-opacity", type=float, default=1.0, help="Extra multiplier for connection intensity [0..2].")
+    ap.add_argument("--local-point-track-opacity", type=float, default=0.72, help="Overlay opacity for local point-track effect [0..1].")
+    ap.add_argument("--local-point-track-decay", type=float, default=0.90, help="Trail decay for local point-track layer [0..0.999].")
     ap.add_argument("--reels-local-overlay", type=bool_flag, default=False, help="Run reels_cv_overlay on a local region around logo only, then composite back.")
     ap.add_argument("--reels-script-path", default=None, help="Optional path to reels_cv_overlay.py (default: auto-detect in sibling folder)")
     ap.add_argument("--reels-local-pad-px", type=int, default=120, help="Padding around logo motion bounds for local reels processing")
@@ -603,10 +632,28 @@ def main() -> None:
     voidstar_energy = clamp(float(args.voidstar_energy), 0.0, 3.0)
     voidstar_strobe = clamp(float(args.voidstar_strobe), 0.0, 2.0)
     voidstar_glitch_hit = clamp(float(args.voidstar_glitch_hit), 0.0, 2.0)
+    point_track_enabled = bool(args.local_point_track)
+    use_content_bbox_for_local = bool(args.content_bbox_for_local)
+    content_bbox_alpha_threshold = float(np.clip(args.content_bbox_alpha_threshold, 0.0, 1.0))
+    point_track_scale = float(np.clip(args.local_point_track_scale, 0.1, 8.0))
+    point_track_pad_px = float(np.clip(args.local_point_track_pad_px, -2000.0, 2000.0))
+    point_track_max_points = max(4, int(args.local_point_track_max_points))
+    point_track_quality = float(np.clip(args.local_point_track_quality, 1e-4, 0.2))
+    point_track_min_distance = float(np.clip(args.local_point_track_min_distance, 1.0, 80.0))
+    point_track_refresh = max(1, int(args.local_point_track_refresh))
+    point_track_radius = float(np.clip(args.local_point_track_radius, 8.0, 500.0))
+    point_track_link_neighbors = max(1, int(args.local_point_track_link_neighbors))
+    point_track_link_thickness = max(1, int(args.local_point_track_link_thickness))
+    point_track_link_opacity = float(np.clip(args.local_point_track_link_opacity, 0.0, 2.0))
+    point_track_opacity = float(np.clip(args.local_point_track_opacity, 0.0, 1.0))
+    point_track_decay = float(np.clip(args.local_point_track_decay, 0.0, 0.999))
     trail_decay = 0.80 + 0.18 * trails_strength
     trail_opacity = 0.10 + 0.30 * trails_strength
     trail_bgr = None
     trail_alpha = None
+    point_track_layer = np.zeros((frame_h, frame_w, 3), dtype=np.float32) if point_track_enabled else None
+    track_prev_gray = None
+    track_points = np.empty((0, 1, 2), dtype=np.float32)
 
     local_reels_enabled = bool(args.reels_local_overlay)
     roi_min_x = frame_w
@@ -723,6 +770,22 @@ def main() -> None:
         draw_x = int(round(cx - half_w))
         draw_y = int(round(cy - half_h))
 
+        if use_content_bbox_for_local:
+            ax0, ay0, ax1, ay1 = alpha_content_bbox(logo_alpha, content_bbox_alpha_threshold)
+            local_base_x = draw_x + ax0
+            local_base_y = draw_y + ay0
+            local_base_w = max(1, ax1 - ax0)
+            local_base_h = max(1, ay1 - ay0)
+            local_base_cx = local_base_x + (local_base_w * 0.5)
+            local_base_cy = local_base_y + (local_base_h * 0.5)
+        else:
+            local_base_x = draw_x
+            local_base_y = draw_y
+            local_base_w = cur_w
+            local_base_h = cur_h
+            local_base_cx = cx
+            local_base_cy = cy
+
         pulse = 0.0
         if bass_env is not None and phase_idx < len(bass_env):
             pulse = float(np.clip(bass_env[phase_idx], 0.0, 1.0))
@@ -736,10 +799,10 @@ def main() -> None:
         last_pulse = pulse
 
         if local_reels_enabled:
-            x0 = max(0, draw_x - local_pad)
-            y0 = max(0, draw_y - local_pad)
-            x1 = min(frame_w, draw_x + cur_w + local_pad)
-            y1 = min(frame_h, draw_y + cur_h + local_pad)
+            x0 = max(0, int(round(local_base_x - local_pad)))
+            y0 = max(0, int(round(local_base_y - local_pad)))
+            x1 = min(frame_w, int(round(local_base_x + local_base_w + local_pad)))
+            y1 = min(frame_h, int(round(local_base_y + local_base_h + local_pad)))
             if x1 > x0 and y1 > y0:
                 roi_min_x = min(roi_min_x, x0)
                 roi_min_y = min(roi_min_y, y0)
@@ -762,6 +825,105 @@ def main() -> None:
                 trail_opacity,
             )
             blend_layer_onto_frame(frame, trail_bgr, trail_alpha)
+
+        if point_track_enabled and point_track_layer is not None:
+            gray_now = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            bw = max(8, int(round((local_base_w * point_track_scale) + (2.0 * point_track_pad_px))))
+            bh = max(8, int(round((local_base_h * point_track_scale) + (2.0 * point_track_pad_px))))
+            bx0 = max(0, int(round(local_base_cx - bw * 0.5)))
+            by0 = max(0, int(round(local_base_cy - bh * 0.5)))
+            bx1 = min(frame_w, bx0 + bw)
+            by1 = min(frame_h, by0 + bh)
+
+            # Keep tracking/effect strictly local to current logo neighborhood.
+            point_track_layer[:by0, :, :] = 0.0
+            point_track_layer[by1:, :, :] = 0.0
+            point_track_layer[by0:by1, :bx0, :] = 0.0
+            point_track_layer[by0:by1, bx1:, :] = 0.0
+            point_track_layer[by0:by1, bx0:bx1, :] *= point_track_decay
+
+            tracked = np.empty((0, 2), dtype=np.float32)
+            if track_prev_gray is not None and track_points.size > 0:
+                p1, st, _ = cv2.calcOpticalFlowPyrLK(
+                    track_prev_gray,
+                    gray_now,
+                    track_points,
+                    None,
+                    winSize=(21, 21),
+                    maxLevel=2,
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03),
+                )
+                if p1 is not None and st is not None:
+                    cand = p1[st.reshape(-1) == 1].reshape(-1, 2)
+                    if cand.size > 0:
+                        keep = (
+                            (cand[:, 0] >= bx0)
+                            & (cand[:, 0] < bx1)
+                            & (cand[:, 1] >= by0)
+                            & (cand[:, 1] < by1)
+                        )
+                        tracked = cand[keep]
+
+            need_seed = (processed % point_track_refresh == 0) or (tracked.shape[0] < max(8, point_track_max_points // 3))
+            if need_seed and bx1 > bx0 and by1 > by0:
+                mask = np.zeros_like(gray_now, dtype=np.uint8)
+                mask[by0:by1, bx0:bx1] = 255
+                max_new = max(0, point_track_max_points - tracked.shape[0])
+                if max_new > 0:
+                    pts_new = cv2.goodFeaturesToTrack(
+                        gray_now,
+                        maxCorners=max_new,
+                        qualityLevel=point_track_quality,
+                        minDistance=point_track_min_distance,
+                        mask=mask,
+                        blockSize=7,
+                    )
+                    if pts_new is not None:
+                        new_pts = pts_new.reshape(-1, 2).astype(np.float32)
+                        tracked = np.vstack([tracked, new_pts]) if tracked.size else new_pts
+
+            if tracked.shape[0] > point_track_max_points:
+                tracked = tracked[:point_track_max_points]
+            track_points = tracked.reshape(-1, 1, 2).astype(np.float32) if tracked.size else np.empty((0, 1, 2), dtype=np.float32)
+
+            if tracked.shape[0] > 0:
+                t = phase_idx / max(1e-9, fps)
+                tint = hue_to_bgr_tint(t * float(args.voidstar_hue_rate) * 360.0 + 120.0 * pulse)
+                color = tuple(int(c) for c in (tint * 255.0))
+                canvas = np.zeros((frame_h, frame_w, 3), dtype=np.uint8)
+
+                n = tracked.shape[0]
+                r2 = point_track_radius * point_track_radius
+                if n >= 2:
+                    dx = tracked[:, 0][:, None] - tracked[:, 0][None, :]
+                    dy = tracked[:, 1][:, None] - tracked[:, 1][None, :]
+                    d2 = dx * dx + dy * dy
+                    for i in range(n):
+                        nbrs = np.where((d2[i] > 0) & (d2[i] <= r2))[0]
+                        if nbrs.size:
+                            nbrs = nbrs[np.argsort(d2[i, nbrs])[:point_track_link_neighbors]]
+                            x0, y0 = int(round(tracked[i, 0])), int(round(tracked[i, 1]))
+                            for j in nbrs:
+                                if j <= i:
+                                    continue
+                                x1, y1 = int(round(tracked[j, 0])), int(round(tracked[j, 1]))
+                                cv2.line(canvas, (x0, y0), (x1, y1), color, point_track_link_thickness, cv2.LINE_AA)
+
+                for p in tracked:
+                    cv2.circle(canvas, (int(round(p[0])), int(round(p[1]))), 2, color, -1, cv2.LINE_AA)
+
+                point_track_layer[:, :, :] = np.clip(
+                    point_track_layer + canvas.astype(np.float32) * (0.35 + 0.75 * pulse) * point_track_link_opacity,
+                    0,
+                    255,
+                )
+                frame[:, :, :] = np.clip(
+                    frame.astype(np.float32) + point_track_layer * point_track_opacity,
+                    0,
+                    255,
+                ).astype(np.uint8)
+
+            track_prev_gray = gray_now
 
         if audio_env is not None and phase_idx < len(audio_env):
             level = float(np.clip(audio_env[phase_idx], 0.0, 1.0))
