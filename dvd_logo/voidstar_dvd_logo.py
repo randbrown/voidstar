@@ -433,7 +433,7 @@ def main() -> None:
     ap.add_argument("--voidstar-bloom", type=float, default=0.55, help="Bloom strength [0..2] for VoidStar FX.")
     ap.add_argument("--voidstar-strobe", type=float, default=0.35, help="Beat-hit strobe intensity [0..2].")
     ap.add_argument("--voidstar-glitch-hit", type=float, default=0.45, help="Beat-hit glitch intensity [0..2].")
-    ap.add_argument("--voidstar-preset", choices=["custom", "subtle", "wild", "insane"], default="custom", help="Convenience preset for VoidStar energy stack.")
+    ap.add_argument("--voidstar-preset", choices=["custom", "subtle", "cinema", "wild", "insane"], default="custom", help="Convenience preset for VoidStar energy stack.")
     ap.add_argument("--reels-local-overlay", type=bool_flag, default=False, help="Run reels_cv_overlay on a local region around logo only, then composite back.")
     ap.add_argument("--reels-script-path", default=None, help="Optional path to reels_cv_overlay.py (default: auto-detect in sibling folder)")
     ap.add_argument("--reels-local-pad-px", type=int, default=120, help="Padding around logo motion bounds for local reels processing")
@@ -463,6 +463,15 @@ def main() -> None:
                 "voidstar_bloom": 0.35,
                 "voidstar_strobe": 0.18,
                 "voidstar_glitch_hit": 0.20,
+            },
+            "cinema": {
+                "voidstar_energy": 1.15,
+                "voidstar_hue_rate": 10.0,
+                "voidstar_chroma": 1.2,
+                "voidstar_jitter": 0.35,
+                "voidstar_bloom": 0.95,
+                "voidstar_strobe": 0.30,
+                "voidstar_glitch_hit": 0.08,
             },
             "wild": {
                 "voidstar_energy": 1.6,
