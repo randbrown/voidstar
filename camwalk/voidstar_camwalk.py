@@ -492,7 +492,7 @@ def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("input")
 
-    ap.add_argument("--speed",type=float,default=0.18)
+    ap.add_argument("--speed",type=float,default=0.1)
     ap.add_argument("--zoom-max",type=float,default=10.0)
     ap.add_argument("--pan-max",type=float,default=1.0)
     ap.add_argument("--edge-margin",type=float,default=0.0,
@@ -509,9 +509,9 @@ def main():
                     help="Absolute minimum zoom floor")
     ap.add_argument("--zoom-chase",type=float,default=1.8,
                     help="Zoom chase response rate")
-    ap.add_argument("--bounce-rot-kick",type=float,default=0.9,
+    ap.add_argument("--bounce-rot-kick",type=float,default=0.2,
                     help="Bounce angle to rotation coupling (higher = bigger turn on bounce)")
-    ap.add_argument("--bounce-rot-ease",type=float,default=4.0,
+    ap.add_argument("--bounce-rot-ease",type=float,default=1.0,
                     help="How quickly bounce-induced rotation target is eased in (physical mode)")
     ap.add_argument("--bounce-style",default="dvd",
                     choices=["dvd","physical"],
