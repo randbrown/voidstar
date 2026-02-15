@@ -74,6 +74,7 @@ def make_output_filename(input_path: Path, args: argparse.Namespace) -> str:
         f"sx{args.start_x:.3f}",
         f"sy{args.start_y:.3f}",
         f"sc{args.logo_scale:.3f}",
+        f"em{args.edge_margin_px:g}",
         f"ang{args.angle_deg:g}",
         f"st{args.start:g}",
     ]
@@ -85,6 +86,8 @@ def make_output_filename(input_path: Path, args: argparse.Namespace) -> str:
         parts.append(f"dur{args.duration:g}")
     if args.logo_width_px > 0:
         parts.append(f"lwp{args.logo_width_px}")
+    if args.trails > 0:
+        parts.append(f"tr{args.trails:.2f}")
 
     safe = "_".join(parts).replace("/", "-").replace(" ", "")
     return f"{safe}{input_path.suffix}"
@@ -92,6 +95,28 @@ def make_output_filename(input_path: Path, args: argparse.Namespace) -> str:
 
 def clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
+
+
+def reflect_1d_interval(pos: float, vel: float, lo: float, hi: float) -> tuple[float, float]:
+    """Advance by one step and reflect inside [lo, hi] with overshoot handling."""
+    if hi <= lo:
+        return (lo + hi) * 0.5, 0.0
+
+    x = pos + vel
+    v = vel
+    for _ in range(4):
+        if x < lo:
+            x = 2.0 * lo - x
+            v = abs(v)
+            continue
+        if x > hi:
+            x = 2.0 * hi - x
+            v = -abs(v)
+            continue
+        break
+
+    x = clamp(x, lo, hi)
+    return x, v
 
 
 def overlay_rgba(frame: np.ndarray, logo_bgr: np.ndarray, logo_alpha: np.ndarray, x: int, y: int) -> None:
@@ -117,6 +142,73 @@ def overlay_rgba(frame: np.ndarray, logo_bgr: np.ndarray, logo_alpha: np.ndarray
 
     out = lroi * aroi + roi * (1.0 - aroi)
     frame[y0:y1, x0:x1] = out.astype(np.uint8)
+
+
+def rotate_logo_rgba(logo_rgba: np.ndarray, angle_deg: float) -> tuple[np.ndarray, np.ndarray]:
+    h, w = logo_rgba.shape[:2]
+    cx = w * 0.5
+    cy = h * 0.5
+
+    M = cv2.getRotationMatrix2D((cx, cy), angle_deg, 1.0)
+    cosv = abs(M[0, 0])
+    sinv = abs(M[0, 1])
+    new_w = max(1, int((h * sinv) + (w * cosv)))
+    new_h = max(1, int((h * cosv) + (w * sinv)))
+
+    M[0, 2] += (new_w * 0.5) - cx
+    M[1, 2] += (new_h * 0.5) - cy
+
+    rotated = cv2.warpAffine(
+        logo_rgba,
+        M,
+        (new_w, new_h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0, 0),
+    )
+    return rotated[:, :, :3], rotated[:, :, 3].astype(np.float32) / 255.0
+
+
+def stamp_rgba_into_layer(
+    layer_bgr: np.ndarray,
+    layer_alpha: np.ndarray,
+    logo_bgr: np.ndarray,
+    logo_alpha: np.ndarray,
+    x: int,
+    y: int,
+    opacity: float,
+) -> None:
+    h, w = layer_alpha.shape[:2]
+    lh, lw = logo_bgr.shape[:2]
+
+    x0 = max(0, x)
+    y0 = max(0, y)
+    x1 = min(w, x + lw)
+    y1 = min(h, y + lh)
+    if x0 >= x1 or y0 >= y1:
+        return
+
+    lx0 = x0 - x
+    ly0 = y0 - y
+    lx1 = lx0 + (x1 - x0)
+    ly1 = ly0 + (y1 - y0)
+
+    src_bgr = logo_bgr[ly0:ly1, lx0:lx1].astype(np.float32)
+    src_a = (logo_alpha[ly0:ly1, lx0:lx1] * opacity).astype(np.float32)
+    src_a = np.clip(src_a, 0.0, 1.0)
+    src_a3 = src_a[..., None]
+
+    dst_bgr = layer_bgr[y0:y1, x0:x1]
+    dst_a = layer_alpha[y0:y1, x0:x1]
+
+    layer_bgr[y0:y1, x0:x1] = src_bgr * src_a3 + dst_bgr * (1.0 - src_a3)
+    layer_alpha[y0:y1, x0:x1] = src_a + dst_a * (1.0 - src_a)
+
+
+def blend_layer_onto_frame(frame: np.ndarray, layer_bgr: np.ndarray, layer_alpha: np.ndarray) -> None:
+    a3 = np.clip(layer_alpha, 0.0, 1.0)[..., None]
+    out = layer_bgr * a3 + frame.astype(np.float32) * (1.0 - a3)
+    frame[:, :, :] = np.clip(out, 0, 255).astype(np.uint8)
 
 
 def format_eta(seconds: float) -> str:
@@ -146,6 +238,10 @@ def main() -> None:
 
     ap.add_argument("--logo-scale", type=float, default=0.18, help="Logo width as fraction of frame width")
     ap.add_argument("--logo-width-px", type=int, default=0, help="Absolute logo width in pixels (overrides --logo-scale if >0)")
+    ap.add_argument("--logo-rotate-speed", type=float, default=0.0, help="Continuous logo rotation speed in degrees/second (0 disables)")
+    ap.add_argument("--logo-rotate-start-deg", type=float, default=0.0, help="Initial logo rotation angle in degrees")
+    ap.add_argument("--edge-margin-px", type=float, default=0.0, help="Signed edge margin in pixels. Positive stays inside edge; negative allows overlap.")
+    ap.add_argument("--trails", type=float, default=0.0, help="Ghost trail strength [0..1]. 0 disables, 1 is strongest.")
 
     ap.add_argument("--start", type=float, default=0.0, help="Start time in seconds")
     ap.add_argument("--duration", type=float, default=0.0, help="Duration in seconds (0 = to end)")
@@ -215,29 +311,33 @@ def main() -> None:
     logo_h = max(8, int(round(logo_w * (src_h / max(1, src_w)))))
 
     logo_resized = cv2.resize(logo_rgba, (logo_w, logo_h), interpolation=cv2.INTER_AREA)
-    logo_bgr = logo_resized[:, :, :3]
-    logo_alpha = logo_resized[:, :, 3].astype(np.float32) / 255.0
-
-    max_x = max(0.0, frame_w - logo_w)
-    max_y = max(0.0, frame_h - logo_h)
+    base_logo_bgr = logo_resized[:, :, :3]
+    base_logo_alpha = logo_resized[:, :, 3].astype(np.float32) / 255.0
 
     cx0 = clamp(args.start_x, 0.0, 1.0) * frame_w
     cy0 = clamp(args.start_y, 0.0, 1.0) * frame_h
-    x = clamp(cx0 - logo_w * 0.5, 0.0, max_x)
-    y = clamp(cy0 - logo_h * 0.5, 0.0, max_y)
+    cx = clamp(cx0, logo_w * 0.5, max(logo_w * 0.5, frame_w - logo_w * 0.5))
+    cy = clamp(cy0, logo_h * 0.5, max(logo_h * 0.5, frame_h - logo_h * 0.5))
 
     theta = math.radians(args.angle_deg)
     if args.end_x is not None and args.end_y is not None:
         tx = clamp(args.end_x, 0.0, 1.0) * frame_w
         ty = clamp(args.end_y, 0.0, 1.0) * frame_h
-        dx = tx - (x + logo_w * 0.5)
-        dy = ty - (y + logo_h * 0.5)
+        dx = tx - cx
+        dy = ty - cy
         if abs(dx) > 1e-6 or abs(dy) > 1e-6:
             theta = math.atan2(dy, dx)
 
     px_per_frame = max(0.0, args.speed) / max(1e-9, fps)
     vx = math.cos(theta) * px_per_frame
     vy = math.sin(theta) * px_per_frame
+
+    margin_px = float(args.edge_margin_px)
+    trails_strength = clamp(float(args.trails), 0.0, 1.0)
+    trail_decay = 0.80 + 0.18 * trails_strength
+    trail_opacity = 0.10 + 0.30 * trails_strength
+    trail_bgr = None
+    trail_alpha = None
 
     tmp_video = output_path.with_name(output_path.stem + "__video.mp4")
 
@@ -283,38 +383,56 @@ def main() -> None:
         if not ok:
             break
 
-        overlay_rgba(frame, logo_bgr, logo_alpha, int(round(x)), int(round(y)))
+        if abs(args.logo_rotate_speed) > 1e-9 or abs(args.logo_rotate_start_deg) > 1e-9:
+            angle = args.logo_rotate_start_deg + args.logo_rotate_speed * (processed / max(1e-9, fps))
+            logo_bgr, logo_alpha = rotate_logo_rgba(logo_resized, angle)
+        else:
+            logo_bgr, logo_alpha = base_logo_bgr, base_logo_alpha
+
+        cur_w = logo_bgr.shape[1]
+        cur_h = logo_bgr.shape[0]
+        half_w = cur_w * 0.5
+        half_h = cur_h * 0.5
+
+        lo_x = half_w + margin_px
+        hi_x = frame_w - half_w - margin_px
+        lo_y = half_h + margin_px
+        hi_y = frame_h - half_h - margin_px
+
+        # Keep center valid for this frame's rotated dimensions.
+        cx = clamp(cx, lo_x, max(lo_x, hi_x))
+        cy = clamp(cy, lo_y, max(lo_y, hi_y))
+
+        # Move + reflect using current frame's true logo bounds.
+        cx, vx = reflect_1d_interval(cx, vx, lo_x, hi_x)
+        cy, vy = reflect_1d_interval(cy, vy, lo_y, hi_y)
+
+        draw_x = int(round(cx - half_w))
+        draw_y = int(round(cy - half_h))
+
+        if trails_strength > 0.0:
+            if trail_bgr is None or trail_alpha is None:
+                trail_bgr = np.zeros((frame_h, frame_w, 3), dtype=np.float32)
+                trail_alpha = np.zeros((frame_h, frame_w), dtype=np.float32)
+            trail_bgr *= trail_decay
+            trail_alpha *= trail_decay
+            stamp_rgba_into_layer(
+                trail_bgr,
+                trail_alpha,
+                logo_bgr,
+                logo_alpha,
+                draw_x,
+                draw_y,
+                trail_opacity,
+            )
+            blend_layer_onto_frame(frame, trail_bgr, trail_alpha)
+
+        overlay_rgba(frame, logo_bgr, logo_alpha, draw_x, draw_y)
 
         if enc_proc.stdin is None:
             raise RuntimeError("Encoder stdin is unavailable.")
         enc_proc.stdin.write(frame.tobytes())
         processed += 1
-
-        x += vx
-        y += vy
-
-        for _ in range(4):
-            bounced = False
-            if x < 0.0:
-                x = -x
-                vx = abs(vx)
-                bounced = True
-            elif x > max_x:
-                x = 2.0 * max_x - x
-                vx = -abs(vx)
-                bounced = True
-
-            if y < 0.0:
-                y = -y
-                vy = abs(vy)
-                bounced = True
-            elif y > max_y:
-                y = 2.0 * max_y - y
-                vy = -abs(vy)
-                bounced = True
-
-            if not bounced:
-                break
 
         now = time.time()
         if now - last_log >= max(0.1, args.log_interval):
