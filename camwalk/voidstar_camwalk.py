@@ -168,12 +168,8 @@ class CinematicCam:
         self.state = np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float64)
         self.vel = np.zeros(4, dtype=np.float64)
 
-        # keep zoom above a floor so pan has room to travel.
-        self.zoom_floor = min(
-            self.args.zoom_max,
-            max(self.args.zoom_floor_min, self.args.zoom_max * self.args.zoom_floor_ratio),
-        )
-        self.zoom_floor = max(1.0, self.zoom_floor)
+        # zoom minimum (full view by default)
+        self.zoom_floor = float(np.clip(self.args.zoom_min, 1.0, self.args.zoom_max))
 
         # zoom target changes occasionally to keep motion musical.
         self.target_zoom = self.zoom_floor
@@ -198,6 +194,7 @@ class CinematicCam:
         self.rot_bounce_target = 0.0
         self.rot_bounce_applied = 0.0
         self.last_bounce = "-"
+        self.audio_env = 0.0
 
     def _pan_bounds(self):
         z = max(1.0, float(self.state[2]))
@@ -317,13 +314,36 @@ class CinematicCam:
         y = float(np.clip(y, -max_ty, max_ty))
         return x, y, vx, vy, bounced_x, bounced_y
 
-    def step(self, dt, frame_idx, audio_level=0.0):
+    def step(self, dt, frame_idx, audio_level=0.0, progress=None):
         # periodic zoom retarget
         if frame_idx >= self.next_retarget:
             self._retarget()
             self.next_retarget = frame_idx + int(self.args.retarget_sec*self.fps)
 
         # zoom first, then compute this frame's pan bounds from original input size.
+        if self.args.beat_react:
+            # Map audio energy to zoom range [zoom_min, zoom_max].
+            # Silence (or near-silence) => full view.
+            a = max(0.0, float(audio_level) - self.args.silence_level)
+            n = np.clip(a / max(self.args.audio_ref_level, 1e-6), 0.0, 1.0)
+            n = float(n) ** self.args.audio_energy_gamma
+            self.audio_env = self.audio_env * self.args.audio_zoom_smooth + n * (1.0 - self.args.audio_zoom_smooth)
+
+            audio_zoom = self.zoom_floor + (self.args.zoom_max - self.zoom_floor) * self.audio_env
+            self.target_zoom = (1.0 - self.args.audio_target_mix) * self.target_zoom + self.args.audio_target_mix * audio_zoom
+
+        # Force full-view near start/end if progress is provided.
+        if progress is not None and self.args.open_close_sec > 0.0:
+            edge_frac = min(0.45, (self.args.open_close_sec * self.fps) / max(self.args.total_frames_hint, 1.0))
+            if edge_frac > 0:
+                p = float(np.clip(progress, 0.0, 1.0))
+                w_start = max(0.0, 1.0 - p / edge_frac)
+                w_end = max(0.0, 1.0 - (1.0 - p) / edge_frac)
+                w = max(w_start, w_end)
+                # smoothstep
+                w = w * w * (3.0 - 2.0 * w)
+                self.target_zoom = (1.0 - w) * self.target_zoom + w * self.zoom_floor
+
         zoom_chase = max(0.05, self.args.speed * self.args.zoom_chase)
         self.vel[2] += (self.target_zoom - self.state[2]) * zoom_chase * dt
         self.vel[2] *= self.args.inertia
@@ -335,15 +355,20 @@ class CinematicCam:
             self.state[2] *= 1 + audio_level * self.args.beat_strength * 0.05
             self.state[2] = float(np.clip(self.state[2], self.zoom_floor, self.args.zoom_max))
 
-        # maintain nearly constant glide speed (no steering until edge hit)
+        # maintain glide speed scaled inversely by current zoom.
+        # Higher zoom => slower pan to reduce jarring motion.
+        z_for_speed = max(1.0, float(self.state[2]))
+        speed_scale = 1.0 / (z_for_speed ** max(0.0, self.args.pan_zoom_speed_exp))
+        target_pan_speed = max(1e-6, self.pan_speed_px * speed_scale)
+
         speed_now = float(np.linalg.norm(self.vel[:2]))
         if speed_now < 1e-6:
             theta = self.rng.uniform(0, math.tau)
-            self.vel[0] = math.cos(theta) * self.pan_speed_px
-            self.vel[1] = math.sin(theta) * self.pan_speed_px
+            self.vel[0] = math.cos(theta) * target_pan_speed
+            self.vel[1] = math.sin(theta) * target_pan_speed
         else:
-            self.vel[0] *= self.pan_speed_px / speed_now
-            self.vel[1] *= self.pan_speed_px / speed_now
+            self.vel[0] *= target_pan_speed / speed_now
+            self.vel[1] *= target_pan_speed / speed_now
 
         # reflect only when movement crosses current source-frame bounds.
         # Use substeps so bounce appears at/near the visual edge (less jumpy).
@@ -468,9 +493,16 @@ def build_output_name(input_path,args):
         f"em{args.edge_margin:.2f}",
         f"psm{args.pan_speed_mult:.2f}",
         f"psn{args.pan_speed_min:g}",
+        f"pze{args.pan_zoom_speed_exp:.2f}",
         f"pss{args.pan_substeps:g}",
         f"zfr{args.zoom_floor_ratio:.2f}",
         f"zfm{args.zoom_floor_min:g}",
+        f"zmn{args.zoom_min:.2f}",
+        f"asl{args.silence_level:.3f}",
+        f"arl{args.audio_ref_level:.3f}",
+        f"aeg{args.audio_energy_gamma:.2f}",
+        f"acz{args.audio_target_mix:.2f}",
+        f"ocs{args.open_close_sec:.2f}",
         f"zc{args.zoom_chase:.2f}",
         f"rr{args.rot_return:.2f}",
         f"rk{args.bounce_rot_kick:.2f}",
@@ -501,12 +533,28 @@ def main():
                     help="Pan speed scale: px/s = min(w,h) * speed * pan_speed_mult")
     ap.add_argument("--pan-speed-min",type=float,default=8.0,
                     help="Minimum pan speed in px/s")
+    ap.add_argument("--pan-zoom-speed-exp",type=float,default=1.0,
+                    help="Pan speed scales as 1/(zoom^exp). Higher = slower when zoomed in")
     ap.add_argument("--pan-substeps",type=int,default=4,
                     help="Pan integration substeps per frame (higher = cleaner edge bounces)")
     ap.add_argument("--zoom-floor-ratio",type=float,default=0.22,
                     help="Minimum zoom floor as ratio of zoom-max to allow panning")
     ap.add_argument("--zoom-floor-min",type=float,default=1.25,
                     help="Absolute minimum zoom floor")
+    ap.add_argument("--zoom-min",type=float,default=1.0,
+                    help="Minimum zoom. 1.0 means full-view")
+    ap.add_argument("--silence-level",type=float,default=0.01,
+                    help="Audio level at/below this is treated as silence for zoom")
+    ap.add_argument("--audio-ref-level",type=float,default=0.08,
+                    help="Audio level mapped near max zoom")
+    ap.add_argument("--audio-energy-gamma",type=float,default=0.85,
+                    help="Audio-to-zoom curve shape (<1 more sensitive, >1 less)")
+    ap.add_argument("--audio-target-mix",type=float,default=1.0,
+                    help="Blend amount of audio-derived zoom target")
+    ap.add_argument("--audio-zoom-smooth",type=float,default=0.90,
+                    help="Smoothing of normalized audio energy for zoom")
+    ap.add_argument("--open-close-sec",type=float,default=1.5,
+                    help="Force full-view near start/end over this many seconds")
     ap.add_argument("--zoom-chase",type=float,default=1.8,
                     help="Zoom chase response rate")
     ap.add_argument("--bounce-rot-kick",type=float,default=0.2,
@@ -560,6 +608,11 @@ def main():
         print(f"[voidstar] script={Path(__file__).resolve()}")
         print(f"[voidstar] cwd={Path.cwd()}")
 
+    # keep zoom limits sane
+    args.zoom_min = float(np.clip(args.zoom_min, 1.0, args.zoom_max))
+    args.audio_zoom_smooth = float(np.clip(args.audio_zoom_smooth, 0.0, 0.999))
+    args.audio_target_mix = float(np.clip(args.audio_target_mix, 0.0, 1.0))
+
     input_path=Path(args.input).resolve()
     out_dir=Path(args.out_dir)
     out_dir.mkdir(parents=True,exist_ok=True)
@@ -583,6 +636,8 @@ def main():
         frames_to_process=int(args.duration*fps)
     else:
         frames_to_process=-1
+
+    args.total_frames_hint = float(max(frames_to_process, int(fps * 6))) if frames_to_process > 0 else float(max(int(fps * 6), 1))
 
     rng=np.random.default_rng(int(time.time()))
     cam=CinematicCam(rng,args,fps,w,h)
@@ -619,7 +674,10 @@ def main():
         if not ok: break
 
         audio_level=audio.read_level() if audio else 0.0
-        x,y,z,r=cam.step(1.0/fps,processed,audio_level)
+        progress = None
+        if frames_to_process > 1:
+            progress = processed / max(1, frames_to_process - 1)
+        x,y,z,r=cam.step(1.0/fps,processed,audio_level,progress)
 
         tx = float(x)
         ty = float(y)
@@ -668,7 +726,14 @@ def main():
 
         if processed%int(fps)==0:
             elapsed=time.time()-t0
-            print(f"[voidstar] frames={processed} fps={processed/elapsed:.2f}")
+            if frames_to_process > 0:
+                pct = 100.0 * processed / max(1, frames_to_process)
+                print(
+                    f"[voidstar] frames={processed}/{frames_to_process} "
+                    f"({pct:.1f}%) fps={processed/elapsed:.2f}"
+                )
+            else:
+                print(f"[voidstar] frames={processed} fps={processed/elapsed:.2f}")
 
     cap.release()
 
