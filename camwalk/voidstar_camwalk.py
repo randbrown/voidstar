@@ -155,58 +155,262 @@ class SmoothNoise:
 # ============================================================
 
 class CinematicCam:
-    def __init__(self, rng, args, fps):
+    def __init__(self, rng, args, fps, frame_w, frame_h):
         self.rng = rng
         self.args = args
         self.fps = fps
+        self.frame_w = float(frame_w)
+        self.frame_h = float(frame_h)
+        self.pan_limit = float(np.clip(args.pan_max, 0.0, 1.0))
+        self.edge_margin = float(np.clip(args.edge_margin, 0.0, 0.45))
 
-        self.state = np.array([0.0,0.0,1.0,0.0])
-        self.vel = np.zeros(4)
-        self.target = self.state.copy()
+        # state = [cam_center_offset_x_px, cam_center_offset_y_px, zoom, rotation_rad]
+        self.state = np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float64)
+        self.vel = np.zeros(4, dtype=np.float64)
 
-        self.noise = SmoothNoise(rng)
+        # keep zoom above a floor so pan has room to travel.
+        self.zoom_floor = min(
+            self.args.zoom_max,
+            max(self.args.zoom_floor_min, self.args.zoom_max * self.args.zoom_floor_ratio),
+        )
+        self.zoom_floor = max(1.0, self.zoom_floor)
+
+        # zoom target changes occasionally to keep motion musical.
+        self.target_zoom = self.zoom_floor
+
         self.next_retarget = 0
-        self.rot_dir = 1 if rng.random()>0.5 else -1
+
+        # start with a gentle random heading for straight-line glide.
+        theta = rng.uniform(0, math.tau)
+        self.pan_speed_px = max(
+            self.args.pan_speed_min,
+            min(self.frame_w, self.frame_h) * self.args.speed * self.args.pan_speed_mult,
+        )
+        self.vel[0] = math.cos(theta) * self.pan_speed_px
+        self.vel[1] = math.sin(theta) * self.pan_speed_px
+
+        # start already zoomed so panning is visible immediately
+        self.state[2] = self.zoom_floor
+
+        # continuous slow rotation + bounce-induced kick
+        self.base_rot_vel = math.radians(self.args.rotation_speed) * (1 if rng.random() > 0.5 else -1)
+        self.rot_vel = self.base_rot_vel
+        self.last_bounce = "-"
+
+    def _pan_bounds(self):
+        z = max(1.0, float(self.state[2]))
+
+        # Rotation-aware source footprint of the output viewport.
+        # This makes bounce logic match visible corners when rotating.
+        c = abs(math.cos(float(self.state[3])))
+        s = abs(math.sin(float(self.state[3])))
+        half_w_src = (c * self.frame_w * 0.5 + s * self.frame_h * 0.5) / z
+        half_h_src = (s * self.frame_w * 0.5 + c * self.frame_h * 0.5) / z
+
+        max_tx = max(0.0, (self.frame_w * 0.5 - half_w_src) * self.pan_limit)
+        max_ty = max(0.0, (self.frame_h * 0.5 - half_h_src) * self.pan_limit)
+
+        # Optional safety cushion so bounce occurs "near" edge, not exactly on edge.
+        cushion = max(0.0, 1.0 - self.edge_margin)
+        max_tx = max(0.0, max_tx * cushion)
+        max_ty = max(0.0, max_ty * cushion)
+        return max_tx, max_ty
 
     def _retarget(self):
-        spread = self.args.pan_bias
-        self.target[0] = self.rng.uniform(-spread,spread)
-        self.target[1] = self.rng.uniform(-spread,spread)
-        self.target[2] = self.rng.uniform(1.0,self.args.zoom_max)
+        self.target_zoom = self.rng.uniform(self.zoom_floor, self.args.zoom_max)
+
+    @staticmethod
+    def _reflect_1d(pos, vel, bound, dt):
+        """Reflect 1D motion off [-bound, +bound] with overshoot handling."""
+        if bound <= 1e-9:
+            return 0.0, vel, False
+
+        x = pos + vel * dt
+        bounced = False
+
+        # Handle rare large-step overshoot by reflecting until inside bounds.
+        # (Typically 0 or 1 iterations at video frame rates.)
+        for _ in range(4):
+            if x > bound:
+                x = 2.0 * bound - x
+                vel = -abs(vel)
+                bounced = True
+                continue
+            if x < -bound:
+                x = -2.0 * bound - x
+                vel = abs(vel)
+                bounced = True
+                continue
+            break
+
+        x = float(np.clip(x, -bound, bound))
+        return x, vel, bounced
+
+    @staticmethod
+    def _advance_billiard_2d(x, y, vx, vy, max_tx, max_ty, dt):
+        """Advance one step with exact axis-aligned billiard reflections.
+
+        Uses time-of-impact against vertical/horizontal walls so reflection angle
+        matches incidence angle (specular reflection).
+        """
+        if max_tx <= 1e-12:
+            x = 0.0
+            vx = abs(vx)
+            vx = -vx
+        if max_ty <= 1e-12:
+            y = 0.0
+            vy = abs(vy)
+            vy = -vy
+
+        rem = float(dt)
+        bounced_x = False
+        bounced_y = False
+
+        for _ in range(6):
+            if rem <= 1e-10:
+                break
+
+            tx_hit = math.inf
+            ty_hit = math.inf
+
+            if abs(vx) > 1e-12 and max_tx > 1e-12:
+                tx_hit = ((max_tx - x) / vx) if vx > 0 else ((-max_tx - x) / vx)
+                if tx_hit < -1e-12:
+                    tx_hit = math.inf
+
+            if abs(vy) > 1e-12 and max_ty > 1e-12:
+                ty_hit = ((max_ty - y) / vy) if vy > 0 else ((-max_ty - y) / vy)
+                if ty_hit < -1e-12:
+                    ty_hit = math.inf
+
+            t_hit = min(tx_hit, ty_hit)
+
+            # No collision in remaining interval
+            if not np.isfinite(t_hit) or t_hit > rem:
+                x += vx * rem
+                y += vy * rem
+                rem = 0.0
+                break
+
+            # Move to impact point
+            t_move = max(0.0, t_hit)
+            x += vx * t_move
+            y += vy * t_move
+
+            hit_x = abs(t_hit - tx_hit) <= 1e-9
+            hit_y = abs(t_hit - ty_hit) <= 1e-9
+
+            if hit_x:
+                vx = -vx
+                bounced_x = True
+                x = float(np.clip(x, -max_tx, max_tx))
+            if hit_y:
+                vy = -vy
+                bounced_y = True
+                y = float(np.clip(y, -max_ty, max_ty))
+
+            rem -= t_move
+
+        x = float(np.clip(x, -max_tx, max_tx))
+        y = float(np.clip(y, -max_ty, max_ty))
+        return x, y, vx, vy, bounced_x, bounced_y
 
     def step(self, dt, frame_idx, audio_level=0.0):
-        # periodic retarget
+        # periodic zoom retarget
         if frame_idx >= self.next_retarget:
             self._retarget()
             self.next_retarget = frame_idx + int(self.args.retarget_sec*self.fps)
 
-        # smooth drift
-        drift = self.noise.step(dt, self.args.drift_speed)
-        self.vel[0] += drift[0]*self.args.drift_strength*dt
-        self.vel[1] += drift[1]*self.args.drift_strength*dt
-
-        # target chase
-        accel = (self.target - self.state)*(self.args.speed*0.35)
-        self.vel += accel*dt
-
-        # inertia
-        self.vel *= self.args.inertia
-        self.state += self.vel*dt
-
-        # soft bounds
-        for i in (0,1):
-            if self.state[i]>1:
-                self.vel[i]-=(self.state[i]-1)*self.args.edge_softness
-            if self.state[i]<-1:
-                self.vel[i]-=(self.state[i]+1)*self.args.edge_softness
-
-        # rotation
-        if self.args.rotation_mode=="continuous":
-            self.state[3]+=math.radians(self.args.rotation_speed)*dt*self.rot_dir
+        # zoom first, then compute this frame's pan bounds from original input size.
+        zoom_chase = max(0.05, self.args.speed * self.args.zoom_chase)
+        self.vel[2] += (self.target_zoom - self.state[2]) * zoom_chase * dt
+        self.vel[2] *= self.args.inertia
+        self.state[2] += self.vel[2] * dt
+        self.state[2] = float(np.clip(self.state[2], self.zoom_floor, self.args.zoom_max))
 
         # audio zoom react
         if self.args.beat_react:
-            self.state[2]*=1+audio_level*self.args.beat_strength*0.05
+            self.state[2] *= 1 + audio_level * self.args.beat_strength * 0.05
+            self.state[2] = float(np.clip(self.state[2], self.zoom_floor, self.args.zoom_max))
+
+        # maintain nearly constant glide speed (no steering until edge hit)
+        speed_now = float(np.linalg.norm(self.vel[:2]))
+        if speed_now < 1e-6:
+            theta = self.rng.uniform(0, math.tau)
+            self.vel[0] = math.cos(theta) * self.pan_speed_px
+            self.vel[1] = math.sin(theta) * self.pan_speed_px
+        else:
+            self.vel[0] *= self.pan_speed_px / speed_now
+            self.vel[1] *= self.pan_speed_px / speed_now
+
+        # reflect only when movement crosses current source-frame bounds.
+        # Use substeps so bounce appears at/near the visual edge (less jumpy).
+        max_tx, max_ty = self._pan_bounds()
+        bounced = False
+        bounced_x = False
+        bounced_y = False
+
+        # keep inside bounds first without changing direction
+        self.state[0] = float(np.clip(self.state[0], -max_tx, max_tx))
+        self.state[1] = float(np.clip(self.state[1], -max_ty, max_ty))
+
+        old_vx = float(self.vel[0])
+        old_vy = float(self.vel[1])
+
+        n_sub = max(1, int(self.args.pan_substeps))
+        dt_sub = dt / n_sub
+        for _ in range(n_sub):
+            self.state[0], self.state[1], self.vel[0], self.vel[1], bx, by = self._advance_billiard_2d(
+                float(self.state[0]),
+                float(self.state[1]),
+                float(self.vel[0]),
+                float(self.vel[1]),
+                float(max_tx),
+                float(max_ty),
+                float(dt_sub),
+            )
+            if bx or by:
+                bounced = True
+                bounced_x = bounced_x or bx
+                bounced_y = bounced_y or by
+
+        if bounced_x and bounced_y:
+            bounce_axis = "xy"
+        elif bounced_x:
+            bounce_axis = "x"
+        elif bounced_y:
+            bounce_axis = "y"
+        else:
+            bounce_axis = "-"
+        self.last_bounce = bounce_axis
+
+        # continuous slow rotation; bounce can alter angular velocity
+        if self.args.rotation_mode == "continuous":
+            if bounced:
+                if self.args.bounce_style == "physical":
+                    # Deterministic "physical" kick from actual heading change.
+                    h0 = math.atan2(old_vy, old_vx)
+                    h1 = math.atan2(float(self.vel[1]), float(self.vel[0]))
+                    dtheta = (h1 - h0 + math.pi) % (2 * math.pi) - math.pi
+                    self.rot_vel += dtheta * self.args.bounce_rot_kick * 0.35
+                else:
+                    # DVD mode: still specular translation, but add a gentle,
+                    # deterministic spin response to wall contact.
+                    kick_mag = math.radians(self.args.rotation_speed) * self.args.bounce_rot_kick * 0.30
+                    if bounce_axis == "x":
+                        # Vertical wall hit: couple spin to vertical travel direction.
+                        self.rot_vel += math.copysign(kick_mag, float(self.vel[1]) if abs(self.vel[1]) > 1e-9 else 1.0)
+                    elif bounce_axis == "y":
+                        # Horizontal wall hit: opposite coupling from horizontal travel.
+                        self.rot_vel -= math.copysign(kick_mag, float(self.vel[0]) if abs(self.vel[0]) > 1e-9 else 1.0)
+                    else:  # corner hit
+                        self.rot_vel = -self.rot_vel
+
+            # ease back to base spin so it's always slow/continuous
+            self.rot_vel += (self.base_rot_vel - self.rot_vel) * (1.0 - math.exp(-self.args.rot_return * dt))
+            self.state[3] += self.rot_vel * dt
+        elif self.args.rotation_mode == "off":
+            pass
 
         return self.state
 
@@ -248,7 +452,21 @@ def build_output_name(input_path,args):
         f"spd{args.speed:.2f}",
         f"z{args.zoom_max:g}",
         f"dr{args.drift_strength:.2f}",
+        f"pm{args.pan_max:.2f}",
+        f"em{args.edge_margin:.2f}",
+        f"psm{args.pan_speed_mult:.2f}",
+        f"psn{args.pan_speed_min:g}",
+        f"pss{args.pan_substeps:g}",
+        f"zfr{args.zoom_floor_ratio:.2f}",
+        f"zfm{args.zoom_floor_min:g}",
+        f"zc{args.zoom_chase:.2f}",
+        f"rr{args.rot_return:.2f}",
+        f"rk{args.bounce_rot_kick:.2f}",
+        f"bs{args.bounce_style}",
+        f"rs{args.rotation_speed:.2f}",
     ]
+    if args.beat_react: parts.append("br1")
+    if args.bass_react: parts.append("ba1")
     if args.start>0: parts.append(f"s{args.start:g}")
     if args.duration>0: parts.append(f"d{args.duration:g}")
     return "_".join(parts)+".mp4"
@@ -263,7 +481,28 @@ def main():
 
     ap.add_argument("--speed",type=float,default=0.18)
     ap.add_argument("--zoom-max",type=float,default=10.0)
-    ap.add_argument("--pan-max",type=float,default=0.15)
+    ap.add_argument("--pan-max",type=float,default=1.0)
+    ap.add_argument("--edge-margin",type=float,default=0.0,
+                    help="Early-bounce margin as fraction of one-sided pan range; 0.0 = true edge")
+    ap.add_argument("--pan-speed-mult",type=float,default=0.25,
+                    help="Pan speed scale: px/s = min(w,h) * speed * pan_speed_mult")
+    ap.add_argument("--pan-speed-min",type=float,default=8.0,
+                    help="Minimum pan speed in px/s")
+    ap.add_argument("--pan-substeps",type=int,default=4,
+                    help="Pan integration substeps per frame (higher = cleaner edge bounces)")
+    ap.add_argument("--zoom-floor-ratio",type=float,default=0.22,
+                    help="Minimum zoom floor as ratio of zoom-max to allow panning")
+    ap.add_argument("--zoom-floor-min",type=float,default=1.25,
+                    help="Absolute minimum zoom floor")
+    ap.add_argument("--zoom-chase",type=float,default=1.8,
+                    help="Zoom chase response rate")
+    ap.add_argument("--bounce-rot-kick",type=float,default=0.9,
+                    help="Rotation velocity kick strength on edge bounce")
+    ap.add_argument("--bounce-style",default="dvd",
+                    choices=["dvd","physical"],
+                    help="dvd = strict screensaver reflections; physical = add heading-based rotation kick")
+    ap.add_argument("--rot-return",type=float,default=2.2,
+                    help="How quickly rotation velocity returns to base spin")
 
     ap.add_argument("--rotation-mode",default="continuous",
                     choices=["continuous","oscillate","off"])
@@ -287,6 +526,8 @@ def main():
     ap.add_argument("--hud",action="store_true")
     ap.add_argument("--hud-scale",type=float,default=1.0)
     ap.add_argument("--hud-alpha",type=float,default=0.6)
+    ap.add_argument("--debug-cam",action="store_true",
+                    help="Print script path and camera pan/zoom diagnostics")
 
     ap.add_argument("--start",type=float,default=0.0)
     ap.add_argument("--duration",type=float,default=0.0)
@@ -299,6 +540,10 @@ def main():
     ap.add_argument("--out-dir",default=str(default_videos_dir()))
 
     args=ap.parse_args()
+
+    if args.debug_cam:
+        print(f"[voidstar] script={Path(__file__).resolve()}")
+        print(f"[voidstar] cwd={Path.cwd()}")
 
     input_path=Path(args.input).resolve()
     out_dir=Path(args.out_dir)
@@ -325,7 +570,7 @@ def main():
         frames_to_process=-1
 
     rng=np.random.default_rng(int(time.time()))
-    cam=CinematicCam(rng,args,fps)
+    cam=CinematicCam(rng,args,fps,w,h)
 
     audio=AudioAnalyzer(input_path,fps,args.start,args.duration) if args.beat_react else None
 
@@ -348,7 +593,6 @@ def main():
 
     enc=subprocess.Popen(ffmpeg_cmd,stdin=subprocess.PIPE)
 
-    pan_px=min(w,h)*args.pan_max
     t0=time.time()
     processed=0
 
@@ -362,22 +606,47 @@ def main():
         audio_level=audio.read_level() if audio else 0.0
         x,y,z,r=cam.step(1.0/fps,processed,audio_level)
 
-        tx=x*pan_px
-        ty=y*pan_px
+        tx = float(x)
+        ty = float(y)
 
-        M=cv2.getRotationMatrix2D((w/2,h/2),math.degrees(r),max(1.0,z))
-        M[0,2]+=tx
-        M[1,2]+=ty
+        # Camera model (dst -> src):
+        # src = center + [tx, ty] + R(-r) * (dst-center) / z
+        zc = max(1.0, float(z))
+        cr = math.cos(float(r))
+        sr = math.sin(float(r))
+        cx = w * 0.5
+        cy = h * 0.5
+
+        a00 = cr / zc
+        a01 = sr / zc
+        a10 = -sr / zc
+        a11 = cr / zc
+        m02 = cx + tx - (a00 * cx + a01 * cy)
+        m12 = cy + ty - (a10 * cx + a11 * cy)
+
+        M = np.array([[a00, a01, m02],
+                  [a10, a11, m12]], dtype=np.float32)
 
         warped=cv2.warpAffine(frame,M,(w,h),
-                               flags=cv2.INTER_LINEAR,
-                               borderMode=cv2.BORDER_REFLECT101)
+                       flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
+                       borderMode=cv2.BORDER_REFLECT101)
 
         if args.hud:
             elapsed=time.time()-t0
             fps_proc=processed/max(elapsed,1e-6)
             draw_hud(warped,(x,y,z,r),audio_level,fps_proc,
                      processed,args.hud_scale,args.hud_alpha)
+
+        if args.debug_cam and processed % max(1, int(fps)) == 0:
+            # report actual bounds from camera logic (rotation-safe when enabled)
+            max_tx, max_ty = cam._pan_bounds()
+            z_now = max(1.0, float(z))
+            vmag = float(np.linalg.norm(cam.vel[:2]))
+            print(
+                f"[voidstar][cam] f={processed} pan=({x:+.1f},{y:+.1f}) "
+                f"bounds=({max_tx:.1f},{max_ty:.1f}) z={z_now:.2f} "
+                f"v={vmag:.1f}px/s bounce={cam.last_bounce}"
+            )
 
         enc.stdin.write(warped.tobytes())
         processed+=1
