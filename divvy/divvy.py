@@ -281,6 +281,32 @@ def probe_duration_and_audio(path: Path) -> tuple[float, bool]:
 	return dur, has_audio
 
 
+def sanitize_tag(text: str) -> str:
+	t = re.sub(r"[^A-Za-z0-9._-]+", "-", text.strip())
+	t = re.sub(r"-+", "-", t).strip("-._")
+	return t or "x"
+
+
+def float_tag(value: float, digits: int = 3) -> str:
+	s = f"{value:.{digits}f}".rstrip("0").rstrip(".")
+	if not s:
+		s = "0"
+	return s.replace(".", "p")
+
+
+def build_recombine_default_filename(segment_dir: Path, args: argparse.Namespace) -> str:
+	order_tag = "rev" if args.reverse_order else "fwd"
+	glitch_sec_tag = float_tag(max(0.0, args.glitch_seconds), digits=3)
+	glitch_style_tag = sanitize_tag(args.glitch_style)
+	loop_tag = "loop1" if args.loop_perfect else "loop0"
+	return (
+		f"{segment_dir.name}__recombined"
+		f"__ord-{order_tag}"
+		f"__glitch-{glitch_style_tag}-{glitch_sec_tag}s"
+		f"__{loop_tag}.mp4"
+	)
+
+
 def add_split_args(ap: argparse.ArgumentParser) -> None:
 	ap.add_argument("input", help="Input video path")
 	ap.add_argument(
@@ -377,6 +403,11 @@ def add_split_args(ap: argparse.ArgumentParser) -> None:
 
 def add_recombine_args(ap: argparse.ArgumentParser) -> None:
 	ap.add_argument("segment_dir", help="Directory containing divvy segment files")
+	ap.add_argument(
+		"--out-dir",
+		default=None,
+		help="Output directory for recombined file (used when --output is not set)",
+	)
 	ap.add_argument(
 		"--output",
 		default=None,
@@ -652,7 +683,21 @@ def run_recombine(args: argparse.Namespace) -> None:
 	if not segment_dir.exists() or not segment_dir.is_dir():
 		raise FileNotFoundError(f"Segment directory not found: {segment_dir}")
 
+	if args.output:
+		out_path = Path(args.output).expanduser().resolve()
+	elif args.out_dir:
+		out_dir = Path(args.out_dir).expanduser().resolve()
+		out_path = out_dir / build_recombine_default_filename(segment_dir, args)
+	else:
+		out_path = segment_dir / build_recombine_default_filename(segment_dir, args)
+	out_path.parent.mkdir(parents=True, exist_ok=True)
+
 	segment_files = list_segment_files(segment_dir)
+	# Ignore previous recombined renders and never allow the output file to be reused as an input.
+	segment_files = [
+		p for p in segment_files
+		if p.resolve() != out_path and not p.stem.endswith("__recombined")
+	]
 	if len(segment_files) < 1:
 		raise RuntimeError(f"No segment video files found in: {segment_dir}")
 	if len(segment_files) < 2 and args.glitch_seconds > 0:
@@ -660,12 +705,6 @@ def run_recombine(args: argparse.Namespace) -> None:
 
 	if args.reverse_order:
 		segment_files = list(reversed(segment_files))
-
-	if args.output:
-		out_path = Path(args.output).expanduser().resolve()
-	else:
-		out_path = segment_dir / f"{segment_dir.name}__recombined.mp4"
-	out_path.parent.mkdir(parents=True, exist_ok=True)
 
 	durations: list[float] = []
 	has_audio_all = True
