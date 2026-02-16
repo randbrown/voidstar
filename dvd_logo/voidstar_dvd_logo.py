@@ -442,6 +442,7 @@ def main() -> None:
     ap.add_argument("--audio-glow-blur", type=float, default=8.0, help="Glow blur sigma in pixels.")
     ap.add_argument("--voidstar-energy", type=float, default=1.0, help="Extra VoidStar FX intensity [0..3].")
     ap.add_argument("--voidstar-hue-rate", type=float, default=22.0, help="Hue cycling speed in cycles/sec for VoidStar FX.")
+    ap.add_argument("--voidstar-colorize", type=bool_flag, default=True, help="Enable reactive hue colorization for VoidStar overlays. Set false to keep overlays neutral/white.")
     ap.add_argument("--voidstar-chroma", type=float, default=3.0, help="Chromatic split amount in pixels for VoidStar FX.")
     ap.add_argument("--voidstar-jitter", type=float, default=1.2, help="Jitter amount in pixels for VoidStar FX.")
     ap.add_argument("--voidstar-bloom", type=float, default=0.55, help="Bloom strength [0..2] for VoidStar FX.")
@@ -630,6 +631,7 @@ def main() -> None:
     reactive_glow_strength = clamp(float(args.audio_reactive_glow), 0.0, 2.0)
     reactive_scale_strength = clamp(float(args.audio_reactive_scale), 0.0, 0.5)
     voidstar_energy = clamp(float(args.voidstar_energy), 0.0, 3.0)
+    voidstar_colorize = bool(args.voidstar_colorize)
     voidstar_strobe = clamp(float(args.voidstar_strobe), 0.0, 2.0)
     voidstar_glitch_hit = clamp(float(args.voidstar_glitch_hit), 0.0, 2.0)
     point_track_enabled = bool(args.local_point_track)
@@ -950,24 +952,29 @@ def main() -> None:
             tint_b = hue_to_bgr_tint(hue + 120.0)
 
             if chroma_px > 0:
-                overlay_tinted_rgba(
-                    frame,
-                    logo_bgr,
-                    logo_alpha,
-                    draw_x - chroma_px + jx,
-                    draw_y + jy,
-                    np.array([1.0, 0.40, 0.40], dtype=np.float32) * tint_a,
-                    opacity=min(1.0, 0.22 * eng),
-                )
-                overlay_tinted_rgba(
-                    frame,
-                    logo_bgr,
-                    logo_alpha,
-                    draw_x + chroma_px + jx,
-                    draw_y + jy,
-                    np.array([0.40, 0.70, 1.0], dtype=np.float32) * tint_b,
-                    opacity=min(1.0, 0.22 * eng),
-                )
+                if voidstar_colorize:
+                    overlay_tinted_rgba(
+                        frame,
+                        logo_bgr,
+                        logo_alpha,
+                        draw_x - chroma_px + jx,
+                        draw_y + jy,
+                        np.array([1.0, 0.40, 0.40], dtype=np.float32) * tint_a,
+                        opacity=min(1.0, 0.22 * eng),
+                    )
+                    overlay_tinted_rgba(
+                        frame,
+                        logo_bgr,
+                        logo_alpha,
+                        draw_x + chroma_px + jx,
+                        draw_y + jy,
+                        np.array([0.40, 0.70, 1.0], dtype=np.float32) * tint_b,
+                        opacity=min(1.0, 0.22 * eng),
+                    )
+                else:
+                    neutral_opacity = min(1.0, 0.18 * eng)
+                    overlay_rgba(frame, logo_bgr, logo_alpha, draw_x - chroma_px + jx, draw_y + jy, neutral_opacity)
+                    overlay_rgba(frame, logo_bgr, logo_alpha, draw_x + chroma_px + jx, draw_y + jy, neutral_opacity)
 
             bloom_alpha = cv2.GaussianBlur(
                 logo_alpha,
@@ -979,7 +986,10 @@ def main() -> None:
             if peak > 1e-8:
                 bloom_alpha = np.clip(bloom_alpha / peak, 0.0, 1.0)
                 bloom_alpha = np.clip(bloom_alpha * (float(args.voidstar_bloom) * 0.30 * eng), 0.0, 1.0)
-                overlay_tinted_rgba(frame, logo_bgr, bloom_alpha, draw_x + jx, draw_y + jy, tint_a, 1.0)
+                if voidstar_colorize:
+                    overlay_tinted_rgba(frame, logo_bgr, bloom_alpha, draw_x + jx, draw_y + jy, tint_a, 1.0)
+                else:
+                    overlay_rgba(frame, logo_bgr, bloom_alpha, draw_x + jx, draw_y + jy, 1.0)
 
         overlay_rgba(frame, logo_bgr, logo_alpha, draw_x, draw_y, overlay_opacity)
 
