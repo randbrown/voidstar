@@ -430,6 +430,12 @@ def add_recombine_args(ap: argparse.ArgumentParser) -> None:
 		help="ffmpeg xfade transition style for glitch effect (e.g. pixelize, hblur, fadeblack)",
 	)
 	ap.add_argument(
+		"--intro-glitch-seconds",
+		type=float,
+		default=0.06,
+		help="Small start-only intro transition duration in seconds (0 to disable)",
+	)
+	ap.add_argument(
 		"--loop-perfect",
 		action="store_true",
 		default=True,
@@ -716,6 +722,7 @@ def run_recombine(args: argparse.Namespace) -> None:
 		has_audio_all = has_audio_all and has_audio
 
 	glitch_dur = max(0.0, args.glitch_seconds)
+	intro_glitch_dur = max(0.0, min(args.intro_glitch_seconds, 0.50))
 	min_dur = min(durations)
 	if glitch_dur > 0 and glitch_dur >= (min_dur * 0.95):
 		raise ValueError(f"--glitch-seconds too large for shortest segment ({min_dur:.6f}s)")
@@ -734,6 +741,11 @@ def run_recombine(args: argparse.Namespace) -> None:
 	else:
 		transition_count = 0
 		est_output_duration = total_input
+
+	if est_output_duration > 0:
+		intro_glitch_dur = min(intro_glitch_dur, est_output_duration * 0.25)
+	if intro_glitch_dur < 0.001:
+		intro_glitch_dur = 0.0
 
 	enc = choose_video_encoder(args.video_encoder)
 	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
@@ -774,16 +786,37 @@ def run_recombine(args: argparse.Namespace) -> None:
 		split_offset = glitch_dur * 0.5
 		cycle_duration = max(1e-6, est_output_duration)
 		filter_parts.append(
-			f"{v_cur}trim=start={split_offset:.6f}:duration={cycle_duration:.6f},setpts=PTS-STARTPTS[vout]"
+			f"{v_cur}trim=start={split_offset:.6f}:duration={cycle_duration:.6f},setpts=PTS-STARTPTS[vbase]"
 		)
 		if has_audio_all:
 			filter_parts.append(
-				f"{a_cur}atrim=start={split_offset:.6f}:duration={cycle_duration:.6f},asetpts=PTS-STARTPTS[aout]"
+				f"{a_cur}atrim=start={split_offset:.6f}:duration={cycle_duration:.6f},asetpts=PTS-STARTPTS[abase]"
 			)
 	else:
-		filter_parts.append(f"{v_cur}setpts=PTS-STARTPTS[vout]")
+		filter_parts.append(f"{v_cur}setpts=PTS-STARTPTS[vbase]")
 		if has_audio_all:
-			filter_parts.append(f"{a_cur}asetpts=PTS-STARTPTS[aout]")
+			filter_parts.append(f"{a_cur}asetpts=PTS-STARTPTS[abase]")
+
+	if intro_glitch_dur > 0:
+		filter_parts.append("[vbase]split=2[vintro_src][vintro_main]")
+		filter_parts.append(
+			f"[vintro_src]trim=duration=0.001,tpad=stop_mode=clone:stop_duration={intro_glitch_dur:.6f},setpts=PTS-STARTPTS[vintro_hold]"
+		)
+		filter_parts.append(
+			f"[vintro_hold][vintro_main]xfade=transition={args.glitch_style}:duration={intro_glitch_dur:.6f}:offset=0[vout]"
+		)
+	else:
+		filter_parts.append("[vbase]setpts=PTS-STARTPTS[vout]")
+
+	if has_audio_all:
+		filter_parts.append(
+			"[abase]"
+			"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+			"aresample=48000:resampler=soxr:precision=28,"
+			"alimiter=limit=0.89:attack=5:release=50,"
+			"aresample=async=1:first_pts=0,"
+			"asetpts=PTS-STARTPTS[aout]"
+		)
 
 	filter_complex = ";".join(filter_parts)
 
@@ -811,6 +844,9 @@ def run_recombine(args: argparse.Namespace) -> None:
 	elif enc in {"libx264", "libx265"}:
 		cmd += ["-preset", args.preset, "-crf", str(args.crf)]
 
+	if enc in {"h264_nvenc", "libx264"}:
+		cmd += ["-pix_fmt", "yuv420p", "-profile:v", "high", "-level:v", "4.1"]
+
 	if has_audio_all:
 		cmd += ["-c:a", args.audio_codec, "-b:a", args.audio_bitrate]
 
@@ -820,8 +856,13 @@ def run_recombine(args: argparse.Namespace) -> None:
 	print(f"[voidstar] output={out_path}")
 	print(f"[voidstar] segment_count={len(segment_files)} reverse_order={'on' if args.reverse_order else 'off'}")
 	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.6f}")
+	print(f"[voidstar] intro_glitch_seconds={intro_glitch_dur:.6f}")
 	print(f"[voidstar] loop_perfect={'on' if loop_perfect else 'off'}")
 	print(f"[voidstar] encoder={enc} audio={'on' if has_audio_all else 'off'}")
+	if has_audio_all:
+		print("[voidstar] audio_stabilize=soxr+limiter+aresample_async1")
+	if enc in {"h264_nvenc", "libx264"}:
+		print("[voidstar] video_compat=h264_yuv420p_high_4.1")
 	print(f"[voidstar] est_output_duration={est_output_duration:.6f}s")
 
 	started = time.time()
