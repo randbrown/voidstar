@@ -490,6 +490,12 @@ def add_recombine_args(ap: argparse.ArgumentParser) -> None:
 		default="320k",
 		help="Audio bitrate",
 	)
+	ap.add_argument(
+		"--target-total-seconds",
+		type=float,
+		default=0.0,
+		help="Target max recombined duration in seconds; uniformly trims the start of each source segment (0 disables)",
+	)
 
 
 def run_split(args: argparse.Namespace) -> None:
@@ -728,15 +734,41 @@ def run_recombine(args: argparse.Namespace) -> None:
 		raise ValueError(f"--glitch-seconds too large for shortest segment ({min_dur:.6f}s)")
 
 	loop_perfect = bool(args.loop_perfect and len(segment_files) >= 2 and glitch_dur > 0)
+	segment_count = len(segment_files)
+	transition_count = segment_count if (glitch_dur > 0 and segment_count >= 2 and loop_perfect) else (segment_count - 1 if glitch_dur > 0 and segment_count >= 2 else 0)
+
+	target_total = max(0.0, float(args.target_total_seconds))
+	trim_each = 0.0
+	if target_total > 0 and segment_count > 0:
+		base_total = sum(durations)
+		base_est_output = max(0.0, base_total - (transition_count * glitch_dur))
+		if base_est_output > target_total:
+			min_keep = 0.010
+			if glitch_dur > 0 and segment_count >= 2:
+				min_keep = max(min_keep, (glitch_dur / 0.95) + 0.001)
+			max_trim_each = max(0.0, min_dur - min_keep)
+
+			trim_each = max(0.0, (base_est_output - target_total) / max(1, segment_count))
+			if trim_each > max_trim_each:
+				min_possible_output = max(0.0, (base_total - (max_trim_each * segment_count)) - (transition_count * glitch_dur))
+				raise ValueError(
+					"--target-total-seconds cannot be reached with uniform per-segment start trim "
+					f"while preserving transition constraints. min_possible={min_possible_output:.6f}s"
+				)
+
+	used_durations = [max(0.001, d - trim_each) for d in durations]
+	min_used_dur = min(used_durations)
+	if glitch_dur > 0 and glitch_dur >= (min_used_dur * 0.95):
+		raise ValueError(f"--target-total-seconds trim leaves segments too short for glitch ({min_used_dur:.6f}s)")
+
 	input_files = list(segment_files)
-	input_durations = list(durations)
+	input_durations = list(used_durations)
 	if loop_perfect:
 		input_files.append(segment_files[0])
-		input_durations.append(durations[0])
+		input_durations.append(used_durations[0])
 
-	total_input = sum(durations)
+	total_input = sum(used_durations)
 	if glitch_dur > 0 and len(segment_files) >= 2:
-		transition_count = len(segment_files) if loop_perfect else (len(segment_files) - 1)
 		est_output_duration = max(0.0, total_input - (transition_count * glitch_dur))
 	else:
 		transition_count = 0
@@ -751,32 +783,53 @@ def run_recombine(args: argparse.Namespace) -> None:
 	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
 
 	filter_parts: list[str] = []
+	video_inputs: list[str] = []
+	audio_inputs: list[str] = []
+	for i in range(len(input_files)):
+		v_lab = f"[v{i}]"
+		if trim_each > 0:
+			filter_parts.append(
+				f"[{i}:v]trim=start={trim_each:.6f},setpts=PTS-STARTPTS{v_lab}"
+			)
+		else:
+			filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS{v_lab}")
+		video_inputs.append(v_lab)
+
+		if has_audio_all:
+			a_lab = f"[a{i}]"
+			if trim_each > 0:
+				filter_parts.append(
+					f"[{i}:a]atrim=start={trim_each:.6f},asetpts=PTS-STARTPTS{a_lab}"
+				)
+			else:
+				filter_parts.append(f"[{i}:a]asetpts=PTS-STARTPTS{a_lab}")
+			audio_inputs.append(a_lab)
 
 	if glitch_dur > 0 and len(input_files) >= 2:
-		v_cur = "[0:v]"
-		a_cur = "[0:a]" if has_audio_all else ""
+		v_cur = video_inputs[0]
+		a_cur = audio_inputs[0] if has_audio_all else ""
 		offset = max(0.0, input_durations[0] - glitch_dur)
 		for i in range(1, len(input_files)):
 			v_out = f"[vx{i}]"
 			filter_parts.append(
-				f"{v_cur}[{i}:v]xfade=transition={args.glitch_style}:duration={glitch_dur:.6f}:offset={offset:.6f}{v_out}"
+				f"{v_cur}{video_inputs[i]}xfade=transition={args.glitch_style}:duration={glitch_dur:.6f}:offset={offset:.6f}{v_out}"
 			)
 			v_cur = v_out
 
 			if has_audio_all:
 				a_out = f"[ax{i}]"
 				filter_parts.append(
-					f"{a_cur}[{i}:a]acrossfade=d={glitch_dur:.6f}:c1=tri:c2=tri{a_out}"
+					f"{a_cur}{audio_inputs[i]}acrossfade=d={glitch_dur:.6f}:c1=tri:c2=tri{a_out}"
 				)
 				a_cur = a_out
 
 			offset += max(0.0, input_durations[i] - glitch_dur)
 	else:
-		v_inputs = "".join(f"[{i}:v]" for i in range(len(input_files)))
+		v_inputs = "".join(video_inputs)
 		filter_parts.append(f"{v_inputs}concat=n={len(input_files)}:v=1:a=0[vx0]")
 		v_cur = "[vx0]"
 		if has_audio_all:
-			a_inputs = "".join(f"[{i}:a]" for i in range(len(input_files)))
+			a_inputs = "".join(audio_inputs)
 			filter_parts.append(f"{a_inputs}concat=n={len(input_files)}:v=0:a=1[ax0]")
 			a_cur = "[ax0]"
 		else:
@@ -857,6 +910,7 @@ def run_recombine(args: argparse.Namespace) -> None:
 	print(f"[voidstar] segment_count={len(segment_files)} reverse_order={'on' if args.reverse_order else 'off'}")
 	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.6f}")
 	print(f"[voidstar] intro_glitch_seconds={intro_glitch_dur:.6f}")
+	print(f"[voidstar] target_total_seconds={target_total:.6f} trim_each_start={trim_each:.6f}")
 	print(f"[voidstar] loop_perfect={'on' if loop_perfect else 'off'}")
 	print(f"[voidstar] encoder={enc} audio={'on' if has_audio_all else 'off'}")
 	if has_audio_all:
