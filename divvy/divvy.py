@@ -348,6 +348,62 @@ def overlap_fraction(start: float, duration: float, ranges: list[tuple[float, fl
 	return min(1.0, max(0.0, overlap / max(1e-9, duration)))
 
 
+def build_recursive_ranges(start: float, end: float, min_segment_seconds: float) -> list[tuple[float, float]]:
+	ranges = [(start, end)]
+	result: list[tuple[float, float]] = []
+	limit = 4096
+	while ranges:
+		s, e = ranges.pop(0)
+		d = max(0.0, e - s)
+		if d > max(1e-6, min_segment_seconds) and (len(ranges) + len(result)) < limit:
+			m = s + (d * 0.5)
+			ranges.append((s, m))
+			ranges.append((m, e))
+		else:
+			if d > 0.001:
+				result.append((s, e))
+	return result
+
+
+def align_clip_to_grid(
+	seg_start: float,
+	seg_end: float,
+	desired_duration: float,
+	anchor_mode: str,
+	ref_time: float,
+	grid_step: float,
+) -> tuple[float, float] | None:
+	if grid_step <= 0:
+		return None
+	k_lo = int(math.ceil(((seg_start - ref_time) / grid_step) - 1e-9))
+	k_hi = int(math.floor(((seg_end - ref_time) / grid_step) + 1e-9))
+	available_steps = k_hi - k_lo
+	if available_steps < 1:
+		return None
+
+	desired_steps = max(1, int(math.floor((desired_duration / grid_step) + 1e-9)))
+	desired_steps = min(desired_steps, available_steps)
+	if desired_steps < 1:
+		return None
+
+	if anchor_mode == "end":
+		end_idx = k_hi
+		start_idx = max(k_lo, end_idx - desired_steps)
+	else:
+		start_idx = k_lo
+		end_idx = min(k_hi, start_idx + desired_steps)
+
+	if end_idx <= start_idx:
+		return None
+
+	start = ref_time + (start_idx * grid_step)
+	end = ref_time + (end_idx * grid_step)
+	dur = end - start
+	if dur <= 0.001:
+		return None
+	return start, dur
+
+
 def ffconcat_quote(path: Path) -> str:
 	return str(path).replace("'", r"'\\''")
 
@@ -602,9 +658,15 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 	)
 	ap.add_argument(
 		"--sampling-mode",
-		choices=["minute-averages", "n-averages"],
+		choices=["minute-averages", "n-averages", "recursive-halves"],
 		default="minute-averages",
 		help="Sampling strategy for selecting source snippets",
+	)
+	ap.add_argument(
+		"--sample-anchor",
+		choices=["start", "end"],
+		default="start",
+		help="Pick samples from start or end of each sampling segment",
 	)
 	ap.add_argument(
 		"--sample-seconds",
@@ -617,6 +679,18 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 		type=int,
 		default=12,
 		help="Number of equal segments for n-averages mode",
+	)
+	ap.add_argument(
+		"--recursive-min-segment-seconds",
+		type=float,
+		default=60.0,
+		help="Stop splitting in recursive-halves mode when segment length is <= this many seconds",
+	)
+	ap.add_argument(
+		"--cps",
+		type=float,
+		default=0.0,
+		help="Cycles per second for tempo grid lock. If > 0, sample starts/durations align to 1/cps seconds from --start-seconds",
 	)
 	ap.add_argument(
 		"--log-interval",
@@ -1177,6 +1251,10 @@ def run_highlights(args: argparse.Namespace) -> None:
 		raise ValueError("--youtube-full-seconds must be > 0")
 	if args.target_length_seconds <= 0:
 		raise ValueError("--target-length-seconds must be > 0")
+	if args.recursive_min_segment_seconds <= 0:
+		raise ValueError("--recursive-min-segment-seconds must be > 0")
+	if args.cps < 0:
+		raise ValueError("--cps must be >= 0")
 
 	video_duration, has_audio = probe_duration_and_audio(input_path)
 	if video_duration <= 0:
@@ -1210,9 +1288,25 @@ def run_highlights(args: argparse.Namespace) -> None:
 	if args.sampling_mode == "minute-averages":
 		segment_len = 60.0
 		segment_count = max(1, int(math.ceil(window_len / segment_len)))
-	else:
+		segment_ranges = []
+		for i in range(segment_count):
+			s = window_start + (i * segment_len)
+			e = min(window_end, s + segment_len)
+			if e - s > 0.001:
+				segment_ranges.append((s, e))
+	elif args.sampling_mode == "n-averages":
 		segment_count = max(1, int(args.n_segments))
 		segment_len = window_len / max(1, segment_count)
+		segment_ranges = []
+		for i in range(segment_count):
+			s = window_start + (i * segment_len)
+			e = min(window_end, s + segment_len)
+			if e - s > 0.001:
+				segment_ranges.append((s, e))
+	else:
+		segment_ranges = build_recursive_ranges(window_start, window_end, float(args.recursive_min_segment_seconds))
+		segment_count = len(segment_ranges)
+		segment_len = 0.0
 
 	if args.sample_seconds > 0:
 		sample_len = args.sample_seconds
@@ -1222,29 +1316,53 @@ def run_highlights(args: argparse.Namespace) -> None:
 	if sample_len <= 0:
 		raise ValueError("Computed sample length is zero; increase target length or set --sample-seconds")
 
-	segments: list[tuple[float, float]] = []
-	for i in range(segment_count):
-		seg_start = window_start + (i * segment_len)
-		if seg_start >= window_end:
-			break
-		max_for_segment = min(segment_len, window_end - seg_start)
-		dur = min(sample_len, max_for_segment)
+	grid_step = (1.0 / args.cps) if args.cps > 0 else 0.0
+	grid_ref = window_start
 
-		ignore_frac = overlap_fraction(seg_start, max_for_segment, ignore_ranges_abs)
+	segments: list[tuple[float, float]] = []
+	for seg_start, seg_end in segment_ranges:
+		seg_dur = max(0.0, seg_end - seg_start)
+		dur = min(sample_len, seg_dur)
+
+		ignore_frac = overlap_fraction(seg_start, seg_dur, ignore_ranges_abs)
 		if ignore_frac >= 0.999:
 			continue
 
-		deemph_frac = overlap_fraction(seg_start, max_for_segment, deemph_ranges_abs)
+		deemph_frac = overlap_fraction(seg_start, seg_dur, deemph_ranges_abs)
 		weight = (1.0 - ignore_frac) * (1.0 - (deemph_frac * (1.0 - args.deemphasize_factor)))
-		dur = min(dur, max_for_segment * max(0.0, weight))
+		dur = min(dur, seg_dur * max(0.0, weight))
 
-		if dur > 0.001:
-			segments.append((seg_start, dur))
+		if grid_step > 0:
+			aligned = align_clip_to_grid(
+				seg_start=seg_start,
+				seg_end=seg_end,
+				desired_duration=dur,
+				anchor_mode=args.sample_anchor,
+				ref_time=grid_ref,
+				grid_step=grid_step,
+			)
+			if aligned is None:
+				continue
+			clip_start, clip_dur = aligned
+		else:
+			clip_dur = dur
+			if args.sample_anchor == "end":
+				clip_start = max(seg_start, seg_end - clip_dur)
+			else:
+				clip_start = seg_start
+
+		if clip_dur > 0.001:
+			segments.append((clip_start, clip_dur))
 
 	if not segments:
 		raise RuntimeError("No highlight segments were generated from provided settings")
 
-	total_target = max(0.0, args.target_length_seconds)
+	requested_target = max(0.0, args.target_length_seconds)
+	total_target = requested_target
+	if grid_step > 0:
+		total_target = math.floor((total_target / grid_step) + 1e-9) * grid_step
+		if total_target <= 0:
+			raise ValueError("--target-length-seconds is too small for the requested --cps tempo grid")
 	selected: list[tuple[float, float]] = []
 	total_selected = 0.0
 	for start, dur in segments:
@@ -1281,6 +1399,13 @@ def run_highlights(args: argparse.Namespace) -> None:
 	print(f"[voidstar] selected_total={total_selected:.3f}s encoder={enc} audio={'on' if has_audio else 'off'}")
 	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.3f}")
 	print(f"[voidstar] intro_glitch_seconds={intro_glitch_dur:.3f}")
+	print(f"[voidstar] sample_anchor={args.sample_anchor}")
+	if args.sampling_mode == "recursive-halves":
+		print(f"[voidstar] recursive_min_segment_seconds={args.recursive_min_segment_seconds:.3f}")
+	if grid_step > 0:
+		print(f"[voidstar] tempo_grid=on cps={args.cps:.6f} step={grid_step:.6f}s target_aligned={total_target:.3f}s requested_target={requested_target:.3f}s")
+	else:
+		print("[voidstar] tempo_grid=off")
 	if ignore_ranges_abs:
 		print(f"[voidstar] ignore_ranges={len(ignore_ranges_abs)}")
 	if deemph_ranges_abs:
