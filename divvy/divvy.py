@@ -662,6 +662,23 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 		help="Audio bitrate",
 	)
 	ap.add_argument(
+		"--glitch-seconds",
+		type=float,
+		default=0.0,
+		help="Transition duration between highlight clips in seconds (0 disables)",
+	)
+	ap.add_argument(
+		"--glitch-style",
+		default="pixelize",
+		help="ffmpeg xfade transition style for highlight glitches (e.g. pixelize, hblur, fadeblack)",
+	)
+	ap.add_argument(
+		"--intro-glitch-seconds",
+		type=float,
+		default=0.0,
+		help="Small start-only intro transition duration in seconds for highlights (0 disables)",
+	)
+	ap.add_argument(
 		"--ignore-range",
 		action="append",
 		default=[],
@@ -1242,6 +1259,18 @@ def run_highlights(args: argparse.Namespace) -> None:
 	if not selected:
 		raise RuntimeError("No highlight clips selected; try increasing --target-length-seconds")
 
+	glitch_dur = max(0.0, float(args.glitch_seconds))
+	intro_glitch_dur = max(0.0, min(float(args.intro_glitch_seconds), 0.50))
+	if glitch_dur > 0 and len(selected) >= 2:
+		min_sel_dur = min(d for _, d in selected)
+		if glitch_dur >= (min_sel_dur * 0.95):
+			raise ValueError(f"--glitch-seconds too large for shortest selected clip ({min_sel_dur:.6f}s)")
+
+	if intro_glitch_dur > 0 and total_selected > 0:
+		intro_glitch_dur = min(intro_glitch_dur, total_selected * 0.25)
+	if intro_glitch_dur < 0.001:
+		intro_glitch_dur = 0.0
+
 	enc = choose_video_encoder(args.video_encoder)
 	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
 
@@ -1250,11 +1279,16 @@ def run_highlights(args: argparse.Namespace) -> None:
 	print(f"[voidstar] mode={args.sampling_mode} start={window_start:.3f}s window={window_len:.3f}s")
 	print(f"[voidstar] target={args.target_length_seconds:.3f}s segments={len(selected)} sample_seconds={sample_len:.3f}")
 	print(f"[voidstar] selected_total={total_selected:.3f}s encoder={enc} audio={'on' if has_audio else 'off'}")
+	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.3f}")
+	print(f"[voidstar] intro_glitch_seconds={intro_glitch_dur:.3f}")
 	if ignore_ranges_abs:
 		print(f"[voidstar] ignore_ranges={len(ignore_ranges_abs)}")
 	if deemph_ranges_abs:
 		print(f"[voidstar] deemphasize_ranges={len(deemph_ranges_abs)} factor={args.deemphasize_factor:.3f}")
-	print("[voidstar] pipeline=segment-then-concat (low-memory)")
+	if glitch_dur > 0 and len(selected) >= 2:
+		print("[voidstar] pipeline=segment-then-glitch-xfade (low-memory)")
+	else:
+		print("[voidstar] pipeline=segment-then-concat (low-memory)")
 
 	for i, (start, dur) in enumerate(selected, start=1):
 		print(f"[voidstar] sample={i}/{len(selected)} start={start:.3f}s dur={dur:.3f}s")
@@ -1319,39 +1353,124 @@ def run_highlights(args: argparse.Namespace) -> None:
 			done_before += dur
 			clip_paths.append(clip_path)
 
-		concat_list = tmp_dir / "concat.txt"
-		concat_lines = [f"file '{ffconcat_quote(p)}'" for p in clip_paths]
-		concat_list.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
+		if glitch_dur > 0 and len(clip_paths) >= 2:
+			clip_durations = [d for _, d in selected]
+			filter_parts: list[str] = []
+			video_inputs = [f"[v{i}]" for i in range(len(clip_paths))]
+			audio_inputs = [f"[a{i}]" for i in range(len(clip_paths))] if has_audio else []
 
-		concat_cmd: list[str] = [
-			"ffmpeg",
-			"-hide_banner",
-			"-loglevel",
-			"error",
-			"-nostats",
-			"-progress",
-			"pipe:1",
-			"-y",
-			"-f",
-			"concat",
-			"-safe",
-			"0",
-			"-i",
-			str(concat_list),
-			"-c",
-			"copy",
-			"-movflags",
-			"+faststart",
-			str(staged_out_path),
-		]
+			for i in range(len(clip_paths)):
+				filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS{video_inputs[i]}")
+				if has_audio:
+					filter_parts.append(f"[{i}:a]asetpts=PTS-STARTPTS{audio_inputs[i]}")
 
-		run_ffmpeg_with_progress(
-			cmd=concat_cmd,
-			label="highlights-concat",
-			total_duration=max(1e-6, total_selected),
-			started_at=time.time(),
-			log_interval=args.log_interval,
-		)
+			v_cur = video_inputs[0]
+			a_cur = audio_inputs[0] if has_audio else ""
+			offset = max(0.0, clip_durations[0] - glitch_dur)
+			for i in range(1, len(clip_paths)):
+				v_out = f"[vx{i}]"
+				filter_parts.append(
+					f"{v_cur}{video_inputs[i]}xfade=transition={args.glitch_style}:duration={glitch_dur:.6f}:offset={offset:.6f}{v_out}"
+				)
+				v_cur = v_out
+
+				if has_audio:
+					a_out = f"[ax{i}]"
+					filter_parts.append(
+						f"{a_cur}{audio_inputs[i]}acrossfade=d={glitch_dur:.6f}:c1=tri:c2=tri{a_out}"
+					)
+					a_cur = a_out
+
+				offset += max(0.0, clip_durations[i] - glitch_dur)
+
+			filter_parts.append(f"{v_cur}setpts=PTS-STARTPTS[vout]")
+			if has_audio:
+				filter_parts.append(f"{a_cur}asetpts=PTS-STARTPTS[aout]")
+
+			if intro_glitch_dur > 0:
+				filter_parts.append("[vout]split=2[vintro_src][vintro_main]")
+				filter_parts.append(
+					f"[vintro_src]trim=duration=0.001,tpad=stop_mode=clone:stop_duration={intro_glitch_dur:.6f},setpts=PTS-STARTPTS[vintro_hold]"
+				)
+				filter_parts.append(
+					f"[vintro_hold][vintro_main]xfade=transition={args.glitch_style}:duration={intro_glitch_dur:.6f}:offset=0[vout2]"
+				)
+
+			filter_complex = ";".join(filter_parts)
+
+			glitch_cmd: list[str] = [
+				"ffmpeg",
+				"-hide_banner",
+				"-loglevel",
+				"error",
+				"-nostats",
+				"-progress",
+				"pipe:1",
+				"-y",
+			]
+			for p in clip_paths:
+				glitch_cmd += ["-i", str(p)]
+
+			glitch_cmd += ["-filter_complex", filter_complex, "-map", "[vout2]" if intro_glitch_dur > 0 else "[vout]"]
+			if has_audio:
+				glitch_cmd += ["-map", "[aout]"]
+
+			glitch_cmd += ["-c:v", enc]
+			if enc in {"h264_nvenc", "hevc_nvenc"}:
+				glitch_cmd += ["-preset", args.preset, "-rc", "vbr", "-cq", str(args.nvenc_cq), "-b:v", "0"]
+			elif enc in {"libx264", "libx265"}:
+				glitch_cmd += ["-preset", args.preset, "-crf", str(args.crf)]
+
+			if enc in {"h264_nvenc", "libx264"}:
+				glitch_cmd += ["-pix_fmt", "yuv420p", "-profile:v", "high", "-level:v", "4.1"]
+
+			if has_audio:
+				glitch_cmd += ["-c:a", args.audio_codec, "-b:a", args.audio_bitrate]
+
+			glitch_cmd += ["-movflags", "+faststart", str(staged_out_path)]
+
+			est_total = max(1e-6, total_selected - (glitch_dur * max(0, len(clip_paths) - 1)))
+			run_ffmpeg_with_progress(
+				cmd=glitch_cmd,
+				label="highlights-glitch",
+				total_duration=est_total,
+				started_at=time.time(),
+				log_interval=args.log_interval,
+			)
+		else:
+			concat_list = tmp_dir / "concat.txt"
+			concat_lines = [f"file '{ffconcat_quote(p)}'" for p in clip_paths]
+			concat_list.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
+
+			concat_cmd: list[str] = [
+				"ffmpeg",
+				"-hide_banner",
+				"-loglevel",
+				"error",
+				"-nostats",
+				"-progress",
+				"pipe:1",
+				"-y",
+				"-f",
+				"concat",
+				"-safe",
+				"0",
+				"-i",
+				str(concat_list),
+				"-c",
+				"copy",
+				"-movflags",
+				"+faststart",
+				str(staged_out_path),
+			]
+
+			run_ffmpeg_with_progress(
+				cmd=concat_cmd,
+				label="highlights-concat",
+				total_duration=max(1e-6, total_selected),
+				started_at=time.time(),
+				log_interval=args.log_interval,
+			)
 
 		if not staged_out_path.exists():
 			raise RuntimeError(f"Staged output missing after concat: {staged_out_path}")
