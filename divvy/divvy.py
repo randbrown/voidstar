@@ -1342,6 +1342,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 	grid_step = (1.0 / args.cps) if args.cps > 0 else 0.0
 	grid_ref = window_start
 	transient_skew = max(0.0, float(args.transient_skew_seconds))
+	glitch_dur = max(0.0, float(args.glitch_seconds))
 
 	segments: list[tuple[float, float]] = []
 	for seg_start, seg_end in segment_ranges:
@@ -1392,29 +1393,49 @@ def run_highlights(args: argparse.Namespace) -> None:
 		total_target = math.floor((total_target / grid_step) + 1e-9) * grid_step
 		if total_target <= 0:
 			raise ValueError("--target-length-seconds is too small for the requested --cps tempo grid")
+
+	intro_glitch_dur = max(0.0, min(float(args.intro_glitch_seconds), 0.50))
+
 	selected: list[tuple[float, float]] = []
-	total_selected = 0.0
+	total_selected_effective = 0.0
 	for start, dur in segments:
-		if total_selected >= total_target:
+		if total_selected_effective >= total_target:
 			break
-		remaining = total_target - total_selected
-		use_dur = min(dur, remaining)
-		if use_dur > 0.001:
-			selected.append((start, use_dur))
-			total_selected += use_dur
+
+		remaining_effective = total_target - total_selected_effective
+		use_dur = min(dur, remaining_effective)
+		if use_dur <= 0.001:
+			continue
+
+		selected.append((start, use_dur))
+		total_selected_effective += use_dur
 
 	if not selected:
 		raise RuntimeError("No highlight clips selected; try increasing --target-length-seconds")
 
-	glitch_dur = max(0.0, float(args.glitch_seconds))
-	intro_glitch_dur = max(0.0, min(float(args.intro_glitch_seconds), 0.50))
 	if glitch_dur > 0 and len(selected) >= 2:
 		min_sel_dur = min(d for _, d in selected)
 		if glitch_dur >= (min_sel_dur * 0.95):
 			raise ValueError(f"--glitch-seconds too large for shortest selected clip ({min_sel_dur:.6f}s)")
 
-	if intro_glitch_dur > 0 and total_selected > 0:
-		intro_glitch_dur = min(intro_glitch_dur, total_selected * 0.25)
+	render_segments: list[tuple[float, float]] = []
+	total_selected_raw = 0.0
+	preroll_deficit_total = 0.0
+	for i, (start, dur_effective) in enumerate(selected):
+		required_preroll = glitch_dur if (glitch_dur > 0 and i >= 1) else 0.0
+		raw_start = max(window_start, start - required_preroll)
+		applied_preroll = max(0.0, start - raw_start)
+		if required_preroll > 0 and applied_preroll + 1e-9 < required_preroll:
+			preroll_deficit_total += (required_preroll - applied_preroll)
+		raw_dur = dur_effective + applied_preroll
+		raw_dur = max(0.001, min(raw_dur, max(0.0, window_end - raw_start)))
+		render_segments.append((raw_start, raw_dur))
+		total_selected_raw += raw_dur
+
+	total_selected_est_output = total_selected_raw - (glitch_dur * max(0, len(render_segments) - 1))
+
+	if intro_glitch_dur > 0 and total_selected_effective > 0:
+		intro_glitch_dur = min(intro_glitch_dur, total_selected_effective * 0.25)
 	if intro_glitch_dur < 0.001:
 		intro_glitch_dur = 0.0
 
@@ -1425,8 +1446,13 @@ def run_highlights(args: argparse.Namespace) -> None:
 	print(f"[voidstar] output={out_path}")
 	print(f"[voidstar] mode={args.sampling_mode} start={window_start:.3f}s window={window_len:.3f}s")
 	print(f"[voidstar] target={args.target_length_seconds:.3f}s segments={len(selected)} sample_seconds={sample_len:.3f}")
-	print(f"[voidstar] selected_total={total_selected:.3f}s encoder={enc} audio={'on' if has_audio else 'off'}")
+	print(
+		f"[voidstar] selected_total_effective={total_selected_effective:.3f}s "
+		f"selected_total_raw={total_selected_raw:.3f}s estimated_output={total_selected_est_output:.3f}s encoder={enc} audio={'on' if has_audio else 'off'}"
+	)
 	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.3f}")
+	if preroll_deficit_total > 0.001:
+		print(f"[voidstar] preroll_deficit_total={preroll_deficit_total:.3f}s (window start clamp)")
 	print(f"[voidstar] intro_glitch_seconds={intro_glitch_dur:.3f}")
 	print(f"[voidstar] transient_skew_seconds={transient_skew:.3f}")
 	print(f"[voidstar] sample_anchor={args.sample_anchor}")
@@ -1438,6 +1464,8 @@ def run_highlights(args: argparse.Namespace) -> None:
 		print(f"[voidstar] tempo_grid=on cps={args.cps:.6f} step={grid_step:.6f}s target_aligned={total_target:.3f}s requested_target={requested_target:.3f}s")
 	else:
 		print("[voidstar] tempo_grid=off")
+	if glitch_dur > 0 and len(selected) >= 2:
+		print(f"[voidstar] transition_budget=on overlap_total={glitch_dur * max(0, len(selected) - 1):.3f}s")
 	if ignore_ranges_abs:
 		print(f"[voidstar] ignore_ranges={len(ignore_ranges_abs)}")
 	if deemph_ranges_abs:
@@ -1448,7 +1476,11 @@ def run_highlights(args: argparse.Namespace) -> None:
 		print("[voidstar] pipeline=segment-then-concat (low-memory)")
 
 	for i, (start, dur) in enumerate(selected, start=1):
-		print(f"[voidstar] sample={i}/{len(selected)} start={start:.3f}s dur={dur:.3f}s")
+		raw_start, raw_dur = render_segments[i - 1]
+		print(
+			f"[voidstar] sample={i}/{len(selected)} start={start:.3f}s dur={dur:.3f}s "
+			f"raw_start={raw_start:.3f}s raw_dur={raw_dur:.3f}s"
+		)
 
 	started = time.time()
 	with tempfile.TemporaryDirectory(prefix="divvy_highlights_", dir="/tmp") as tmp_dir_str:
@@ -1457,7 +1489,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 		done_before = 0.0
 		staged_out_path = tmp_dir / out_path.name
 
-		for i, (start, dur) in enumerate(selected, start=1):
+		for i, (start, dur) in enumerate(render_segments, start=1):
 			clip_path = tmp_dir / f"clip_{i:03d}.mp4"
 			clip_cmd: list[str] = [
 				"ffmpeg",
@@ -1500,10 +1532,10 @@ def run_highlights(args: argparse.Namespace) -> None:
 			run_segment_with_progress(
 				cmd=clip_cmd,
 				seg_i=i,
-				seg_n=len(selected),
+				seg_n=len(render_segments),
 				seg_duration=dur,
 				done_before=done_before,
-				total_duration=max(1e-6, total_selected),
+				total_duration=max(1e-6, total_selected_raw),
 				started_at=started,
 				log_interval=args.log_interval,
 			)
@@ -1511,7 +1543,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 			clip_paths.append(clip_path)
 
 		if glitch_dur > 0 and len(clip_paths) >= 2:
-			clip_durations = [d for _, d in selected]
+			clip_durations = [d for _, d in render_segments]
 			filter_parts: list[str] = []
 			video_inputs = [f"[v{i}]" for i in range(len(clip_paths))]
 			audio_inputs = [f"[a{i}]" for i in range(len(clip_paths))] if has_audio else []
@@ -1586,7 +1618,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 
 			glitch_cmd += ["-movflags", "+faststart", str(staged_out_path)]
 
-			est_total = max(1e-6, total_selected - (glitch_dur * max(0, len(clip_paths) - 1)))
+			est_total = max(1e-6, total_selected_est_output)
 			run_ffmpeg_with_progress(
 				cmd=glitch_cmd,
 				label="highlights-glitch",
@@ -1624,7 +1656,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 			run_ffmpeg_with_progress(
 				cmd=concat_cmd,
 				label="highlights-concat",
-				total_duration=max(1e-6, total_selected),
+				total_duration=max(1e-6, total_selected_raw),
 				started_at=time.time(),
 				log_interval=args.log_interval,
 			)
@@ -1635,12 +1667,15 @@ def run_highlights(args: argparse.Namespace) -> None:
 		print(f"[voidstar] copy_to_final src={staged_out_path} dst={out_path}")
 		shutil.copy2(staged_out_path, out_path)
 	elapsed_total = time.time() - started
-	throughput = total_selected / max(1e-9, elapsed_total)
+	throughput = total_selected_est_output / max(1e-9, elapsed_total)
 
 	print("[voidstar] ===== summary =====")
 	print(f"[voidstar] output_file={out_path}")
 	print(f"[voidstar] mode={args.sampling_mode} segments={len(selected)}")
-	print(f"[voidstar] target={args.target_length_seconds:.3f}s actual={total_selected:.3f}s")
+	print(
+		f"[voidstar] target={args.target_length_seconds:.3f}s "
+		f"actual_effective={total_selected_est_output:.3f}s requested_effective={total_selected_effective:.3f}s actual_raw={total_selected_raw:.3f}s"
+	)
 	print(f"[voidstar] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
 
 
