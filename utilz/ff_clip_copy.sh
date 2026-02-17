@@ -12,7 +12,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ff_clip_copy.sh <input.mp4> <start> <duration>
+  ff_clip_copy.sh [--accurate|-a] <input.mp4> <start> <duration>
 
 Where:
   <start>    = HH:MM:SS[.ms]  (e.g. 00:23:00 or 00:23:00.500)
@@ -21,8 +21,39 @@ Where:
 Examples:
   ./ff_clip_copy.sh "in.mp4" 00:23:00 60
   ./ff_clip_copy.sh "in.mp4" 00:23:00 00:01:00
+  ./ff_clip_copy.sh --accurate "in.mp4" 00:23:00 00:01:00
+
+Modes:
+  default    stream-copy (fast, keyframe/GOP-bounded cut points)
+  --accurate re-encode video for near-frame-accurate boundaries; copy audio
 EOF
 }
+
+ACCURATE=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -a|--accurate)
+      ACCURATE=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "ERROR: unknown option: $1" >&2
+      usage
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 if [[ $# -lt 3 ]]; then
   usage
@@ -71,21 +102,38 @@ BASE="$(basename "$IN")"
 NAME="${BASE%.*}"
 EXT="${BASE##*.}"
 
-OUT="${DIR}/${NAME}_s${START_TAG}_d${DUR_TAG}_copy.${EXT}"
+MODE_TAG="copy"
+if [[ "$ACCURATE" -eq 1 ]]; then
+  MODE_TAG="accurate"
+fi
+
+OUT="${DIR}/${NAME}_s${START_TAG}_d${DUR_TAG}_${MODE_TAG}.${EXT}"
 
 echo "Input : $IN"
 echo "Start : $START"
 echo "Dur   : $DUR"
+echo "Mode  : $MODE_TAG"
 echo "Output: $OUT"
 echo
 
-ffmpeg -hide_banner -y \
-  -ss "$START" -i "$IN" \
-  -t "$DUR" \
-  -map 0 -c copy \
-  -fflags +genpts -avoid_negative_ts make_zero \
-  -movflags +faststart \
-  "$OUT"
+if [[ "$ACCURATE" -eq 1 ]]; then
+  ffmpeg -hide_banner -y \
+    -ss "$START" -i "$IN" \
+    -t "$DUR" \
+    -map 0 -c copy \
+    -c:v libx264 -preset medium -crf 18 \
+    -fflags +genpts -avoid_negative_ts make_zero \
+    -movflags +faststart \
+    "$OUT"
+else
+  ffmpeg -hide_banner -y \
+    -ss "$START" -i "$IN" \
+    -t "$DUR" \
+    -map 0 -c copy \
+    -fflags +genpts -avoid_negative_ts make_zero \
+    -movflags +faststart \
+    "$OUT"
+fi
 
 echo
 echo "Done: $OUT"

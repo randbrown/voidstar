@@ -420,6 +420,7 @@ def draw_clamped_rect(
     y1: int,
     color_bgr: tuple[int, int, int],
     thickness: int,
+    label: str | None = None,
 ) -> None:
     h, w = frame.shape[:2]
     xa = max(0, min(w - 1, int(round(x0))))
@@ -429,6 +430,22 @@ def draw_clamped_rect(
     if xb <= xa or yb <= ya:
         return
     cv2.rectangle(frame, (xa, ya), (xb, yb), color_bgr, max(1, int(thickness)), cv2.LINE_AA)
+    if label:
+        bw = max(1, xb - xa + 1)
+        bh = max(1, yb - ya + 1)
+        text = f"{label} {bw}x{bh}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.45
+        txt_th = 1
+        ((tw, th), baseline) = cv2.getTextSize(text, font, scale, txt_th)
+        tx = xa
+        ty = ya - 6
+        if ty - th < 0:
+            ty = min(h - baseline - 1, ya + th + 6)
+        if tx + tw >= w:
+            tx = max(0, w - tw - 1)
+        cv2.putText(frame, text, (tx, ty), font, scale, (0, 0, 0), txt_th + 2, cv2.LINE_AA)
+        cv2.putText(frame, text, (tx, ty), font, scale, color_bgr, txt_th, cv2.LINE_AA)
 
 
 def main() -> None:
@@ -1062,6 +1079,7 @@ def main() -> None:
                 draw_y + cur_h,
                 color_logo,
                 debug_bounds_thickness,
+                "logo",
             )
             draw_clamped_rect(
                 frame,
@@ -1071,19 +1089,20 @@ def main() -> None:
                 int(round(local_base_y + local_base_h)),
                 color_content,
                 debug_bounds_thickness,
+                "content",
             )
 
             motion_x0 = int(round(half_w + margin_px - half_w))
             motion_y0 = int(round(half_h + margin_px - half_h))
             motion_x1 = int(round((frame_w - half_w - margin_px) + half_w))
             motion_y1 = int(round((frame_h - half_h - margin_px) + half_h))
-            draw_clamped_rect(frame, motion_x0, motion_y0, motion_x1, motion_y1, color_motion, debug_bounds_thickness)
+            draw_clamped_rect(frame, motion_x0, motion_y0, motion_x1, motion_y1, color_motion, debug_bounds_thickness, "motion")
 
             if search_x0 is not None and search_y0 is not None and search_x1 is not None and search_y1 is not None:
-                draw_clamped_rect(frame, search_x0, search_y0, search_x1, search_y1, color_search, debug_bounds_thickness)
+                draw_clamped_rect(frame, search_x0, search_y0, search_x1, search_y1, color_search, debug_bounds_thickness, "search")
 
             if local_reels_enabled:
-                draw_clamped_rect(frame, x0, y0, x1, y1, color_reels, debug_bounds_thickness)
+                draw_clamped_rect(frame, x0, y0, x1, y1, color_reels, debug_bounds_thickness, "reels")
 
         if enc_proc.stdin is None:
             raise RuntimeError("Encoder stdin is unavailable.")
