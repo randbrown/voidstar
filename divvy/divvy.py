@@ -658,7 +658,7 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 	)
 	ap.add_argument(
 		"--sampling-mode",
-		choices=["minute-averages", "n-averages", "recursive-halves"],
+		choices=["minute-averages", "n-averages", "recursive-halves", "uniform-spread"],
 		default="minute-averages",
 		help="Sampling strategy for selecting source snippets",
 	)
@@ -1311,6 +1311,10 @@ def run_highlights(args: argparse.Namespace) -> None:
 			e = min(window_end, s + segment_len)
 			if e - s > 0.001:
 				segment_ranges.append((s, e))
+	elif args.sampling_mode == "uniform-spread":
+		segment_count = max(1, int(args.n_segments))
+		segment_len = window_len / max(1, segment_count)
+		segment_ranges = []
 	else:
 		segment_ranges = build_recursive_ranges(window_start, window_end, float(args.recursive_min_segment_seconds))
 		segment_count = len(segment_ranges)
@@ -1323,6 +1327,17 @@ def run_highlights(args: argparse.Namespace) -> None:
 
 	if sample_len <= 0:
 		raise ValueError("Computed sample length is zero; increase target length or set --sample-seconds")
+
+	if args.sampling_mode == "uniform-spread":
+		if args.sample_seconds > 0:
+			segment_count = max(1, int(math.ceil(max(1e-9, args.target_length_seconds) / max(1e-9, sample_len))))
+		segment_len = window_len / max(1, segment_count)
+		segment_ranges = []
+		for i in range(segment_count):
+			s = window_start + (i * segment_len)
+			e = min(window_end, s + segment_len)
+			if e - s > 0.001:
+				segment_ranges.append((s, e))
 
 	grid_step = (1.0 / args.cps) if args.cps > 0 else 0.0
 	grid_ref = window_start
@@ -1417,6 +1432,8 @@ def run_highlights(args: argparse.Namespace) -> None:
 	print(f"[voidstar] sample_anchor={args.sample_anchor}")
 	if args.sampling_mode == "recursive-halves":
 		print(f"[voidstar] recursive_min_segment_seconds={args.recursive_min_segment_seconds:.3f}")
+	if args.sampling_mode == "uniform-spread":
+		print(f"[voidstar] uniform_segment_count={segment_count} uniform_segment_seconds={segment_len:.3f}")
 	if grid_step > 0:
 		print(f"[voidstar] tempo_grid=on cps={args.cps:.6f} step={grid_step:.6f}s target_aligned={total_target:.3f}s requested_target={requested_target:.3f}s")
 	else:

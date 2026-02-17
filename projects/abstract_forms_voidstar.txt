@@ -15,7 +15,7 @@ ffmpeg -i "$HOME/WinVideos/abstract_forms_voidstar_0_fps30_mc2_det0p05_trk0p05_t
 
 ffmpeg -i "$HOME/WinVideos/abstract_forms_voidstar_0_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" -ss 00:00:06.13 -t 1080 -async 1 "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4"
 
-
+python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --ignore-range 12:00-17:00 --glitch-seconds 0.05 --glitch-style hblur --sampling-mode recursive-halves --recursive-min-segment-seconds 90 --sample-anchor end --cps 0.5 --intro-glitch-seconds 0.25 --transient-skew-seconds .05 --sampling-mode uniform-spread --sample-seconds 15
 
 python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds 1080 --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --ignore-range 12:00-17:00 --glitch-seconds 1.5 --glitch-style hblur --sampling-mode recursive-halves --recursive-min-segment-seconds 45 --sample-anchor end --cps 0.5 --intro-glitch-seconds 0.5
 
