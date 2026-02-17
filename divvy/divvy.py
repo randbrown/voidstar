@@ -1445,8 +1445,8 @@ def run_highlights(args: argparse.Namespace) -> None:
 
 	total_selected_est_output = total_selected_raw - (glitch_dur * max(0, len(render_segments) - 1))
 
-	if intro_glitch_dur > 0 and total_selected_effective > 0:
-		intro_glitch_dur = min(intro_glitch_dur, total_selected_effective * 0.25)
+	if intro_glitch_dur > 0 and total_selected_est_output > 0:
+		intro_glitch_dur = min(intro_glitch_dur, total_selected_est_output * 0.25)
 	if intro_glitch_dur < 0.001:
 		intro_glitch_dur = 0.0
 
@@ -1495,6 +1495,20 @@ def run_highlights(args: argparse.Namespace) -> None:
 			f"[voidstar] sample={i}/{len(selected)} start={start:.3f}s dur={dur:.3f}s "
 			f"raw_start={raw_start:.3f}s raw_dur={raw_dur:.3f}s"
 		)
+
+	if glitch_dur > 0 and len(render_segments) >= 2:
+		timeline_pos = 0.0
+		for i in range(1, len(render_segments)):
+			prev_raw_dur = render_segments[i - 1][1]
+			boundary = timeline_pos + prev_raw_dur
+			transition_start = max(0.0, boundary - glitch_dur)
+			delta = boundary - transition_start
+			print(
+				f"[voidstar] transition={i}/{len(render_segments)-1} "
+				f"grid_boundary={boundary:.3f}s transition_start={transition_start:.3f}s "
+				f"delta={delta:.3f}s"
+			)
+			timeline_pos = boundary - glitch_dur
 
 	started = time.time()
 	with tempfile.TemporaryDirectory(prefix="divvy_highlights_", dir="/tmp") as tmp_dir_str:
@@ -1561,6 +1575,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 			filter_parts: list[str] = []
 			video_inputs = [f"[v{i}]" for i in range(len(clip_paths))]
 			audio_inputs = [f"[a{i}]" for i in range(len(clip_paths))] if has_audio else []
+			est_total = max(1e-6, total_selected_est_output)
 
 			for i in range(len(clip_paths)):
 				filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS{video_inputs[i]}")
@@ -1586,18 +1601,26 @@ def run_highlights(args: argparse.Namespace) -> None:
 
 				offset += max(0.0, clip_durations[i] - glitch_dur)
 
-			filter_parts.append(f"{v_cur}setpts=PTS-STARTPTS[vout]")
+			filter_parts.append(f"{v_cur}setpts=PTS-STARTPTS[vbase]")
 			if has_audio:
-				filter_parts.append(f"{a_cur}asetpts=PTS-STARTPTS[aout]")
+				filter_parts.append(f"{a_cur}asetpts=PTS-STARTPTS[abase]")
 
 			if intro_glitch_dur > 0:
-				filter_parts.append("[vout]split=2[vintro_src][vintro_main]")
+				tail_start = max(0.0, est_total - intro_glitch_dur)
+				filter_parts.append("[vbase]split=2[vintro_main][vintro_tail_src]")
 				filter_parts.append(
-					f"[vintro_src]trim=duration=0.001,tpad=stop_mode=clone:stop_duration={intro_glitch_dur:.6f},setpts=PTS-STARTPTS[vintro_hold]"
+					f"[vintro_tail_src]trim=start={tail_start:.6f}:duration={intro_glitch_dur:.6f},setpts=PTS-STARTPTS[vintro_tail]"
 				)
 				filter_parts.append(
-					f"[vintro_hold][vintro_main]xfade=transition={args.glitch_style}:duration={intro_glitch_dur:.6f}:offset=0[vout2]"
+					f"[vintro_tail][vintro_main]xfade=transition={args.glitch_style}:duration={intro_glitch_dur:.6f}:offset=0[vout]"
 				)
+
+				if has_audio:
+					filter_parts.append("[abase]asetpts=PTS-STARTPTS[aout]")
+			else:
+				filter_parts.append("[vbase]setpts=PTS-STARTPTS[vout]")
+				if has_audio:
+					filter_parts.append("[abase]asetpts=PTS-STARTPTS[aout]")
 
 			filter_complex = ";".join(filter_parts)
 
@@ -1614,7 +1637,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 			for p in clip_paths:
 				glitch_cmd += ["-i", str(p)]
 
-			glitch_cmd += ["-filter_complex", filter_complex, "-map", "[vout2]" if intro_glitch_dur > 0 else "[vout]"]
+			glitch_cmd += ["-filter_complex", filter_complex, "-map", "[vout]"]
 			if has_audio:
 				glitch_cmd += ["-map", "[aout]"]
 
@@ -1632,7 +1655,6 @@ def run_highlights(args: argparse.Namespace) -> None:
 
 			glitch_cmd += ["-movflags", "+faststart", str(staged_out_path)]
 
-			est_total = max(1e-6, total_selected_est_output)
 			run_ffmpeg_with_progress(
 				cmd=glitch_cmd,
 				label="highlights-glitch",
