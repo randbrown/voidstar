@@ -486,7 +486,10 @@ def main() -> None:
     ap.add_argument("--voidstar-glitch-hit", type=float, default=0.45, help="Beat-hit glitch intensity [0..2].")
     ap.add_argument("--voidstar-preset", choices=["custom", "subtle", "cinema", "wild", "insane"], default="custom", help="Convenience preset for VoidStar energy stack.")
     ap.add_argument("--voidstar-debug-bounds", type=bool_flag, default=False, help="Draw debug bounding boxes for logo and tracking/search regions.")
-    ap.add_argument("--voidstar-debug-bounds-thickness", type=int, default=2, help="Line thickness for debug bounds overlay.")
+    ap.add_argument("--voidstar-debug-bounds-mode", choices=["always", "hit-glitch"], default="hit-glitch", help="Debug bounds visibility mode. hit-glitch pops boxes briefly on strong beat peaks.")
+    ap.add_argument("--voidstar-debug-bounds-hit-threshold", type=float, default=0.92, help="Pulse threshold [0..1] required to trigger hit-glitch debug bounds.")
+    ap.add_argument("--voidstar-debug-bounds-hit-prob", type=float, default=0.1, help="Probability [0..1] to trigger a debug burst when threshold peak is reached.")
+    ap.add_argument("--voidstar-debug-bounds-thickness", type=int, default=1, help="Line thickness for debug bounds overlay.")
     ap.add_argument("--local-point-track", type=bool_flag, default=False, help="Track moving feature points only within a logo-centered local bbox.")
     ap.add_argument("--content-bbox-for-local", type=bool_flag, default=True, help="Use non-transparent logo-content bbox (alpha) for local tracking/reels ROI calculations.")
     ap.add_argument("--content-bbox-alpha-threshold", type=float, default=0.02, help="Alpha threshold [0..1] to define visible logo-content bbox.")
@@ -674,6 +677,9 @@ def main() -> None:
     voidstar_glitch_hit = clamp(float(args.voidstar_glitch_hit), 0.0, 2.0)
     point_track_enabled = bool(args.local_point_track)
     debug_bounds_enabled = bool(args.voidstar_debug_bounds)
+    debug_bounds_mode = str(args.voidstar_debug_bounds_mode)
+    debug_bounds_hit_threshold = float(np.clip(args.voidstar_debug_bounds_hit_threshold, 0.0, 1.0))
+    debug_bounds_hit_prob = float(np.clip(args.voidstar_debug_bounds_hit_prob, 0.0, 1.0))
     debug_bounds_thickness = max(1, int(args.voidstar_debug_bounds_thickness))
     use_content_bbox_for_local = bool(args.content_bbox_for_local)
     content_bbox_alpha_threshold = float(np.clip(args.content_bbox_alpha_threshold, 0.0, 1.0))
@@ -758,6 +764,11 @@ def main() -> None:
     last_pulse = 0.0
     last_peak_frame = -10**9
     peak_cooldown_frames = max(1, int(round(0.12 * fps)))
+    debug_burst_frames_left = 0
+    debug_next_allowed_frame = 0
+    debug_burst_min_frames = max(1, int(round(0.05 * fps)))
+    debug_burst_max_frames = max(debug_burst_min_frames, int(round(0.20 * fps)))
+    debug_burst_cooldown_frames = max(1, int(round(0.45 * fps)))
 
     while True:
         if total_frames > 0 and processed >= total_frames:
@@ -1057,7 +1068,29 @@ def main() -> None:
                 band_shift = int(np.random.randint(-18, 19))
                 frame[y0:y1, :, :] = np.roll(frame[y0:y1, :, :], band_shift, axis=1)
 
+        show_debug_bounds = False
         if debug_bounds_enabled:
+            if debug_bounds_mode == "always" or bass_env is None:
+                show_debug_bounds = True
+            else:
+                intense_peak = beat_peak and (pulse >= debug_bounds_hit_threshold)
+                if (
+                    intense_peak
+                    and processed >= debug_next_allowed_frame
+                    and np.random.rand() < debug_bounds_hit_prob
+                ):
+                    debug_burst_frames_left = int(np.random.randint(debug_burst_min_frames, debug_burst_max_frames + 1))
+                    debug_next_allowed_frame = (
+                        processed
+                        + debug_burst_cooldown_frames
+                        + int(np.random.randint(0, max(1, int(round(0.60 * fps)))))
+                    )
+
+                if debug_burst_frames_left > 0:
+                    debug_burst_frames_left -= 1
+                    show_debug_bounds = (np.random.rand() < 0.82)
+
+        if show_debug_bounds:
             if voidstar_colorize:
                 color_logo = (255, 200, 40)
                 color_content = (80, 230, 255)
@@ -1071,24 +1104,33 @@ def main() -> None:
                 color_search = (255, 255, 255)
                 color_reels = (255, 255, 255)
 
+            debug_jx = 0
+            debug_jy = 0
+            debug_t = debug_bounds_thickness
+            if debug_bounds_mode == "hit-glitch" and bass_env is not None:
+                glitch_amp = 1.0 + (1.6 * pulse)
+                debug_jx = int(round(np.random.uniform(-1.2, 1.2) * glitch_amp))
+                debug_jy = int(round(np.random.uniform(-1.2, 1.2) * glitch_amp))
+                debug_t = max(1, debug_bounds_thickness + int(np.random.randint(0, 2)))
+
             draw_clamped_rect(
                 frame,
-                draw_x,
-                draw_y,
-                draw_x + cur_w,
-                draw_y + cur_h,
+                draw_x + debug_jx,
+                draw_y + debug_jy,
+                draw_x + cur_w + debug_jx,
+                draw_y + cur_h + debug_jy,
                 color_logo,
-                debug_bounds_thickness,
+                debug_t,
                 "logo",
             )
             draw_clamped_rect(
                 frame,
-                int(round(local_base_x)),
-                int(round(local_base_y)),
-                int(round(local_base_x + local_base_w)),
-                int(round(local_base_y + local_base_h)),
+                int(round(local_base_x + debug_jx)),
+                int(round(local_base_y + debug_jy)),
+                int(round(local_base_x + local_base_w + debug_jx)),
+                int(round(local_base_y + local_base_h + debug_jy)),
                 color_content,
-                debug_bounds_thickness,
+                debug_t,
                 "content",
             )
 
@@ -1096,13 +1138,22 @@ def main() -> None:
             motion_y0 = int(round(half_h + margin_px - half_h))
             motion_x1 = int(round((frame_w - half_w - margin_px) + half_w))
             motion_y1 = int(round((frame_h - half_h - margin_px) + half_h))
-            draw_clamped_rect(frame, motion_x0, motion_y0, motion_x1, motion_y1, color_motion, debug_bounds_thickness, "motion")
+            draw_clamped_rect(frame, motion_x0, motion_y0, motion_x1, motion_y1, color_motion, debug_t, "motion")
 
             if search_x0 is not None and search_y0 is not None and search_x1 is not None and search_y1 is not None:
-                draw_clamped_rect(frame, search_x0, search_y0, search_x1, search_y1, color_search, debug_bounds_thickness, "search")
+                draw_clamped_rect(
+                    frame,
+                    search_x0 + debug_jx,
+                    search_y0 + debug_jy,
+                    search_x1 + debug_jx,
+                    search_y1 + debug_jy,
+                    color_search,
+                    debug_t,
+                    "search",
+                )
 
             if local_reels_enabled:
-                draw_clamped_rect(frame, x0, y0, x1, y1, color_reels, debug_bounds_thickness, "reels")
+                draw_clamped_rect(frame, x0 + debug_jx, y0 + debug_jy, x1 + debug_jx, y1 + debug_jy, color_reels, debug_t, "reels")
 
         if enc_proc.stdin is None:
             raise RuntimeError("Encoder stdin is unavailable.")
