@@ -14,8 +14,10 @@ import json
 import math
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -294,6 +296,62 @@ def float_tag(value: float, digits: int = 3) -> str:
 	return s.replace(".", "p")
 
 
+def parse_time_token(text: str) -> float:
+	t = text.strip()
+	if not t:
+		raise ValueError("empty time token")
+	if ":" not in t:
+		return float(t)
+	parts = t.split(":")
+	if len(parts) not in {2, 3}:
+		raise ValueError(f"invalid time token: {text}")
+	try:
+		vals = [float(p) for p in parts]
+	except ValueError as e:
+		raise ValueError(f"invalid time token: {text}") from e
+	if len(vals) == 2:
+		mm, ss = vals
+		return (mm * 60.0) + ss
+	hh, mm, ss = vals
+	return (hh * 3600.0) + (mm * 60.0) + ss
+
+
+def parse_time_range_token(text: str) -> tuple[float, float]:
+	t = text.strip()
+	if not t:
+		raise ValueError("empty range token")
+	if "-" not in t:
+		raise ValueError(f"invalid range token: {text}")
+	left, right = t.split("-", 1)
+	start = parse_time_token(left)
+	end = parse_time_token(right)
+	if start < 0 or end < 0:
+		raise ValueError(f"range values must be non-negative: {text}")
+	if end <= start:
+		raise ValueError(f"range end must be greater than start: {text}")
+	return start, end
+
+
+def overlap_seconds(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
+	if a_end <= a_start or b_end <= b_start:
+		return 0.0
+	return max(0.0, min(a_end, b_end) - max(a_start, b_start))
+
+
+def overlap_fraction(start: float, duration: float, ranges: list[tuple[float, float]]) -> float:
+	if duration <= 0:
+		return 0.0
+	end = start + duration
+	overlap = 0.0
+	for r_start, r_end in ranges:
+		overlap += overlap_seconds(start, end, r_start, r_end)
+	return min(1.0, max(0.0, overlap / max(1e-9, duration)))
+
+
+def ffconcat_quote(path: Path) -> str:
+	return str(path).replace("'", r"'\\''")
+
+
 def build_recombine_default_filename(segment_dir: Path, args: argparse.Namespace) -> str:
 	order_tag = "rev" if args.reverse_order else "fwd"
 	glitch_sec_tag = float_tag(max(0.0, args.glitch_seconds), digits=3)
@@ -304,6 +362,20 @@ def build_recombine_default_filename(segment_dir: Path, args: argparse.Namespace
 		f"__ord-{order_tag}"
 		f"__glitch-{glitch_style_tag}-{glitch_sec_tag}s"
 		f"__{loop_tag}.mp4"
+	)
+
+
+def build_highlights_default_filename(input_path: Path, args: argparse.Namespace) -> str:
+	mode_tag = sanitize_tag(args.sampling_mode)
+	target_tag = float_tag(max(0.0, args.target_length_seconds), digits=3)
+	start_tag = float_tag(max(0.0, args.start_seconds), digits=3)
+	full_tag = float_tag(max(0.0, args.youtube_full_seconds), digits=3)
+	return (
+		f"{input_path.stem}__highlights"
+		f"__mode-{mode_tag}"
+		f"__start-{start_tag}s"
+		f"__full-{full_tag}s"
+		f"__target-{target_tag}s.mp4"
 	)
 
 
@@ -498,6 +570,117 @@ def add_recombine_args(ap: argparse.ArgumentParser) -> None:
 	)
 
 
+def add_highlights_args(ap: argparse.ArgumentParser) -> None:
+	ap.add_argument("input", help="Input video path for automated highlights")
+	ap.add_argument(
+		"--out-dir",
+		default=None,
+		help="Output directory for highlights (used when --output is not set)",
+	)
+	ap.add_argument(
+		"--output",
+		default=None,
+		help="Output highlights video path (default: auto name in input dir)",
+	)
+	ap.add_argument(
+		"--start-seconds",
+		type=float,
+		default=0.0,
+		help="Start time in source video for highlight sampling window",
+	)
+	ap.add_argument(
+		"--youtube-full-seconds",
+		type=float,
+		required=True,
+		help="Total source window length from start-seconds to sample from",
+	)
+	ap.add_argument(
+		"--target-length-seconds",
+		type=float,
+		required=True,
+		help="Desired output highlights length target",
+	)
+	ap.add_argument(
+		"--sampling-mode",
+		choices=["minute-averages", "n-averages"],
+		default="minute-averages",
+		help="Sampling strategy for selecting source snippets",
+	)
+	ap.add_argument(
+		"--sample-seconds",
+		type=float,
+		default=0.0,
+		help="Seconds to sample from each segment (0 = auto fill to target)",
+	)
+	ap.add_argument(
+		"--n-segments",
+		type=int,
+		default=12,
+		help="Number of equal segments for n-averages mode",
+	)
+	ap.add_argument(
+		"--log-interval",
+		type=float,
+		default=1.0,
+		help="Progress print interval in seconds",
+	)
+	ap.add_argument(
+		"--ffmpeg-extra",
+		default="",
+		help="Optional extra ffmpeg args appended to highlights command",
+	)
+	ap.add_argument(
+		"--video-encoder",
+		default="auto",
+		help="Video encoder (auto/libx264/h264_nvenc/libx265/hevc_nvenc)",
+	)
+	ap.add_argument(
+		"--preset",
+		default="p5",
+		help="Encoder preset (e.g. p5 for nvenc, medium for libx264)",
+	)
+	ap.add_argument(
+		"--crf",
+		type=int,
+		default=18,
+		help="CRF for libx264/libx265",
+	)
+	ap.add_argument(
+		"--nvenc-cq",
+		type=int,
+		default=19,
+		help="CQ value for NVENC (lower=better quality)",
+	)
+	ap.add_argument(
+		"--audio-codec",
+		default="aac",
+		help="Audio codec",
+	)
+	ap.add_argument(
+		"--audio-bitrate",
+		default="320k",
+		help="Audio bitrate",
+	)
+	ap.add_argument(
+		"--ignore-range",
+		action="append",
+		default=[],
+		help="Exclude sampling in time ranges. Repeatable. Format: START-END (seconds or MM:SS or HH:MM:SS)",
+	)
+	ap.add_argument(
+		"--deemphasize-range",
+		action="append",
+		default=[],
+		help="Downweight sampling in time ranges. Repeatable. Format: START-END (seconds or MM:SS or HH:MM:SS)",
+	)
+	ap.add_argument(
+		"--deemphasize-factor",
+		type=float,
+		default=0.35,
+		help="Relative sampling weight inside deemphasized ranges (0..1, default 0.35)",
+	)
+
+
 def run_split(args: argparse.Namespace) -> None:
 	input_path = Path(args.input).expanduser().resolve()
 	if not input_path.exists():
@@ -565,108 +748,116 @@ def run_split(args: argparse.Namespace) -> None:
 
 	started = time.time()
 	created_files: list[Path] = []
+	with tempfile.TemporaryDirectory(prefix="divvy_split_", dir="/tmp") as tmp_dir_str:
+		tmp_dir = Path(tmp_dir_str)
 
-	for i in range(parts):
-		idx = i + 1
-		start = (total_duration * i) / parts
-		end = (total_duration * (i + 1)) / parts
-		seg_dur = max(0.0, end - start)
+		for i in range(parts):
+			idx = i + 1
+			start = (total_duration * i) / parts
+			end = (total_duration * (i + 1)) / parts
+			seg_dur = max(0.0, end - start)
 
-		out_name = make_output_name(input_path, start, end, width_int)
-		out_path = out_dir / out_name
+			out_name = make_output_name(input_path, start, end, width_int)
+			out_path = out_dir / out_name
+			staged_out_path = tmp_dir / out_name
 
-		if args.cut_accuracy == "copy":
-			cmd = [
-				"ffmpeg",
-				"-hide_banner",
-				"-loglevel",
-				"error",
-				"-nostats",
-				"-progress",
-				"pipe:1",
-				"-y",
-				"-ss",
-				f"{start:.6f}",
-				"-t",
-				f"{seg_dur:.6f}",
-				"-i",
-				str(input_path),
-				"-map",
-				"0",
-				"-c",
-				"copy",
-				"-avoid_negative_ts",
-				"make_zero",
-				*extra_args,
-				str(out_path),
-			]
-		else:
-			cmd = [
-				"ffmpeg",
-				"-hide_banner",
-				"-loglevel",
-				"error",
-				"-nostats",
-				"-progress",
-				"pipe:1",
-				"-y",
-				"-ss",
-				f"{start:.6f}",
-				"-i",
-				str(input_path),
-				"-t",
-				f"{seg_dur:.6f}",
-				"-map",
-				"0:v:0",
-				"-map",
-				"0:a:0?",
-				"-c:v",
-				enc,
-			]
+			if args.cut_accuracy == "copy":
+				cmd = [
+					"ffmpeg",
+					"-hide_banner",
+					"-loglevel",
+					"error",
+					"-nostats",
+					"-progress",
+					"pipe:1",
+					"-y",
+					"-ss",
+					f"{start:.6f}",
+					"-t",
+					f"{seg_dur:.6f}",
+					"-i",
+					str(input_path),
+					"-map",
+					"0",
+					"-c",
+					"copy",
+					"-avoid_negative_ts",
+					"make_zero",
+					*extra_args,
+					str(staged_out_path),
+				]
+			else:
+				cmd = [
+					"ffmpeg",
+					"-hide_banner",
+					"-loglevel",
+					"error",
+					"-nostats",
+					"-progress",
+					"pipe:1",
+					"-y",
+					"-ss",
+					f"{start:.6f}",
+					"-i",
+					str(input_path),
+					"-t",
+					f"{seg_dur:.6f}",
+					"-map",
+					"0:v:0",
+					"-map",
+					"0:a:0?",
+					"-c:v",
+					enc,
+				]
 
-			if enc in {"h264_nvenc", "hevc_nvenc"}:
-				cmd += ["-preset", args.preset, "-rc", "vbr", "-cq", str(args.nvenc_cq), "-b:v", "0"]
-			elif enc in {"libx264", "libx265"}:
-				cmd += ["-preset", args.preset, "-crf", str(args.crf)]
+				if enc in {"h264_nvenc", "hevc_nvenc"}:
+					cmd += ["-preset", args.preset, "-rc", "vbr", "-cq", str(args.nvenc_cq), "-b:v", "0"]
+				elif enc in {"libx264", "libx265"}:
+					cmd += ["-preset", args.preset, "-crf", str(args.crf)]
 
-			cmd += [
-				"-c:a",
-				args.audio_codec,
-				"-b:a",
-				args.audio_bitrate,
-				"-movflags",
-				"+faststart",
-				*extra_args,
-				str(out_path),
-			]
+				cmd += [
+					"-c:a",
+					args.audio_codec,
+					"-b:a",
+					args.audio_bitrate,
+					"-movflags",
+					"+faststart",
+					*extra_args,
+					str(staged_out_path),
+				]
 
-		print(
-			f"[voidstar] start part={idx}/{parts} "
-			f"start={start:.6f}s end={end:.6f}s out={out_path.name}"
-		)
+			print(
+				f"[voidstar] start part={idx}/{parts} "
+				f"start={start:.6f}s end={end:.6f}s out={out_path.name}"
+			)
 
-		run_segment_with_progress(
-			cmd=cmd,
-			seg_i=idx,
-			seg_n=parts,
-			seg_duration=seg_dur,
-			done_before=start,
-			total_duration=total_duration,
-			started_at=started,
-			log_interval=args.log_interval,
-		)
+			run_segment_with_progress(
+				cmd=cmd,
+				seg_i=idx,
+				seg_n=parts,
+				seg_duration=seg_dur,
+				done_before=start,
+				total_duration=total_duration,
+				started_at=started,
+				log_interval=args.log_interval,
+			)
 
-		created_files.append(out_path)
+			if not staged_out_path.exists():
+				raise RuntimeError(f"Staged split output missing: {staged_out_path}")
 
-		elapsed = time.time() - started
-		done = end
-		speed = done / max(1e-9, elapsed)
-		eta = (total_duration - done) / max(1e-9, speed)
-		pct = 100.0 * done / max(1e-9, total_duration)
-		print(
-			f"[voidstar] done part={idx}/{parts} overall={pct:.1f}% "
-			f"speed={speed:.3f}x eta={format_eta(eta)}"
-		)
+			print(f"[voidstar] copy_to_final src={staged_out_path} dst={out_path}")
+			shutil.copy2(staged_out_path, out_path)
+			created_files.append(out_path)
+
+			elapsed = time.time() - started
+			done = end
+			speed = done / max(1e-9, elapsed)
+			eta = (total_duration - done) / max(1e-9, speed)
+			pct = 100.0 * done / max(1e-9, total_duration)
+			print(
+				f"[voidstar] done part={idx}/{parts} overall={pct:.1f}% "
+				f"speed={speed:.3f}x eta={format_eta(eta)}"
+			)
 
 	elapsed_total = time.time() - started
 	throughput = total_duration / max(1e-9, elapsed_total)
@@ -920,13 +1111,24 @@ def run_recombine(args: argparse.Namespace) -> None:
 	print(f"[voidstar] est_output_duration={est_output_duration:.6f}s")
 
 	started = time.time()
-	run_ffmpeg_with_progress(
-		cmd=cmd,
-		label="recombine",
-		total_duration=max(1e-6, est_output_duration),
-		started_at=started,
-		log_interval=args.log_interval,
-	)
+	with tempfile.TemporaryDirectory(prefix="divvy_recombine_", dir="/tmp") as tmp_dir_str:
+		tmp_dir = Path(tmp_dir_str)
+		staged_out_path = tmp_dir / out_path.name
+		cmd[-1] = str(staged_out_path)
+
+		run_ffmpeg_with_progress(
+			cmd=cmd,
+			label="recombine",
+			total_duration=max(1e-6, est_output_duration),
+			started_at=started,
+			log_interval=args.log_interval,
+		)
+
+		if not staged_out_path.exists():
+			raise RuntimeError(f"Staged output missing after recombine: {staged_out_path}")
+
+		print(f"[voidstar] copy_to_final src={staged_out_path} dst={out_path}")
+		shutil.copy2(staged_out_path, out_path)
 	elapsed_total = time.time() - started
 	throughput = est_output_duration / max(1e-9, elapsed_total)
 
@@ -936,6 +1138,233 @@ def run_recombine(args: argparse.Namespace) -> None:
 	print(f"[voidstar] reverse_order={'on' if args.reverse_order else 'off'}")
 	print(f"[voidstar] transitions={transition_count} style={args.glitch_style} duration={glitch_dur:.6f}s")
 	print(f"[voidstar] loop_perfect={'on' if loop_perfect else 'off'}")
+	print(f"[voidstar] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
+
+
+def run_highlights(args: argparse.Namespace) -> None:
+	input_path = Path(args.input).expanduser().resolve()
+	if not input_path.exists():
+		raise FileNotFoundError(f"Input not found: {input_path}")
+	if not (0.0 <= float(args.deemphasize_factor) <= 1.0):
+		raise ValueError("--deemphasize-factor must be between 0 and 1")
+
+	if args.output:
+		out_path = Path(args.output).expanduser().resolve()
+	elif args.out_dir:
+		out_path = Path(args.out_dir).expanduser().resolve() / build_highlights_default_filename(input_path, args)
+	else:
+		out_path = input_path.parent / build_highlights_default_filename(input_path, args)
+	out_path.parent.mkdir(parents=True, exist_ok=True)
+
+	if args.youtube_full_seconds <= 0:
+		raise ValueError("--youtube-full-seconds must be > 0")
+	if args.target_length_seconds <= 0:
+		raise ValueError("--target-length-seconds must be > 0")
+
+	video_duration, has_audio = probe_duration_and_audio(input_path)
+	if video_duration <= 0:
+		raise RuntimeError("Could not determine input duration")
+
+	window_start = max(0.0, args.start_seconds)
+	if window_start >= video_duration:
+		raise ValueError("--start-seconds is beyond input duration")
+
+	window_len = min(max(0.0, args.youtube_full_seconds), max(0.0, video_duration - window_start))
+	if window_len <= 0:
+		raise ValueError("Sampling window length is zero after clamping to input duration")
+	window_end = window_start + window_len
+
+	ignore_ranges_abs: list[tuple[float, float]] = []
+	for raw in args.ignore_range:
+		rs, re_ = parse_time_range_token(raw)
+		rs = min(max(0.0, rs), video_duration)
+		re_ = min(max(0.0, re_), video_duration)
+		if re_ > rs:
+			ignore_ranges_abs.append((rs, re_))
+
+	deemph_ranges_abs: list[tuple[float, float]] = []
+	for raw in args.deemphasize_range:
+		rs, re_ = parse_time_range_token(raw)
+		rs = min(max(0.0, rs), video_duration)
+		re_ = min(max(0.0, re_), video_duration)
+		if re_ > rs:
+			deemph_ranges_abs.append((rs, re_))
+
+	if args.sampling_mode == "minute-averages":
+		segment_len = 60.0
+		segment_count = max(1, int(math.ceil(window_len / segment_len)))
+	else:
+		segment_count = max(1, int(args.n_segments))
+		segment_len = window_len / max(1, segment_count)
+
+	if args.sample_seconds > 0:
+		sample_len = args.sample_seconds
+	else:
+		sample_len = args.target_length_seconds / max(1, segment_count)
+
+	if sample_len <= 0:
+		raise ValueError("Computed sample length is zero; increase target length or set --sample-seconds")
+
+	segments: list[tuple[float, float]] = []
+	for i in range(segment_count):
+		seg_start = window_start + (i * segment_len)
+		if seg_start >= window_end:
+			break
+		max_for_segment = min(segment_len, window_end - seg_start)
+		dur = min(sample_len, max_for_segment)
+
+		ignore_frac = overlap_fraction(seg_start, max_for_segment, ignore_ranges_abs)
+		if ignore_frac >= 0.999:
+			continue
+
+		deemph_frac = overlap_fraction(seg_start, max_for_segment, deemph_ranges_abs)
+		weight = (1.0 - ignore_frac) * (1.0 - (deemph_frac * (1.0 - args.deemphasize_factor)))
+		dur = min(dur, max_for_segment * max(0.0, weight))
+
+		if dur > 0.001:
+			segments.append((seg_start, dur))
+
+	if not segments:
+		raise RuntimeError("No highlight segments were generated from provided settings")
+
+	total_target = max(0.0, args.target_length_seconds)
+	selected: list[tuple[float, float]] = []
+	total_selected = 0.0
+	for start, dur in segments:
+		if total_selected >= total_target:
+			break
+		remaining = total_target - total_selected
+		use_dur = min(dur, remaining)
+		if use_dur > 0.001:
+			selected.append((start, use_dur))
+			total_selected += use_dur
+
+	if not selected:
+		raise RuntimeError("No highlight clips selected; try increasing --target-length-seconds")
+
+	enc = choose_video_encoder(args.video_encoder)
+	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
+
+	print(f"[voidstar] highlights_input={input_path}")
+	print(f"[voidstar] output={out_path}")
+	print(f"[voidstar] mode={args.sampling_mode} start={window_start:.3f}s window={window_len:.3f}s")
+	print(f"[voidstar] target={args.target_length_seconds:.3f}s segments={len(selected)} sample_seconds={sample_len:.3f}")
+	print(f"[voidstar] selected_total={total_selected:.3f}s encoder={enc} audio={'on' if has_audio else 'off'}")
+	if ignore_ranges_abs:
+		print(f"[voidstar] ignore_ranges={len(ignore_ranges_abs)}")
+	if deemph_ranges_abs:
+		print(f"[voidstar] deemphasize_ranges={len(deemph_ranges_abs)} factor={args.deemphasize_factor:.3f}")
+	print("[voidstar] pipeline=segment-then-concat (low-memory)")
+
+	for i, (start, dur) in enumerate(selected, start=1):
+		print(f"[voidstar] sample={i}/{len(selected)} start={start:.3f}s dur={dur:.3f}s")
+
+	started = time.time()
+	with tempfile.TemporaryDirectory(prefix="divvy_highlights_", dir="/tmp") as tmp_dir_str:
+		tmp_dir = Path(tmp_dir_str)
+		clip_paths: list[Path] = []
+		done_before = 0.0
+		staged_out_path = tmp_dir / out_path.name
+
+		for i, (start, dur) in enumerate(selected, start=1):
+			clip_path = tmp_dir / f"clip_{i:03d}.mp4"
+			clip_cmd: list[str] = [
+				"ffmpeg",
+				"-hide_banner",
+				"-loglevel",
+				"error",
+				"-nostats",
+				"-progress",
+				"pipe:1",
+				"-y",
+				"-ss",
+				f"{start:.6f}",
+				"-i",
+				str(input_path),
+				"-t",
+				f"{dur:.6f}",
+				"-map",
+				"0:v:0",
+				"-map",
+				"0:a:0?",
+				"-c:v",
+				enc,
+			]
+
+			if enc in {"h264_nvenc", "hevc_nvenc"}:
+				clip_cmd += ["-preset", args.preset, "-rc", "vbr", "-cq", str(args.nvenc_cq), "-b:v", "0"]
+			elif enc in {"libx264", "libx265"}:
+				clip_cmd += ["-preset", args.preset, "-crf", str(args.crf)]
+
+			if enc in {"h264_nvenc", "libx264"}:
+				clip_cmd += ["-pix_fmt", "yuv420p", "-profile:v", "high", "-level:v", "4.1"]
+
+			if has_audio:
+				clip_cmd += ["-c:a", args.audio_codec, "-b:a", args.audio_bitrate]
+			else:
+				clip_cmd += ["-an"]
+
+			clip_cmd += [*extra_args, str(clip_path)]
+
+			run_segment_with_progress(
+				cmd=clip_cmd,
+				seg_i=i,
+				seg_n=len(selected),
+				seg_duration=dur,
+				done_before=done_before,
+				total_duration=max(1e-6, total_selected),
+				started_at=started,
+				log_interval=args.log_interval,
+			)
+			done_before += dur
+			clip_paths.append(clip_path)
+
+		concat_list = tmp_dir / "concat.txt"
+		concat_lines = [f"file '{ffconcat_quote(p)}'" for p in clip_paths]
+		concat_list.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
+
+		concat_cmd: list[str] = [
+			"ffmpeg",
+			"-hide_banner",
+			"-loglevel",
+			"error",
+			"-nostats",
+			"-progress",
+			"pipe:1",
+			"-y",
+			"-f",
+			"concat",
+			"-safe",
+			"0",
+			"-i",
+			str(concat_list),
+			"-c",
+			"copy",
+			"-movflags",
+			"+faststart",
+			str(staged_out_path),
+		]
+
+		run_ffmpeg_with_progress(
+			cmd=concat_cmd,
+			label="highlights-concat",
+			total_duration=max(1e-6, total_selected),
+			started_at=time.time(),
+			log_interval=args.log_interval,
+		)
+
+		if not staged_out_path.exists():
+			raise RuntimeError(f"Staged output missing after concat: {staged_out_path}")
+
+		print(f"[voidstar] copy_to_final src={staged_out_path} dst={out_path}")
+		shutil.copy2(staged_out_path, out_path)
+	elapsed_total = time.time() - started
+	throughput = total_selected / max(1e-9, elapsed_total)
+
+	print("[voidstar] ===== summary =====")
+	print(f"[voidstar] output_file={out_path}")
+	print(f"[voidstar] mode={args.sampling_mode} segments={len(selected)}")
+	print(f"[voidstar] target={args.target_length_seconds:.3f}s actual={total_selected:.3f}s")
 	print(f"[voidstar] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
 
 
@@ -949,8 +1378,11 @@ def main() -> None:
 	ap_recombine = sub.add_parser("recombine", help="Recombine divvy parts with glitch transitions")
 	add_recombine_args(ap_recombine)
 
+	ap_highlights = sub.add_parser("highlights", help="Auto-sample and assemble highlight reels")
+	add_highlights_args(ap_highlights)
+
 	argv = sys.argv[1:]
-	if argv and argv[0] not in {"split", "recombine", "-h", "--help"}:
+	if argv and argv[0] not in {"split", "recombine", "highlights", "-h", "--help"}:
 		# Back-compat: legacy invocation defaults to split command.
 		argv = ["split", *argv]
 
@@ -958,6 +1390,8 @@ def main() -> None:
 
 	if args.command == "recombine":
 		run_recombine(args)
+	elif args.command == "highlights":
+		run_highlights(args)
 	else:
 		run_split(args)
 
