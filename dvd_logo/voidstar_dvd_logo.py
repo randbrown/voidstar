@@ -412,6 +412,25 @@ def run_checked(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True)
 
 
+def draw_clamped_rect(
+    frame: np.ndarray,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    color_bgr: tuple[int, int, int],
+    thickness: int,
+) -> None:
+    h, w = frame.shape[:2]
+    xa = max(0, min(w - 1, int(round(x0))))
+    ya = max(0, min(h - 1, int(round(y0))))
+    xb = max(0, min(w - 1, int(round(x1 - 1))))
+    yb = max(0, min(h - 1, int(round(y1 - 1))))
+    if xb <= xa or yb <= ya:
+        return
+    cv2.rectangle(frame, (xa, ya), (xb, yb), color_bgr, max(1, int(thickness)), cv2.LINE_AA)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Overlay bouncing PNG logo on a source video.")
     ap.add_argument("input", help="Input video path (bare names resolve under /mnt/c/users/<user>/Videos; ./ and ../ resolve from cwd)")
@@ -449,6 +468,8 @@ def main() -> None:
     ap.add_argument("--voidstar-strobe", type=float, default=0.35, help="Beat-hit strobe intensity [0..2].")
     ap.add_argument("--voidstar-glitch-hit", type=float, default=0.45, help="Beat-hit glitch intensity [0..2].")
     ap.add_argument("--voidstar-preset", choices=["custom", "subtle", "cinema", "wild", "insane"], default="custom", help="Convenience preset for VoidStar energy stack.")
+    ap.add_argument("--voidstar-debug-bounds", type=bool_flag, default=False, help="Draw debug bounding boxes for logo and tracking/search regions.")
+    ap.add_argument("--voidstar-debug-bounds-thickness", type=int, default=2, help="Line thickness for debug bounds overlay.")
     ap.add_argument("--local-point-track", type=bool_flag, default=False, help="Track moving feature points only within a logo-centered local bbox.")
     ap.add_argument("--content-bbox-for-local", type=bool_flag, default=True, help="Use non-transparent logo-content bbox (alpha) for local tracking/reels ROI calculations.")
     ap.add_argument("--content-bbox-alpha-threshold", type=float, default=0.02, help="Alpha threshold [0..1] to define visible logo-content bbox.")
@@ -635,6 +656,8 @@ def main() -> None:
     voidstar_strobe = clamp(float(args.voidstar_strobe), 0.0, 2.0)
     voidstar_glitch_hit = clamp(float(args.voidstar_glitch_hit), 0.0, 2.0)
     point_track_enabled = bool(args.local_point_track)
+    debug_bounds_enabled = bool(args.voidstar_debug_bounds)
+    debug_bounds_thickness = max(1, int(args.voidstar_debug_bounds_thickness))
     use_content_bbox_for_local = bool(args.content_bbox_for_local)
     content_bbox_alpha_threshold = float(np.clip(args.content_bbox_alpha_threshold, 0.0, 1.0))
     point_track_scale = float(np.clip(args.local_point_track_scale, 0.1, 8.0))
@@ -788,6 +811,11 @@ def main() -> None:
             local_base_cx = cx
             local_base_cy = cy
 
+        search_x0 = None
+        search_y0 = None
+        search_x1 = None
+        search_y1 = None
+
         pulse = 0.0
         if bass_env is not None and phase_idx < len(bass_env):
             pulse = float(np.clip(bass_env[phase_idx], 0.0, 1.0))
@@ -836,6 +864,7 @@ def main() -> None:
             by0 = max(0, int(round(local_base_cy - bh * 0.5)))
             bx1 = min(frame_w, bx0 + bw)
             by1 = min(frame_h, by0 + bh)
+            search_x0, search_y0, search_x1, search_y1 = bx0, by0, bx1, by1
 
             # Keep tracking/effect strictly local to current logo neighborhood.
             point_track_layer[:by0, :, :] = 0.0
@@ -1010,6 +1039,51 @@ def main() -> None:
                 y1 = min(frame_h, y0 + bh)
                 band_shift = int(np.random.randint(-18, 19))
                 frame[y0:y1, :, :] = np.roll(frame[y0:y1, :, :], band_shift, axis=1)
+
+        if debug_bounds_enabled:
+            if voidstar_colorize:
+                color_logo = (255, 200, 40)
+                color_content = (80, 230, 255)
+                color_motion = (120, 120, 255)
+                color_search = (80, 255, 120)
+                color_reels = (230, 80, 255)
+            else:
+                color_logo = (255, 255, 255)
+                color_content = (255, 255, 255)
+                color_motion = (255, 255, 255)
+                color_search = (255, 255, 255)
+                color_reels = (255, 255, 255)
+
+            draw_clamped_rect(
+                frame,
+                draw_x,
+                draw_y,
+                draw_x + cur_w,
+                draw_y + cur_h,
+                color_logo,
+                debug_bounds_thickness,
+            )
+            draw_clamped_rect(
+                frame,
+                int(round(local_base_x)),
+                int(round(local_base_y)),
+                int(round(local_base_x + local_base_w)),
+                int(round(local_base_y + local_base_h)),
+                color_content,
+                debug_bounds_thickness,
+            )
+
+            motion_x0 = int(round(half_w + margin_px - half_w))
+            motion_y0 = int(round(half_h + margin_px - half_h))
+            motion_x1 = int(round((frame_w - half_w - margin_px) + half_w))
+            motion_y1 = int(round((frame_h - half_h - margin_px) + half_h))
+            draw_clamped_rect(frame, motion_x0, motion_y0, motion_x1, motion_y1, color_motion, debug_bounds_thickness)
+
+            if search_x0 is not None and search_y0 is not None and search_x1 is not None and search_y1 is not None:
+                draw_clamped_rect(frame, search_x0, search_y0, search_x1, search_y1, color_search, debug_bounds_thickness)
+
+            if local_reels_enabled:
+                draw_clamped_rect(frame, x0, y0, x1, y1, color_reels, debug_bounds_thickness)
 
         if enc_proc.stdin is None:
             raise RuntimeError("Encoder stdin is unavailable.")
