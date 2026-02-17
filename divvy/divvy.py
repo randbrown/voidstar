@@ -693,6 +693,12 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 		help="Cycles per second for tempo grid lock. If > 0, sample starts/durations align to 1/cps seconds from --start-seconds",
 	)
 	ap.add_argument(
+		"--transient-skew-seconds",
+		type=float,
+		default=0.0,
+		help="Optional pre-roll added before each selected clip start (seconds) to protect transients; keeps aligned clip end timing",
+	)
+	ap.add_argument(
 		"--log-interval",
 		type=float,
 		default=1.0,
@@ -1255,6 +1261,8 @@ def run_highlights(args: argparse.Namespace) -> None:
 		raise ValueError("--recursive-min-segment-seconds must be > 0")
 	if args.cps < 0:
 		raise ValueError("--cps must be >= 0")
+	if args.transient_skew_seconds < 0:
+		raise ValueError("--transient-skew-seconds must be >= 0")
 
 	video_duration, has_audio = probe_duration_and_audio(input_path)
 	if video_duration <= 0:
@@ -1318,6 +1326,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 
 	grid_step = (1.0 / args.cps) if args.cps > 0 else 0.0
 	grid_ref = window_start
+	transient_skew = max(0.0, float(args.transient_skew_seconds))
 
 	segments: list[tuple[float, float]] = []
 	for seg_start, seg_end in segment_ranges:
@@ -1352,6 +1361,11 @@ def run_highlights(args: argparse.Namespace) -> None:
 				clip_start = seg_start
 
 		if clip_dur > 0.001:
+			if transient_skew > 0:
+				aligned_end = clip_start + clip_dur
+				skewed_start = max(seg_start, clip_start - transient_skew)
+				clip_start = skewed_start
+				clip_dur = max(0.001, aligned_end - clip_start)
 			segments.append((clip_start, clip_dur))
 
 	if not segments:
@@ -1399,6 +1413,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 	print(f"[voidstar] selected_total={total_selected:.3f}s encoder={enc} audio={'on' if has_audio else 'off'}")
 	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.3f}")
 	print(f"[voidstar] intro_glitch_seconds={intro_glitch_dur:.3f}")
+	print(f"[voidstar] transient_skew_seconds={transient_skew:.3f}")
 	print(f"[voidstar] sample_anchor={args.sample_anchor}")
 	if args.sampling_mode == "recursive-halves":
 		print(f"[voidstar] recursive_min_segment_seconds={args.recursive_min_segment_seconds:.3f}")
