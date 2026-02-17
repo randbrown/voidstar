@@ -776,6 +776,11 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 		default=0.35,
 		help="Relative sampling weight inside deemphasized ranges (0..1, default 0.35)",
 	)
+	ap.add_argument(
+		"--truncate-to-full-clips",
+		action="store_true",
+		help="If target would end with a partial final clip, omit that clip and end early using only full selected clips",
+	)
 
 
 def run_split(args: argparse.Namespace) -> None:
@@ -1398,6 +1403,8 @@ def run_highlights(args: argparse.Namespace) -> None:
 
 	selected: list[tuple[float, float]] = []
 	total_selected_effective = 0.0
+	omitted_partial_clip = False
+	omitted_partial_seconds = 0.0
 	for start, dur in segments:
 		if total_selected_effective >= total_target:
 			break
@@ -1406,6 +1413,10 @@ def run_highlights(args: argparse.Namespace) -> None:
 		use_dur = min(dur, remaining_effective)
 		if use_dur <= 0.001:
 			continue
+		if args.truncate_to_full_clips and (use_dur + 1e-9) < dur:
+			omitted_partial_clip = True
+			omitted_partial_seconds = use_dur
+			break
 
 		selected.append((start, use_dur))
 		total_selected_effective += use_dur
@@ -1446,10 +1457,13 @@ def run_highlights(args: argparse.Namespace) -> None:
 	print(f"[voidstar] output={out_path}")
 	print(f"[voidstar] mode={args.sampling_mode} start={window_start:.3f}s window={window_len:.3f}s")
 	print(f"[voidstar] target={args.target_length_seconds:.3f}s segments={len(selected)} sample_seconds={sample_len:.3f}")
+	print(f"[voidstar] truncate_to_full_clips={'on' if args.truncate_to_full_clips else 'off'}")
 	print(
 		f"[voidstar] selected_total_effective={total_selected_effective:.3f}s "
 		f"selected_total_raw={total_selected_raw:.3f}s estimated_output={total_selected_est_output:.3f}s encoder={enc} audio={'on' if has_audio else 'off'}"
 	)
+	if omitted_partial_clip:
+		print(f"[voidstar] omitted_partial_clip=on omitted_effective={omitted_partial_seconds:.3f}s")
 	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.3f}")
 	if preroll_deficit_total > 0.001:
 		print(f"[voidstar] preroll_deficit_total={preroll_deficit_total:.3f}s (window start clamp)")
