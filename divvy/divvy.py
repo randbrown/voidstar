@@ -753,10 +753,10 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 		help="ffmpeg xfade transition style for highlight glitches (e.g. pixelize, hblur, fadeblack)",
 	)
 	ap.add_argument(
-		"--intro-glitch-seconds",
+		"--loop-seam-seconds",
 		type=float,
 		default=0.0,
-		help="Small start-only intro transition duration in seconds for highlights (0 disables)",
+		help="Loop seam transition duration in seconds (end-of-loop transition into start, 0 disables)",
 	)
 	ap.add_argument(
 		"--ignore-range",
@@ -1399,7 +1399,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 		if total_target <= 0:
 			raise ValueError("--target-length-seconds is too small for the requested --cps tempo grid")
 
-	intro_glitch_dur = max(0.0, min(float(args.intro_glitch_seconds), 0.50))
+	loop_seam_dur = max(0.0, min(float(args.loop_seam_seconds), 0.50))
 
 	selected: list[tuple[float, float]] = []
 	total_selected_effective = 0.0
@@ -1445,10 +1445,10 @@ def run_highlights(args: argparse.Namespace) -> None:
 
 	total_selected_est_output = total_selected_raw - (glitch_dur * max(0, len(render_segments) - 1))
 
-	if intro_glitch_dur > 0 and total_selected_est_output > 0:
-		intro_glitch_dur = min(intro_glitch_dur, total_selected_est_output * 0.25)
-	if intro_glitch_dur < 0.001:
-		intro_glitch_dur = 0.0
+	if loop_seam_dur > 0 and total_selected_est_output > 0:
+		loop_seam_dur = min(loop_seam_dur, total_selected_est_output * 0.25)
+	if loop_seam_dur < 0.001:
+		loop_seam_dur = 0.0
 
 	enc = choose_video_encoder(args.video_encoder)
 	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
@@ -1467,7 +1467,9 @@ def run_highlights(args: argparse.Namespace) -> None:
 	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.3f}")
 	if preroll_deficit_total > 0.001:
 		print(f"[voidstar] preroll_deficit_total={preroll_deficit_total:.3f}s (window start clamp)")
-	print(f"[voidstar] intro_glitch_seconds={intro_glitch_dur:.3f}")
+	print(f"[voidstar] loop_seam_seconds={loop_seam_dur:.3f}")
+	if loop_seam_dur > 0:
+		print("[voidstar] loop_seam_mode=outro")
 	print(f"[voidstar] transient_skew_seconds={transient_skew:.3f}")
 	print(f"[voidstar] sample_anchor={args.sample_anchor}")
 	if args.sampling_mode == "recursive-halves":
@@ -1605,14 +1607,14 @@ def run_highlights(args: argparse.Namespace) -> None:
 			if has_audio:
 				filter_parts.append(f"{a_cur}asetpts=PTS-STARTPTS[abase]")
 
-			if intro_glitch_dur > 0:
-				tail_start = max(0.0, est_total - intro_glitch_dur)
-				filter_parts.append("[vbase]split=2[vintro_main][vintro_tail_src]")
+			if loop_seam_dur > 0:
+				outro_offset = max(0.0, est_total - loop_seam_dur)
+				filter_parts.append("[vbase]split=2[voutro_main][voutro_head_src]")
 				filter_parts.append(
-					f"[vintro_tail_src]trim=start={tail_start:.6f}:duration={intro_glitch_dur:.6f},setpts=PTS-STARTPTS[vintro_tail]"
+					f"[voutro_head_src]trim=start=0:duration={loop_seam_dur:.6f},setpts=PTS-STARTPTS[voutro_head]"
 				)
 				filter_parts.append(
-					f"[vintro_tail][vintro_main]xfade=transition={args.glitch_style}:duration={intro_glitch_dur:.6f}:offset=0[vout]"
+					f"[voutro_main][voutro_head]xfade=transition={args.glitch_style}:duration={loop_seam_dur:.6f}:offset={outro_offset:.6f}[vout]"
 				)
 
 				if has_audio:
