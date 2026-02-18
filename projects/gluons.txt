@@ -39,9 +39,9 @@ gluons_voidstar_0__highlights__mode-uniform-spread_target-90s_overlay
  rename
  gluons_voidstar_0__highlights__mode-uniform-spread_target-90s_overlay_dvdlogo_spd0_sx0.800_sy0.830_sc0.400_em0_ang112.86_st0_tr0.85_op0.50_arg1.00_ars0.50_ve1.60_lpt_vpwild
 to
-gluons_voidstar_0__highlights__mode-uniform-spread_target-90s_overlay_dvdlogo_vpwild
+gluons_voidstar_0_highlights_90s_overlay_logo
 
-DONE ??
+DONE gluons_voidstar_0_highlights_90s_overlay_logo
  
  -----v2 180s target
 python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
@@ -50,20 +50,37 @@ python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
 --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  \
 --sampling-mode uniform-spread --n-segments 6  --sample-seconds 32 --truncate-to-full-clips
 
-
-TODO-CURRENT
 python reels_cv_overlay.py "/mnt/c/users/brown/Videos/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-180s.mp4" \
   --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
   --smear true --smear-frames 17 --smear-decay 0.99 \
   --trail true  --trail-alpha .999 --beat-sync true \
   --velocity-color true --velocity-color-mult 10
 
+rename 
+gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-180s_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear
+to
+gluons_voidstar_0_highlights_180s_overlay
 
-TODO
 
-
- python voidstar_dvd_logo.py "gluons_voidstar_0_overlay_trim1080__highlights__mode-n-averages__start-0s__full-1080s__target-90s.mp4" ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1
+ python voidstar_dvd_logo.py \
+ "gluons_voidstar_0_highlights_180s_overlay.mp4" \
+ ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity .5 \
+ --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset wild  \
+ --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0  \
+ --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128  \
+ --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77  \
+ --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1  \
+ --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83  \
+ --content-bbox-for-local false  \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.8  \
+ --voidstar-debug-bounds-hit-prob 0.1 \
+ --output gluons_voidstar_0_highlights_180s_overlay_logo.mp4
  
+ DONE gluons_voidstar_0_highlights_180s_overlay_logo
  
   -----v4 60s target
 python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
@@ -72,20 +89,36 @@ python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
 --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  \
 --sampling-mode uniform-spread --n-segments 8  --sample-seconds 8 --truncate-to-full-clips
 
-TODO-CURRENT
 python reels_cv_overlay.py "/mnt/c/users/brown/Videos/gluons_voidstar_0__highlights__mode-uniform-spread__start-120s__full-600s__target-60s.mp4" \
   --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
   --smear true --smear-frames 17 --smear-decay 0.99 \
   --trail true  --trail-alpha .999 --beat-sync true \
   --velocity-color true --velocity-color-mult 10
 
+RENAME 
+gluons_voidstar_0__highlights__mode-uniform-spread__start-120s__full-600s__target-60s_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear
+TO
+gluons_voidstar_0_highlights_60s_overlay
 
-TODO
+ python voidstar_dvd_logo.py \
+ "gluons_voidstar_0_highlights_60s_overlay.mp4" \
+ ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity .5 \
+ --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset wild  \
+ --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0  \
+ --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128  \
+ --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77  \
+ --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1  \
+ --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83  \
+ --content-bbox-for-local false  \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.8  \
+ --voidstar-debug-bounds-hit-prob 0.1 \
+ --output gluons_voidstar_0_highlights_60s_overlay_logo.mp4
 
-
- #python voidstar_dvd_logo.py "gluons_voidstar_0_overlay_trim1080__highlights__mode-n-averages__start-0s__full-1080s__target-90s.mp4" ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1
- 
- 
+DONE gluons_voidstar_0_highlights_60s_overlay_logo
 
    -----v5 FULL youtube target
 
@@ -96,7 +129,7 @@ TODO
 --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  \
 --sampling-mode uniform-spread --n-segments 8  --sample-seconds 8 --truncate-to-full-clips
 
-TODO-CURRENT
+DONE
 python reels_cv_overlay.py "/mnt/c/users/brown/Videos/gluons_voidstar_0.mp4" \
   --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
   --smear true --smear-frames 17 --smear-decay 0.99 \
@@ -104,31 +137,83 @@ python reels_cv_overlay.py "/mnt/c/users/brown/Videos/gluons_voidstar_0.mp4" \
   --velocity-color true --velocity-color-mult 10
 
 
-TODO
+DONE
 
 rename 
-???
+gluons_voidstar_0_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear
 to
 gluons_voidstar_0_full_overlay
 
- #python voidstar_dvd_logo.py "gluons_voidstar_0_full_overlay.mp4" ./voidstar_emblem_cosmos_0.png \
+DONE: (NOTE i changed this one to "cinema" since it's longer... TBD...???)
+ python voidstar_dvd_logo.py "gluons_voidstar_0_full_overlay.mp4" ./voidstar_emblem_cosmos_0.png \
  --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
  --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
- --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
+ --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
  --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
  --local-point-track-max-points 256 --local-point-track-radius 256 \
  --local-point-track-min-distance 128 --local-point-track-refresh 8 \
  --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
  --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
  --local-point-track-link-opacity .77 --voidstar-colorize true \
- --start-x .8 --start-y .83 
- --content-bbox-for-local false --voidstar-debug-bounds true 
- --voidstar-debug-bounds-mode hit-glitch 
- --voidstar-debug-bounds-hit-threshold 0.8 
+ --start-x .8 --start-y .83 \
+ --content-bbox-for-local false --voidstar-debug-bounds true  \
+ --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.8  \
  --voidstar-debug-bounds-hit-prob 0.1
  
- 
- 
+ RENAME
+gluons_voidstar_0_full_overlay_dvdlogo_spd0_sx0.800_sy0.830_sc0.400_em0_ang164.818_st0_tr0.85_op0.50_arg1.00_ars0.50_ve1.15_lpt_vpcinema
+ TO
+ gluons_voidstar_0_full_overlay_logo
+
+
+ -----v4 60s target sample anchoor END ("t" in filename denotes end, so it sorts after "s" lol)
+python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
+--start-seconds 120 --youtube-full-seconds 600 --target-length-seconds 60 \
+--video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos \
+--glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  \
+--sampling-mode uniform-spread --n-segments 8 --sample-seconds 8 --sample-anchor end \
+--truncate-to-full-clips 
+--out-path gluons_voidstar_0_highlights_target_60t.mp4
+(TODO: fix --output it didn't work, even though it looks right to me, but i manually renamed the output file)
+RENAME
+gluons_voidstar_0__highlights__mode-uniform-spread__start-120s__full-600s__target-60s
+TO
+gluons_voidstar_0_highlights_target_60t
+
+DONE python reels_cv_overlay.py "/mnt/c/users/brown/Videos/gluons_voidstar_0_highlights_target_60t.mp4" \
+  --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
+  --smear true --smear-frames 17 --smear-decay 0.99 \
+  --trail true  --trail-alpha .999 --beat-sync true \
+  --velocity-color true --velocity-color-mult 10
+  --output gluons_voidstar_0_highlights_target_60t_overlay.mp4
+
+(TODO: fix --output it didn't work, even though it looks right to me, but i manually renamed the output file)
+RENAME
+gluons_voidstar_0_highlights_target_60t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear
+TO
+gluons_voidstar_0_highlights_target_60t_overlay
+
+DONE python voidstar_dvd_logo.py \
+ "gluons_voidstar_0_highlights_target_60t_overlay.mp4" \
+ ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity .5 \
+ --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset wild  \
+ --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0  \
+ --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128  \
+ --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77  \
+ --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1  \
+ --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83  \
+ --content-bbox-for-local false  \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.8  \
+ --voidstar-debug-bounds-hit-prob 0.1 \
+ --output gluons_voidstar_0_highlights_target_60t_overlay_logo.mp4
+
+DONE gluons_voidstar_0_highlights_target_60t_overlay_logo.mp4
+
 
  
  
