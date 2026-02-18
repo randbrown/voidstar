@@ -1,0 +1,145 @@
+
+
+--v1 90s 
+python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
+--start-seconds 0 --youtube-full-seconds 834 --target-length-seconds 90 \
+--video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos \
+--glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  \
+--sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
+
+python reels_cv_overlay.py "/mnt/c/users/brown/Videos/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-90s.mp4" \
+  --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
+  --smear true --smear-frames 17 --smear-decay 0.99 \
+  --trail true  --trail-alpha .999 --beat-sync true \
+  --velocity-color true --velocity-color-mult 10
+
+rename 
+gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-90s_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear 
+to
+gluons_voidstar_0__highlights__mode-uniform-spread_target-90s_overlay
+
+ python voidstar_dvd_logo.py \
+ "gluons_voidstar_0__highlights__mode-uniform-spread_target-90s_overlay.mp4" \
+ ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity .5 \
+ --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset wild  \
+ --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0  \
+ --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128  \
+ --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77  \
+ --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1  \
+ --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83  \
+ --content-bbox-for-local false  \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.8  \
+ --voidstar-debug-bounds-hit-prob 0.1 \
+ 
+
+ rename
+ gluons_voidstar_0__highlights__mode-uniform-spread_target-90s_overlay_dvdlogo_spd0_sx0.800_sy0.830_sc0.400_em0_ang112.86_st0_tr0.85_op0.50_arg1.00_ars0.50_ve1.60_lpt_vpwild
+to
+gluons_voidstar_0__highlights__mode-uniform-spread_target-90s_overlay_dvdlogo_vpwild
+
+DONE ??
+ 
+ -----v2 180s target
+python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
+--start-seconds 0 --youtube-full-seconds 834 --target-length-seconds 180 \
+--video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos \
+--glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  \
+--sampling-mode uniform-spread --n-segments 6  --sample-seconds 32 --truncate-to-full-clips
+
+
+TODO-CURRENT
+python reels_cv_overlay.py "/mnt/c/users/brown/Videos/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-180s.mp4" \
+  --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
+  --smear true --smear-frames 17 --smear-decay 0.99 \
+  --trail true  --trail-alpha .999 --beat-sync true \
+  --velocity-color true --velocity-color-mult 10
+
+
+TODO
+
+
+ python voidstar_dvd_logo.py "gluons_voidstar_0_overlay_trim1080__highlights__mode-n-averages__start-0s__full-1080s__target-90s.mp4" ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1
+ 
+ 
+  -----v4 60s target
+python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
+--start-seconds 120 --youtube-full-seconds 600 --target-length-seconds 60 \
+--video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos \
+--glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  \
+--sampling-mode uniform-spread --n-segments 8  --sample-seconds 8 --truncate-to-full-clips
+
+TODO-CURRENT
+python reels_cv_overlay.py "/mnt/c/users/brown/Videos/gluons_voidstar_0__highlights__mode-uniform-spread__start-120s__full-600s__target-60s.mp4" \
+  --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
+  --smear true --smear-frames 17 --smear-decay 0.99 \
+  --trail true  --trail-alpha .999 --beat-sync true \
+  --velocity-color true --velocity-color-mult 10
+
+
+TODO
+
+
+ #python voidstar_dvd_logo.py "gluons_voidstar_0_overlay_trim1080__highlights__mode-n-averages__start-0s__full-1080s__target-90s.mp4" ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1
+ 
+ 
+
+   -----v5 FULL youtube target
+
+--- skip this for full length, no divvy
+----python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
+--start-seconds 120 --youtube-full-seconds 600 --target-length-seconds 60 \
+--video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos \
+--glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  \
+--sampling-mode uniform-spread --n-segments 8  --sample-seconds 8 --truncate-to-full-clips
+
+TODO-CURRENT
+python reels_cv_overlay.py "/mnt/c/users/brown/Videos/gluons_voidstar_0.mp4" \
+  --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
+  --smear true --smear-frames 17 --smear-decay 0.99 \
+  --trail true  --trail-alpha .999 --beat-sync true \
+  --velocity-color true --velocity-color-mult 10
+
+
+TODO
+
+rename 
+???
+to
+gluons_voidstar_0_full_overlay
+
+ #python voidstar_dvd_logo.py "gluons_voidstar_0_full_overlay.mp4" ./voidstar_emblem_cosmos_0.png \
+ --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+ --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+ --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
+ --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+ --local-point-track-max-points 256 --local-point-track-radius 256 \
+ --local-point-track-min-distance 128 --local-point-track-refresh 8 \
+ --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+ --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+ --local-point-track-link-opacity .77 --voidstar-colorize true \
+ --start-x .8 --start-y .83 
+ --content-bbox-for-local false --voidstar-debug-bounds true 
+ --voidstar-debug-bounds-mode hit-glitch 
+ --voidstar-debug-bounds-hit-threshold 0.8 
+ --voidstar-debug-bounds-hit-prob 0.1
+ 
+ 
+ 
+
+ 
+ 
+ -----------------------misc
+ 
+ 
+ debug-bounds true --local-point-track true --local-point-track-scale 2.8 --local-point-track-pad-px 40 --content-bbox-for-local false
+ 
+ 
+ 
+ ffmpeg -hide_banner -y -ss START -i in.mp4 -t DURATION -map 0 -c:v libx264 -preset medium -crf 18 -c:a copy out_precise.mp4
+ 
+
+ 

@@ -2,20 +2,11 @@
 
 python reels_cv_overlay.py "/mnt/c/users/brown/Videos/abstract_forms_voidstar_0.mp4"  --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true --smear true --smear-frames 17 --smear-decay 0.99 --trail true  --trail-alpha .999 --beat-sync true --velocity-color true --velocity-color-mult 10
 
-./ff_clip_copy.sh --accurate "$HOME/WinVideos/abstract_forms_voidstar_0.mp4" 00:00:05.866 10
-./ff_clip_copy.sh "$HOME/WinVideos/abstract_forms_voidstar_0.mp4" 00:00:05.866 10
-
-ffmpeg -ss 5.866 -i "$HOME/WinVideos/abstract_forms_voidstar_0.mp4" -t 1088 -c copy "$HOME/WinVideos/abstract_forms_voidstar_0_trim1088.mp4"
-
-ffmpeg -ss 5.866 -i "$HOME/WinVideos/abstract_forms_voidstar_0_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" -t 1088 -c copy "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1088.mp4"
-
-ffmpeg -ss 00:00:05 -to 00:18:12 -i "$HOME/WinVideos/abstract_forms_voidstar_0_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" -c copy "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4"
-
-ffmpeg -i "$HOME/WinVideos/abstract_forms_voidstar_0_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" -ss 00:00:06.13 -t 1088 -async 1 "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4"
-
 ffmpeg -i "$HOME/WinVideos/abstract_forms_voidstar_0_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" -ss 00:00:06.13 -t 1080 -async 1 "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4"
 
 python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
+
+python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  --sampling-mode polyrhythm --sample-seconds 16 --truncate-to-full-clips
 
 python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 1 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 1  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
 
