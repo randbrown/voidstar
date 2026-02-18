@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # pipeline_gluons.sh
-# Pipeline for generating target videos for the gluons_voidstar_0.mp4 project
+# Pipeline for generating target videos for an input mp4
 #
 # Usage:
-#   ./pipeline_gluons.sh                # build all targets
-#   ./pipeline_gluons.sh preview        # build only 60s START target
-#   ./pipeline_gluons.sh --end-only     # build only END-anchored targets (60/90/180)
-#   ./pipeline_gluons.sh --force        # rebuild even if up-to-date
+#   ./pipeline_gluons.sh                        # uses default INPUT_VIDEO env var or fallback
+#   ./pipeline_gluons.sh /path/to/video.mp4     # build all targets for that input
+#   ./pipeline_gluons.sh preview /path/to.mp4   # build only 60s START target
+#   ./pipeline_gluons.sh --end-only --input /path/to.mp4
+#   ./pipeline_gluons.sh --force --input /path/to.mp4 --outdir /some/dir
 
 set -euo pipefail
 
@@ -61,7 +62,7 @@ rename_output() {
 # 1. 60s highlight (START anchor)
 run_60s_start() {
     echo "--- 60s highlight (START) ---"
-    local target="$OUTDIR/gluons_voidstar_0_highlights_60s_overlay_logo.mp4"
+    local target="$OUTDIR/${STEM}_highlights_60s_overlay_logo.mp4"
     should_rebuild "$target" || return 0
 
     python3 "$DIVVY" highlights "$INPUT_VIDEO" \
@@ -70,16 +71,16 @@ run_60s_start() {
         --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2 \
         --sampling-mode uniform-spread --n-segments 8 --sample-seconds 8 --truncate-to-full-clips
 
-    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-120s__full-600s__target-60s.mp4" \
+    python3 "$REELS_OVERLAY" "$OUTDIR/${STEM}__highlights__mode-uniform-spread__start-120s__full-600s__target-60s.mp4" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10
 
-    rename_output "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-120s__full-600s__target-60s_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_60s_overlay.mp4"
+    rename_output "$OUTDIR/${STEM}__highlights__mode-uniform-spread__start-120s__full-600s__target-60s_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+        "$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_60s_overlay.mp4" "$LOGO_IMG" \
+    python3 "$DVDLOGO" "$OUTDIR/${STEM}_highlights_60s_overlay.mp4" "$LOGO_IMG" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -96,7 +97,7 @@ run_60s_start() {
 # 2. 90s highlight (START anchor)
 run_90s_start() {
     echo "--- 90s highlight (START) ---"
-    local target="$OUTDIR/gluons_voidstar_0_highlights_90s_overlay_logo.mp4"
+    local target="$OUTDIR/${STEM}_highlights_90s_overlay_logo.mp4"
     should_rebuild "$target" || return 0
 
     python3 "$DIVVY" highlights "$INPUT_VIDEO" \
@@ -105,16 +106,16 @@ run_90s_start() {
         --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2 \
         --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
 
-    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-90s.mp4" \
+    python3 "$REELS_OVERLAY" "$OUTDIR/${STEM}__highlights__mode-uniform-spread__start-0s__full-834s__target-90s.mp4" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10
 
-    rename_output "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-90s_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_90s_overlay.mp4"
+    rename_output "$OUTDIR/${STEM}__highlights__mode-uniform-spread__start-0s__full-834s__target-90s_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+        "$OUTDIR/${STEM}_highlights_90s_overlay.mp4"
 
-    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_90s_overlay.mp4" "$LOGO_IMG" \
+    python3 "$DVDLOGO" "$OUTDIR/${STEM}_highlights_90s_overlay.mp4" "$LOGO_IMG" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -131,7 +132,7 @@ run_90s_start() {
 # 3. 180s highlight (START anchor)
 run_180s_start() {
     echo "--- 180s highlight (START) ---"
-    local target="$OUTDIR/gluons_voidstar_0_highlights_180s_overlay_logo.mp4"
+    local target="$OUTDIR/${STEM}_highlights_180s_overlay_logo.mp4"
     should_rebuild "$target" || return 0
 
     python3 "$DIVVY" highlights "$INPUT_VIDEO" \
@@ -140,16 +141,16 @@ run_180s_start() {
         --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2 \
         --sampling-mode uniform-spread --n-segments 6 --sample-seconds 32 --truncate-to-full-clips
 
-    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-180s.mp4" \
+    python3 "$REELS_OVERLAY" "$OUTDIR/${STEM}__highlights__mode-uniform-spread__start-0s__full-834s__target-180s.mp4" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10
 
-    rename_output "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-180s_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_180s_overlay.mp4"
+    rename_output "$OUTDIR/${STEM}__highlights__mode-uniform-spread__start-0s__full-834s__target-180s_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+        "$OUTDIR/${STEM}_highlights_180s_overlay.mp4"
 
-    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_180s_overlay.mp4" "$LOGO_IMG" \
+    python3 "$DVDLOGO" "$OUTDIR/${STEM}_highlights_180s_overlay.mp4" "$LOGO_IMG" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -166,9 +167,10 @@ run_180s_start() {
 # 4. FULL (no divvy, just overlay and logo)
 run_full() {
     echo "--- FULL (YouTube) ---"
-    local target="$OUTDIR/gluons_voidstar_0_full_overlay_logo.mp4"
-    local prebuilt_overlay="$(eval echo \"${PREBUILT_FULL_OVERLAY:-~/WinVideos/gluons_voidstar_0_full_overlay.mp4}\")"
-    local overlay_output="$OUTDIR/gluons_voidstar_0_full_overlay.mp4"
+    local target="$OUTDIR/${STEM}_full_overlay_logo.mp4"
+    local prebuilt_overlay_default="~/WinVideos/${STEM}_full_overlay.mp4"
+    local prebuilt_overlay="$(eval echo \"${PREBUILT_FULL_OVERLAY:-$prebuilt_overlay_default}\")"
+    local overlay_output="$OUTDIR/${STEM}_full_overlay.mp4"
 
     # If prebuilt overlay exists and is newer than the script, use it
     if [[ -f "$prebuilt_overlay" ]]; then
@@ -201,7 +203,7 @@ run_full() {
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10
 
-    rename_output "$OUTDIR/gluons_voidstar_0_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+    rename_output "$OUTDIR/${STEM}_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
         "$overlay_output"
 
     python3 "$DVDLOGO" "$overlay_output" "$LOGO_IMG" \
@@ -221,7 +223,7 @@ run_full() {
 # 5. 60s highlight (END anchor)
 run_60s_end() {
     echo "--- 60s highlight (END) ---"
-    local target="$OUTDIR/gluons_voidstar_0_highlights_60t_overlay_logo.mp4"
+    local target="$OUTDIR/${STEM}_highlights_60t_overlay_logo.mp4"
     should_rebuild "$target" || return 0
 
     python3 "$DIVVY" highlights "$INPUT_VIDEO" \
@@ -231,20 +233,20 @@ run_60s_end() {
         --sampling-mode uniform-spread --n-segments 8 --sample-seconds 8 --sample-anchor end \
         --truncate-to-full-clips
 
-    rename_output "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-120s__full-600s__target-60s.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_60t.mp4"
+    rename_output "$OUTDIR/${STEM}__highlights__mode-uniform-spread__start-120s__full-600s__target-60s.mp4" \
+        "$OUTDIR/${STEM}_highlights_60t.mp4"
 
-    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0_highlights_60t.mp4" \
+    python3 "$REELS_OVERLAY" "$OUTDIR/${STEM}_highlights_60t.mp4" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10 \
-        --output "$OUTDIR/gluons_voidstar_0_highlights_60t_overlay.mp4"
+        --output "$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    rename_output "$OUTDIR/gluons_voidstar_0_highlights_60t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_60t_overlay.mp4"
+    rename_output "$OUTDIR/${STEM}_highlights_60t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+        "$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_60t_overlay.mp4" "$LOGO_IMG" \
+    python3 "$DVDLOGO" "$OUTDIR/${STEM}_highlights_60t_overlay.mp4" "$LOGO_IMG" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -261,7 +263,7 @@ run_60s_end() {
 # 6. 90s highlight (END anchor)
 run_90s_end() {
     echo "--- 90s highlight (END) ---"
-    local target="$OUTDIR/gluons_voidstar_0_highlights_90t_overlay_logo.mp4"
+    local target="$OUTDIR/${STEM}_highlights_90t_overlay_logo.mp4"
     should_rebuild "$target" || return 0
 
     python3 "$DIVVY" highlights "$INPUT_VIDEO" \
@@ -270,20 +272,20 @@ run_90s_end() {
         --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2 \
         --sampling-mode uniform-spread --sample-seconds 16 --sample-anchor end --truncate-to-full-clips
 
-    rename_output "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-90s.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_90t.mp4"
+    rename_output "$OUTDIR/${STEM}__highlights__mode-uniform-spread__start-0s__full-834s__target-90s.mp4" \
+        "$OUTDIR/${STEM}_highlights_90t.mp4"
 
-    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0_highlights_90t.mp4" \
+    python3 "$REELS_OVERLAY" "$OUTDIR/${STEM}_highlights_90t.mp4" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10 \
-        --output "$OUTDIR/gluons_voidstar_0_highlights_90t_overlay.mp4"
+        --output "$OUTDIR/${STEM}_highlights_90t_overlay.mp4"
 
-    rename_output "$OUTDIR/gluons_voidstar_0_highlights_90t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_90t_overlay.mp4"
+    rename_output "$OUTDIR/${STEM}_highlights_90t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+        "$OUTDIR/${STEM}_highlights_90t_overlay.mp4"
 
-    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_90t_overlay.mp4" "$LOGO_IMG" \
+    python3 "$DVDLOGO" "$OUTDIR/${STEM}_highlights_90t_overlay.mp4" "$LOGO_IMG" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -300,7 +302,7 @@ run_90s_end() {
 # 7. 180s highlight (END anchor)
 run_180s_end() {
     echo "--- 180s highlight (END) ---"
-    local target="$OUTDIR/gluons_voidstar_0_highlights_180t_overlay_logo.mp4"
+    local target="$OUTDIR/${STEM}_highlights_180t_overlay_logo.mp4"
     should_rebuild "$target" || return 0
 
     python3 "$DIVVY" highlights "$INPUT_VIDEO" \
@@ -309,20 +311,20 @@ run_180s_end() {
         --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2 \
         --sampling-mode uniform-spread --n-segments 6 --sample-seconds 32 --sample-anchor end --truncate-to-full-clips
 
-    rename_output "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-180s.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_180t.mp4"
+    rename_output "$OUTDIR/${STEM}__highlights__mode-uniform-spread__start-0s__full-834s__target-180s.mp4" \
+        "$OUTDIR/${STEM}_highlights_180t.mp4"
 
-    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0_highlights_180t.mp4" \
+    python3 "$REELS_OVERLAY" "$OUTDIR/${STEM}_highlights_180t.mp4" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10 \
-        --output "$OUTDIR/gluons_voidstar_0_highlights_180t_overlay.mp4"
+        --output "$OUTDIR/${STEM}_highlights_180t_overlay.mp4"
 
-    rename_output "$OUTDIR/gluons_voidstar_0_highlights_180t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_180t_overlay.mp4"
+    rename_output "$OUTDIR/${STEM}_highlights_180t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+        "$OUTDIR/${STEM}_highlights_180t_overlay.mp4"
 
-    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_180t_overlay.mp4" "$LOGO_IMG" \
+    python3 "$DVDLOGO" "$OUTDIR/${STEM}_highlights_180t_overlay.mp4" "$LOGO_IMG" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -344,8 +346,60 @@ main() {
     FORCE=0
     END_ONLY=0
     PREVIEW=0
-    INPUT_VIDEO=$(eval echo "${INPUT_VIDEO:-~/WinVideos/gluons_voidstar_0.mp4}")
-    OUTDIR=$(eval echo "${OUTDIR:-~/WinVideos/gluons_voidstar_0/}")
+
+    # Parse args FIRST (because OUTDIR default depends on input stem)
+    INPUT_VIDEO=""
+    OUTDIR=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force|-f) FORCE=1; shift ;;
+            --end-only) END_ONLY=1; shift ;;
+            preview)    PREVIEW=1; shift ;;
+
+            --input)    INPUT_VIDEO="$2"; shift 2 ;;
+            --outdir)   OUTDIR="$2"; shift 2 ;;
+
+            -h|--help)
+                cat <<'EOF'
+Usage: ./pipeline_gluons.sh [preview] [--end-only] [--force] [<video.mp4>] [--input <video_path>] [--outdir <output_dir>]
+
+  preview     Build only the 60s START target (fast iteration)
+  --end-only  Build only the END-anchored targets (60/90/180)
+  --force     Rebuild even if targets are up-to-date
+  <video.mp4> Positional input video (alternative to --input)
+  --input     Specify input video file location (overrides positional if both provided)
+  --outdir    Specify output directory (default: ~/WinVideos/<input_stem>/)
+EOF
+                return 0
+                ;;
+
+            # Positional mp4 (only if it doesn't look like a flag)
+            *)
+                if [[ "$1" != -* ]]; then
+                    INPUT_VIDEO="$1"
+                    shift
+                else
+                    die "Unknown arg: $1 (try --help)"
+                fi
+                ;;
+        esac
+    done
+
+    # Defaults (support env vars, keep prior behavior as fallback)
+    if [[ -z "${INPUT_VIDEO}" ]]; then
+        INPUT_VIDEO=$(eval echo "${INPUT_VIDEO:-${VOIDSTAR_INPUT_VIDEO:-~/WinVideos/gluons_voidstar_0.mp4}}")
+    else
+        INPUT_VIDEO=$(eval echo "$INPUT_VIDEO")
+    fi
+
+    STEM="$(basename "${INPUT_VIDEO%.*}")"
+
+    if [[ -z "${OUTDIR}" ]]; then
+        OUTDIR=$(eval echo "${OUTDIR:-${VOIDSTAR_OUTDIR:-~/WinVideos/${STEM}/}}")
+    else
+        OUTDIR=$(eval echo "$OUTDIR")
+    fi
 
     # Auto-detect required scripts and logo image
     PROJECT_ROOT="/home/$USER/code/voidstar"
@@ -370,29 +424,6 @@ main() {
     REELS_OVERLAY=$(find_script "reels_cv_overlay.py")
     DVDLOGO=$(find_script "voidstar_dvd_logo.py")
     LOGO_IMG=$(find_logo)
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --force|-f) FORCE=1; shift ;;
-            --end-only) END_ONLY=1; shift ;;
-            preview)    PREVIEW=1; shift ;;
-            --input)    INPUT_VIDEO="$2"; shift 2 ;;
-            --outdir)   OUTDIR="$2"; shift 2 ;;
-            -h|--help)
-                cat <<'EOF'
-Usage: ./pipeline_gluons.sh [preview] [--end-only] [--force] [--input <video_path>] [--outdir <output_dir>]
-
-  preview     Build only the 60s START target (fast iteration)
-  --end-only  Build only the END-anchored targets (60/90/180)
-  --force     Rebuild even if targets are up-to-date
-  --input     Specify input video file location (default: ~/WinVideos/gluons_voidstar_0.mp4)
-  --outdir    Specify output directory (default: ~/WinVideos/gluons_voidstar_0/)
-EOF
-                return 0
-                ;;
-            *) die "Unknown arg: $1 (try --help)" ;;
-        esac
-    done
 
     mkdir -p "$OUTDIR"
 
