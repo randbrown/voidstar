@@ -1,5 +1,9 @@
 
+  mp311 3.11.14   voidstar   main 
 
+❯  ./pipeline_gluons.sh --end-only --input /home/brown/WinVideos/gluons_voidstar_0.mp4 --outdir /home/brown/WinVideos/gluons_voidstar_0
+
+-------------------
 --v1 90s 
 python3 divvy.py highlights "$HOME/WinVideos/gluons_voidstar_0.mp4" \
 --start-seconds 0 --youtube-full-seconds 834 --target-length-seconds 90 \

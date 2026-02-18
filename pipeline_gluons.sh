@@ -221,7 +221,7 @@ run_full() {
 # 5. 60s highlight (END anchor)
 run_60s_end() {
     echo "--- 60s highlight (END) ---"
-    local target="$OUTDIR/gluons_voidstar_0_highlights_target_60t_overlay_logo.mp4"
+    local target="$OUTDIR/gluons_voidstar_0_highlights_60t_overlay_logo.mp4"
     should_rebuild "$target" || return 0
 
     python3 "$DIVVY" highlights "$INPUT_VIDEO" \
@@ -232,19 +232,19 @@ run_60s_end() {
         --truncate-to-full-clips
 
     rename_output "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-120s__full-600s__target-60s.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_target_60t.mp4"
+        "$OUTDIR/gluons_voidstar_0_highlights_60t.mp4"
 
-    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0_highlights_target_60t.mp4" \
+    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0_highlights_60t.mp4" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10 \
-        --output "$OUTDIR/gluons_voidstar_0_highlights_target_60t_overlay.mp4"
+        --output "$OUTDIR/gluons_voidstar_0_highlights_60t_overlay.mp4"
 
-    rename_output "$OUTDIR/gluons_voidstar_0_highlights_target_60t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_target_60t_overlay.mp4"
+    rename_output "$OUTDIR/gluons_voidstar_0_highlights_60t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+        "$OUTDIR/gluons_voidstar_0_highlights_60t_overlay.mp4"
 
-    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_target_60t_overlay.mp4" "$LOGO_IMG" \
+    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_60t_overlay.mp4" "$LOGO_IMG" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -261,7 +261,7 @@ run_60s_end() {
 # 6. 90s highlight (END anchor)
 run_90s_end() {
     echo "--- 90s highlight (END) ---"
-    local target="$OUTDIR/gluons_voidstar_0_highlights_target_90t_overlay_logo.mp4"
+    local target="$OUTDIR/gluons_voidstar_0_highlights_90t_overlay_logo.mp4"
     should_rebuild "$target" || return 0
 
     python3 "$DIVVY" highlights "$INPUT_VIDEO" \
@@ -271,19 +271,19 @@ run_90s_end() {
         --sampling-mode uniform-spread --sample-seconds 16 --sample-anchor end --truncate-to-full-clips
 
     rename_output "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-90s.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_target_90t.mp4"
+        "$OUTDIR/gluons_voidstar_0_highlights_90t.mp4"
 
-    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0_highlights_target_90t.mp4" \
+    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0_highlights_90t.mp4" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10 \
-        --output "$OUTDIR/gluons_voidstar_0_highlights_target_90t_overlay.mp4"
+        --output "$OUTDIR/gluons_voidstar_0_highlights_90t_overlay.mp4"
 
-    rename_output "$OUTDIR/gluons_voidstar_0_highlights_target_90t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_target_90t_overlay.mp4"
+    rename_output "$OUTDIR/gluons_voidstar_0_highlights_90t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+        "$OUTDIR/gluons_voidstar_0_highlights_90t_overlay.mp4"
 
-    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_target_90t_overlay.mp4" "$LOGO_IMG" \
+    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_90t_overlay.mp4" "$LOGO_IMG" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -300,7 +300,7 @@ run_90s_end() {
 # 7. 180s highlight (END anchor)
 run_180s_end() {
     echo "--- 180s highlight (END) ---"
-    local target="$OUTDIR/gluons_voidstar_0_highlights_target_180t_overlay_logo.mp4"
+    local target="$OUTDIR/gluons_voidstar_0_highlights_180t_overlay_logo.mp4"
     should_rebuild "$target" || return 0
 
     python3 "$DIVVY" highlights "$INPUT_VIDEO" \
@@ -310,19 +310,19 @@ run_180s_end() {
         --sampling-mode uniform-spread --n-segments 6 --sample-seconds 32 --sample-anchor end --truncate-to-full-clips
 
     rename_output "$OUTDIR/gluons_voidstar_0__highlights__mode-uniform-spread__start-0s__full-834s__target-180s.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_target_180t.mp4"
+        "$OUTDIR/gluons_voidstar_0_highlights_180t.mp4"
 
-    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0_highlights_target_180t.mp4" \
+    python3 "$REELS_OVERLAY" "$OUTDIR/gluons_voidstar_0_highlights_180t.mp4" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10 \
-        --output "$OUTDIR/gluons_voidstar_0_highlights_target_180t_overlay.mp4"
+        --output "$OUTDIR/gluons_voidstar_0_highlights_180t_overlay.mp4"
 
-    rename_output "$OUTDIR/gluons_voidstar_0_highlights_target_180t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
-        "$OUTDIR/gluons_voidstar_0_highlights_target_180t_overlay.mp4"
+    rename_output "$OUTDIR/gluons_voidstar_0_highlights_180t_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
+        "$OUTDIR/gluons_voidstar_0_highlights_180t_overlay.mp4"
 
-    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_target_180t_overlay.mp4" "$LOGO_IMG" \
+    python3 "$DVDLOGO" "$OUTDIR/gluons_voidstar_0_highlights_180t_overlay.mp4" "$LOGO_IMG" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
