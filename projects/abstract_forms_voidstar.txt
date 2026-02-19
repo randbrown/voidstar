@@ -1,4 +1,12 @@
 
+  mp311 3.11.14   voidstar   main 
+❯  ./pipeline_gluons.sh  --input /home/brown/WinVideos/abstract_forms_voidstar_0.mp4
+
+./pipeline_gluons_refactored_v3.sh myvideo.mp4 --jobs 4
+
+
+
+---
 
 python reels_cv_overlay.py "/mnt/c/users/brown/Videos/abstract_forms_voidstar_0.mp4"  --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true --smear true --smear-frames 17 --smear-decay 0.99 --trail true  --trail-alpha .999 --beat-sync true --velocity-color true --velocity-color-mult 10
 
