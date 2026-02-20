@@ -189,3 +189,45 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --stutter-slice-energy-scale 1.2 \
   --start 690 --duration 15 \
   --seed 1337
+
+
+// ===== Combo Presets (alternates glyph + stutter by weighted probability) =====
+
+// combo 1: glyph-heavy (mostly glyph, occasional stutter)
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect combo \
+  --audio-reactive \
+  --beat-threshold 0.60 --beat-prob 1.0 --glitch-hold 12 \
+  --combo-glyph-prob 0.75 --combo-stutter-prob 0.25 \
+  --combo-alternate-bias 0.35 \
+  --color-mode audio --palette fire --audio-color-reactive \
+  --stutter-slice-prob 0.75 --stutter-slice-shift-max 120 \
+  --start 690 --duration 15 \
+  --seed 1337
+
+// combo 2: balanced (roughly alternating)
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect combo \
+  --audio-reactive \
+  --beat-threshold 0.58 --beat-prob 1.0 --glitch-hold 12 \
+  --combo-glyph-prob 0.5 --combo-stutter-prob 0.5 \
+  --combo-alternate-bias 0.65 \
+  --color-mode input --input-palette-k 6 --palette-refresh 6 \
+  --stutter-slice-prob 0.90 --stutter-slice-shift-max 180 \
+  --stutter-frame-jitter 3 --stutter-jitter-prob 0.6 \
+  --start 690 --duration 15 \
+  --seed 1337
+
+// combo 3: stutter-heavy (hard glitch with glyph accents)
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect combo \
+  --audio-reactive \
+  --beat-threshold 0.52 --beat-prob 1.0 --glitch-hold 14 \
+  --combo-glyph-prob 0.25 --combo-stutter-prob 0.75 \
+  --combo-alternate-bias 0.45 \
+  --color-mode fixed --palette insane --glitch-prob 0.4 \
+  --stutter-slice-prob 0.95 --stutter-slice-shift-max 220 \
+  --stutter-slice-min-bands 4 --stutter-slice-max-bands 12 \
+  --stutter-frame-jitter 4 --stutter-jitter-prob 0.75 \
+  --start 690 --duration 15 \
+  --seed 1337

@@ -205,6 +205,27 @@ def apply_slice_shift_glitch(frame: np.ndarray, rng, args, energy: float) -> np.
     return out
 
 
+def pick_combo_effect(rng, args, last_effect):
+    glyph_w = max(0.0, float(args.combo_glyph_prob))
+    stutter_w = max(0.0, float(args.combo_stutter_prob))
+
+    if glyph_w <= 0.0 and stutter_w <= 0.0:
+        return "glyph"
+
+    if last_effect in ("glyph", "stutter") and args.combo_alternate_bias > 0:
+        if last_effect == "glyph":
+            stutter_w *= (1.0 + args.combo_alternate_bias)
+        else:
+            glyph_w *= (1.0 + args.combo_alternate_bias)
+
+    total = glyph_w + stutter_w
+    if total <= 0.0:
+        return "glyph"
+
+    r = rng.random() * total
+    return "glyph" if r < glyph_w else "stutter"
+
+
 # ============================================================
 # Output naming (same folder as input)
 # ============================================================
@@ -223,6 +244,15 @@ def build_output_name(args) -> str:
             f"_dur{dur_str}"
             f"_sb{args.stutter_min_back}-{args.stutter_max_back}"
             f"_sh{args.stutter_min_hold}-{args.stutter_max_hold}"
+            f".mp4"
+        )
+    elif effect == "combo":
+        filename = (
+            f"{stem}_combo"
+            f"_st{args.start:.2f}"
+            f"_dur{dur_str}"
+            f"_gp{args.combo_glyph_prob:.2f}"
+            f"_sp{args.combo_stutter_prob:.2f}"
             f".mp4"
         )
     else:
@@ -745,6 +775,263 @@ def run_stutter_cpu(args):
     log(f"✅ done → {out_path}")
 
 
+def run_combo_cpu(args):
+    log("mode=CPU effect=combo")
+
+    rng = np.random.default_rng(args.seed)
+
+    cap = cv2.VideoCapture(args.input)
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open input: {args.input}")
+
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    total_frames_input = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+
+    if width <= 0 or height <= 0:
+        raise RuntimeError("Could not read video dimensions.")
+
+    start_frame = int(round(args.start * fps))
+    if args.duration is None:
+        end_frame = total_frames_input if total_frames_input > 0 else 10**12
+    else:
+        end_frame = start_frame + int(round(args.duration * fps))
+
+    frames_to_process = max(0, end_frame - start_frame)
+
+    log(f"input={args.input}")
+    log(f"fps={fps:.3f} size={width}x{height}")
+    log(f"start={args.start:.3f}s -> start_frame={start_frame}")
+    log(f"frames_to_process={frames_to_process}")
+
+    if frames_to_process <= 0:
+        raise RuntimeError("Nothing to process (check --start/--duration).")
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+    out_path = build_output_name(args)
+    log(f"output={out_path}")
+
+    energy_curve = None
+    if args.audio_reactive:
+        energy_curve = analyze_audio_energy(args, fps, frames_to_process)
+
+    tmp_video = str(Path(tempfile.gettempdir()) / f"voidstar_combo_tmp_{int(time.time())}.mp4")
+    log(f"temp_video={tmp_video}")
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(tmp_video, fourcc, fps, (width, height))
+
+    t0 = time.time()
+
+    hold_left = 0
+    active_effect = None
+    last_effect = None
+
+    prev_gray = None
+    flash_left = 0
+    custom_colors = parse_colors_arg(args.colors)
+    cached_input_palette = None
+    base_cell = args.cell
+
+    max_back = max(1, args.stutter_max_back)
+    min_back = max(1, min(args.stutter_min_back, max_back))
+    frame_history = []
+    stutter_back = min_back
+    freeze_left = 0
+    freeze_frame = None
+
+    with tqdm(total=frames_to_process) as pbar:
+        frame_idx = 0
+        while frame_idx < frames_to_process:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame_history.append(frame.copy())
+            if len(frame_history) > (max_back + 1):
+                frame_history.pop(0)
+
+            e = 0.0
+            if energy_curve is not None:
+                e = float(energy_curve[frame_idx])
+
+            if energy_curve is not None:
+                triggered = (e >= args.beat_threshold) and (rng.random() <= args.beat_prob)
+            else:
+                triggered = (hold_left <= 0)
+
+            if triggered and hold_left <= 0:
+                active_effect = pick_combo_effect(rng, args, last_effect)
+                last_effect = active_effect
+                hold_left = max(1, args.glitch_hold)
+
+                if active_effect == "stutter":
+                    stutter_back = int(rng.integers(min_back, max_back + 1))
+                    freeze_left = int(rng.integers(1, max(2, args.stutter_chunk + 1)))
+                    freeze_frame = None
+                elif active_effect == "glyph" and args.beat_flash:
+                    flash_left = max(flash_left, args.beat_flash_frames)
+
+            effect_on = hold_left > 0
+
+            if not effect_on:
+                out = frame
+                mode = "orig"
+            elif active_effect == "stutter":
+                out = frame
+                mode = "stutter"
+
+                if len(frame_history) > 1:
+                    if freeze_left <= 0 or freeze_frame is None:
+                        delay = min(stutter_back, len(frame_history) - 1)
+                        src = frame_history[-1 - delay]
+                        freeze_frame = src.copy()
+                        freeze_left = int(rng.integers(1, max(2, args.stutter_chunk + 1)))
+                    out = freeze_frame
+                    freeze_left -= 1
+
+                    if args.stutter_slice_shift_max > 0:
+                        slice_prob = args.stutter_slice_prob
+                        if args.audio_reactive and args.stutter_slice_energy_scale > 0:
+                            slice_prob = np.clip(slice_prob + 0.25 * args.stutter_slice_energy_scale * max(0.0, e), 0.0, 1.0)
+                        if rng.random() < slice_prob:
+                            out = apply_slice_shift_glitch(out, rng, args, e)
+
+                    if args.stutter_frame_jitter > 0 and rng.random() < args.stutter_jitter_prob:
+                        jitter = int(rng.integers(-args.stutter_frame_jitter, args.stutter_frame_jitter + 1))
+                        stutter_back = int(np.clip(stutter_back + jitter, min_back, max_back))
+            else:
+                mode = "glyph"
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+                if prev_gray is not None:
+                    motion = cv2.absdiff(gray, prev_gray)
+                    motion = cv2.GaussianBlur(motion, (5, 5), 0)
+                else:
+                    motion = np.zeros_like(gray)
+                prev_gray = gray
+
+                edges = cv2.Canny(gray, 60, 120)
+
+                if energy_curve is not None:
+                    scale = 1.0 + args.reactivity * e
+                    motion_w = args.motion_weight * scale
+                    edge_w = args.edge_weight * (0.75 + 0.75 * e)
+                    luma_w = args.luma_weight * (0.90 + 0.35 * e)
+                    density = min(1.0, args.density * (0.75 + 0.65 * e))
+                    cell_local = max(args.min_cell, int(round(base_cell * (1.0 - args.cell_shrink * e))))
+                else:
+                    motion_w = args.motion_weight
+                    edge_w = args.edge_weight
+                    luma_w = args.luma_weight
+                    density = args.density
+                    cell_local = base_cell
+
+                energy_img = (
+                    gray.astype(np.float32) * luma_w +
+                    motion.astype(np.float32) * motion_w +
+                    edges.astype(np.float32) * edge_w
+                )
+                energy_img = np.clip(energy_img, 0, 255).astype(np.uint8)
+                glyph_idx = brightness_to_glyph_idx(energy_img)
+
+                t_sec = frame_idx / max(1e-6, fps)
+                mode_color = "bw" if args.bw else args.color_mode
+
+                if mode_color == "input" or (mode_color == "auto" and e < args.wild_threshold):
+                    if cached_input_palette is None or (frame_idx % max(1, args.palette_refresh) == 0):
+                        cached_input_palette = extract_input_palette(frame, args.input_palette_k)
+                    pal_a = cached_input_palette
+                elif mode_color == "audio":
+                    cool = resolve_palette("ice", custom_colors)
+                    hot = resolve_palette(args.palette, custom_colors)
+                    pal_a = blend_palettes(cool, hot, e)
+                else:
+                    pal_a = resolve_palette(args.palette, custom_colors)
+
+                pal_b = resolve_palette(args.palette_b, custom_colors)
+                if args.palette_mix_speed > 0:
+                    mix_t = 0.5 * (1.0 + math.sin(2.0 * math.pi * args.palette_mix_speed * t_sec))
+                    palette = blend_palettes(pal_a, pal_b, mix_t)
+                else:
+                    palette = pal_a
+
+                if args.hue_drift != 0:
+                    hue_deg = args.hue_drift * t_sec
+                    palette = [shift_hue_bgr(c, hue_deg) for c in palette]
+
+                out = np.zeros_like(frame)
+                wild = (mode_color == "glitch") or (mode_color == "auto" and e >= args.wild_threshold)
+
+                for y in range(0, height, cell_local):
+                    for x in range(0, width, cell_local):
+                        if rng.random() > density:
+                            continue
+
+                        idx = glyph_idx[y, x]
+                        ch = GLYPHS[idx]
+                        brightness = float(energy_img[y, x]) / 255.0
+
+                        if mode_color == "bw":
+                            v = int(255 * brightness)
+                            base = (v, v, v)
+                        else:
+                            base = palette_pick(palette, brightness)
+
+                            if args.depth_color > 0 and len(palette) > 1:
+                                dt = np.clip((y / max(1, height - 1)) * args.depth_color, 0.0, 1.0)
+                                base = lerp_color(base, palette[-1], dt)
+
+                            if args.motion_color > 0:
+                                m = float(motion[y, x]) / 255.0
+                                base = shift_hue_bgr(base, 180.0 * m * args.motion_color)
+
+                            if wild and (rng.random() < args.glitch_prob * (0.35 + 0.65 * e)):
+                                insane = resolve_palette("insane", None)
+                                base = insane[int(rng.integers(0, len(insane)))]
+
+                            if args.audio_color_reactive and energy_curve is not None:
+                                base = scale_sv_bgr(base, sat_mul=1.0 + 0.9 * e, val_mul=0.9 + 0.35 * e)
+
+                        color = (
+                            int(base[0] * brightness),
+                            int(base[1] * brightness),
+                            int(base[2] * brightness),
+                        )
+
+                        if args.beat_flash and flash_left > 0:
+                            ft = flash_left / max(1, args.beat_flash_frames)
+                            color = lerp_color(color, (255, 255, 255), args.beat_flash_strength * ft)
+
+                        cv2.putText(out, ch, (x, y), cv2.FONT_HERSHEY_SIMPLEX, args.font_scale, color, 1, cv2.LINE_AA)
+
+            writer.write(out)
+
+            if hold_left > 0:
+                hold_left -= 1
+            if flash_left > 0:
+                flash_left -= 1
+
+            frame_idx += 1
+            if frame_idx % 10 == 0:
+                eta = format_eta(t0, frame_idx, frames_to_process)
+                if energy_curve is not None and frame_idx < len(energy_curve):
+                    log(f"frames={frame_idx}/{frames_to_process} e={e:.3f} mode={mode} hold={hold_left} eta={eta}")
+                else:
+                    log(f"frames={frame_idx}/{frames_to_process} mode={mode} hold={hold_left} eta={eta}")
+
+            pbar.update(1)
+
+    cap.release()
+    writer.release()
+
+    mux_original_audio(args, tmp_video, out_path)
+
+    log(f"✅ done → {out_path}")
+
+
 # ============================================================
 # GPU hook (future)
 # ============================================================
@@ -754,7 +1041,7 @@ def run_gpu(args):
         import moderngl  # noqa: F401
     except Exception:
         log("⚠️ moderngl not available — falling back to CPU")
-        run_cpu(args)
+        run_selected_cpu(args)
         return
 
     log("mode=GPU (delegating to CPU for now)")
@@ -764,6 +1051,8 @@ def run_gpu(args):
 def run_selected_cpu(args):
     if args.effect == "stutter":
         run_stutter_cpu(args)
+    elif args.effect == "combo":
+        run_combo_cpu(args)
     else:
         run_cpu(args)
 
@@ -777,8 +1066,8 @@ def parse_args():
 
     ap.add_argument("input")
     ap.add_argument("--mode", default="auto", choices=["auto", "gpu", "cpu"])
-    ap.add_argument("--effect", default="glyph", choices=["glyph", "stutter"],
-                    help="glyph=ascii glyph field, stutter=time stutter-shift glitch")
+    ap.add_argument("--effect", default="glyph", choices=["glyph", "stutter", "combo"],
+                    help="glyph=ascii glyph field, stutter=time stutter-shift glitch, combo=beat-gated mix")
 
     ap.add_argument("--start", type=float, default=0.0)
     ap.add_argument("--duration", type=float, default=None)
@@ -872,6 +1161,14 @@ def parse_args():
                     help="max vertical gap (pixels) between shifted slice bands")
     ap.add_argument("--stutter-slice-energy-scale", type=float, default=0.8,
                     help="scales slice shift amount with audio energy")
+
+    # Combo (glyph vs stutter selection per gated trigger)
+    ap.add_argument("--combo-glyph-prob", type=float, default=0.5,
+                    help="relative weight for selecting glyph when combo gate triggers")
+    ap.add_argument("--combo-stutter-prob", type=float, default=0.5,
+                    help="relative weight for selecting stutter when combo gate triggers")
+    ap.add_argument("--combo-alternate-bias", type=float, default=0.35,
+                    help="extra weight applied to the opposite of previous combo effect")
 
     # Audio reactive (gated)
     ap.add_argument("--audio-reactive", action="store_true",
