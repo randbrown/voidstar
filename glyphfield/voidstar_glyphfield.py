@@ -3,16 +3,23 @@
 voidstar_glyphfield.py
 Randy-grade glyph field renderer.
 
-UPDATED:
-✓ --start
-✓ --duration
-✓ proper frame bounds
+Features
+--------
+✓ motion-biased glyph field
+✓ --start / --duration trimming
+✓ output written beside input
+✓ original audio muxed back losslessly
+✓ CPU renderer (portable)
+✓ GPU hook (future expansion)
+✓ Voidstar logging style
+
+Author: Voidstar Systems 😈
 """
 
 import argparse
 import time
-import math
-import sys
+import subprocess
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -20,9 +27,9 @@ import cv2
 from tqdm import tqdm
 
 
-# =========================
-# Logging helpers
-# =========================
+# ============================================================
+# Logging helpers (Voidstar style)
+# ============================================================
 
 def log(msg):
     print(f"[voidstar] {msg}", flush=True)
@@ -37,9 +44,14 @@ def format_eta(start_time, progress, total):
     return time.strftime("%M:%S", time.gmtime(remaining))
 
 
-# =========================
-# Glyph set
-# =========================
+def run_ffmpeg(cmd):
+    log("▶ " + " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+
+# ============================================================
+# Glyph set (Voidstar tuned)
+# ============================================================
 
 GLYPHS = np.array(list(" .·:+*#%@"))
 
@@ -50,9 +62,32 @@ def brightness_to_glyph_idx(gray):
     return idx
 
 
-# =========================
-# CPU FALLBACK
-# =========================
+# ============================================================
+# Output naming (same folder as input)
+# ============================================================
+
+def build_output_name(args):
+    in_path = Path(args.input)
+    stem = in_path.stem
+    out_dir = in_path.parent
+
+    dur_str = "full" if args.duration is None else f"{args.duration:.2f}"
+
+    filename = (
+        f"{stem}_glyph"
+        f"_st{args.start:.2f}"
+        f"_dur{dur_str}"
+        f"_c{args.cell}"
+        f"_d{args.density:.2f}"
+        f".mp4"
+    )
+
+    return str(out_dir / filename)
+
+
+# ============================================================
+# CPU renderer (primary portable path)
+# ============================================================
 
 def run_cpu(args):
     log("mode=CPU fallback")
@@ -66,7 +101,9 @@ def run_cpu(args):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames_input = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # 🎯 compute frame bounds
+    # --------------------------------------------------------
+    # frame bounds
+    # --------------------------------------------------------
     start_frame = int(args.start * fps)
 
     if args.duration is None:
@@ -82,17 +119,26 @@ def run_cpu(args):
     log(f"input={args.input}")
     log(f"fps={fps:.3f}")
     log(f"start={args.start:.3f}s ({start_frame})")
-    log(f"end_frame={end_frame}")
     log(f"frames_to_process={frames_to_process}")
 
-    # 🎯 seek
+    # seek
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     out_path = build_output_name(args)
     log(f"output={out_path}")
 
+    # --------------------------------------------------------
+    # temp video (video only)
+    # --------------------------------------------------------
+    tmp_video = str(
+        Path(tempfile.gettempdir()) /
+        f"voidstar_glyph_tmp_{int(time.time())}.mp4"
+    )
+
+    log(f"temp_video={tmp_video}")
+
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
+    writer = cv2.VideoWriter(tmp_video, fourcc, fps, (width, height))
 
     prev_gray = None
     start_time = time.time()
@@ -100,6 +146,9 @@ def run_cpu(args):
     font = cv2.FONT_HERSHEY_SIMPLEX
     cell = args.cell
 
+    # ========================================================
+    # MAIN PROCESS LOOP
+    # ========================================================
     with tqdm(total=frames_to_process) as pbar:
         frame_idx = 0
 
@@ -110,7 +159,7 @@ def run_cpu(args):
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            # motion emphasis
+            # motion emphasis (critical for your EQ videos)
             if prev_gray is not None:
                 motion = cv2.absdiff(gray, prev_gray)
                 motion = cv2.GaussianBlur(motion, (5, 5), 0)
@@ -133,9 +182,9 @@ def run_cpu(args):
 
             out = np.zeros_like(frame)
 
-            step = cell
-            for y in range(0, height, step):
-                for x in range(0, width, step):
+            # sparse cosmic sampling
+            for y in range(0, height, cell):
+                for x in range(0, width, cell):
 
                     if np.random.rand() > args.density:
                         continue
@@ -174,12 +223,66 @@ def run_cpu(args):
     cap.release()
     writer.release()
 
+    # ========================================================
+    # AUDIO MUX (Voidstar gold standard)
+    # ========================================================
+    log("video render complete — starting audio mux")
+
+    tmp_audio = str(
+        Path(tempfile.gettempdir()) /
+        f"voidstar_audio_tmp_{int(time.time())}.aac"
+    )
+
+    # extract audio segment
+    cmd_extract = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-ss", str(args.start),
+        "-i", args.input,
+    ]
+
+    if args.duration is not None:
+        cmd_extract += ["-t", str(args.duration)]
+
+    cmd_extract += [
+        "-vn",
+        "-acodec", "copy",
+        tmp_audio,
+    ]
+
+    run_ffmpeg(cmd_extract)
+
+    # mux
+    cmd_mux = [
+        "ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-i", tmp_video,
+        "-i", tmp_audio,
+        "-c:v", "copy",
+        "-c:a", "copy",
+        "-shortest",
+        out_path,
+    ]
+
+    run_ffmpeg(cmd_mux)
+
+    # cleanup
+    try:
+        Path(tmp_video).unlink(missing_ok=True)
+        Path(tmp_audio).unlink(missing_ok=True)
+    except Exception:
+        pass
+
     log(f"✅ done → {out_path}")
 
 
-# =========================
-# GPU PATH (still stub)
-# =========================
+# ============================================================
+# GPU hook (future expansion)
+# ============================================================
 
 def run_gpu(args):
     try:
@@ -193,33 +296,9 @@ def run_gpu(args):
     run_cpu(args)
 
 
-# =========================
-# Output naming
-# =========================
-
-def build_output_name(args):
-    in_path = Path(args.input)
-    stem = in_path.stem
-    out_dir = in_path.parent
-
-    dur_str = "full" if args.duration is None else f"{args.duration:.2f}"
-
-    filename = (
-        f"{stem}_glyph"
-        f"_st{args.start:.2f}"
-        f"_dur{dur_str}"
-        f"_c{args.cell}"
-        f"_d{args.density:.2f}"
-        f".mp4"
-    )
-
-    return str(out_dir / filename)
-
-
-
-# =========================
+# ============================================================
 # CLI
-# =========================
+# ============================================================
 
 def parse_args():
     ap = argparse.ArgumentParser()
@@ -229,7 +308,6 @@ def parse_args():
     ap.add_argument("--mode", default="auto",
                     choices=["auto", "gpu", "cpu"])
 
-    # ✅ NEW
     ap.add_argument("--start", type=float, default=0.0,
                     help="start time in seconds")
 
@@ -247,9 +325,9 @@ def parse_args():
     return ap.parse_args()
 
 
-# =========================
+# ============================================================
 # Main
-# =========================
+# ============================================================
 
 def main():
     args = parse_args()
