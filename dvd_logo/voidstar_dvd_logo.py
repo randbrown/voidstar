@@ -484,7 +484,7 @@ def main() -> None:
     ap.add_argument("--voidstar-bloom", type=float, default=0.55, help="Bloom strength [0..2] for VoidStar FX.")
     ap.add_argument("--voidstar-strobe", type=float, default=0.35, help="Beat-hit strobe intensity [0..2].")
     ap.add_argument("--voidstar-glitch-hit", type=float, default=0.45, help="Beat-hit glitch intensity [0..2].")
-    ap.add_argument("--voidstar-preset", choices=["custom", "subtle", "cinema", "wild", "insane"], default="custom", help="Convenience preset for VoidStar energy stack.")
+    ap.add_argument("--voidstar-preset", choices=["custom", "subtle", "cinema", "wild", "insane", "bananas", "max"], default="custom", help="Convenience preset for VoidStar energy stack.")
     ap.add_argument("--voidstar-debug-bounds", type=bool_flag, default=False, help="Draw debug bounding boxes for logo and tracking/search regions.")
     ap.add_argument("--voidstar-debug-bounds-mode", choices=["always", "hit-glitch"], default="hit-glitch", help="Debug bounds visibility mode. hit-glitch pops boxes briefly on strong beat peaks.")
     ap.add_argument("--voidstar-debug-bounds-hit-threshold", type=float, default=0.92, help="Pulse threshold [0..1] required to trigger hit-glitch debug bounds.")
@@ -561,6 +561,24 @@ def main() -> None:
                 "voidstar_bloom": 1.15,
                 "voidstar_strobe": 0.85,
                 "voidstar_glitch_hit": 0.95,
+            },
+            "bananas": {
+                "voidstar_energy": 3,
+                "voidstar_hue_rate": 64.0,
+                "voidstar_chroma": 11.0,
+                "voidstar_jitter": 1,
+                "voidstar_bloom": 1.5,
+                "voidstar_strobe": 0.95,
+                "voidstar_glitch_hit": 1.95,
+            },
+            "max": {
+                "voidstar_energy": 3,
+                "voidstar_hue_rate": 64.0,
+                "voidstar_chroma": 11.0,
+                "voidstar_jitter": 4.4,
+                "voidstar_bloom": 2,
+                "voidstar_strobe": 2,
+                "voidstar_glitch_hit": 2,
             },
         }
         for k, v in presets[args.voidstar_preset].items():

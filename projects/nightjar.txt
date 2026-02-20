@@ -1,0 +1,120 @@
+python voidstar_dvd_logo.py \
+ "nightjar/jam0.mp4" \
+ "nightjar/flyer1_alpha.png" --speed 0 --logo-scale .5 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity 1 \
+ --start-x .5 --start-y .3  \
+ --audio-reactive-glow 2.0 --audio-reactive-scale 1 --audio-reactive-gain .5 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset bananas \
+ --local-point-track false --local-point-track-max-points 0 \
+ --voidstar-colorize true \
+ --content-bbox-for-local false \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.25  \
+ --voidstar-debug-bounds-hit-prob 0.25 
+ 
+ \
+ --start 15 --duration 5 
+
+python voidstar_dvd_logo.py \
+ "nightjar/jam0.mp4" \
+ "nightjar/flyer1_alpha.png" --speed 0 --logo-scale .5 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity 1 \
+ --start-x .6 --start-y .3  \
+ --audio-reactive-glow 2.0 --audio-reactive-scale 1 --audio-reactive-gain .5 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset bananas \
+ --local-point-track false --local-point-track-max-points 0 \
+ --voidstar-colorize true \
+ --content-bbox-for-local false \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.25  \
+ --voidstar-debug-bounds-hit-prob 0.25 \
+ --start 15 --duration 5 
+
+python voidstar_dvd_logo.py \
+ "nightjar/jam0.mp4" \
+ "nightjar/flyer1_alpha.png" --speed 0 --logo-scale .5 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity 1 \
+ --audio-reactive-glow 2.0 --audio-reactive-scale 1 --audio-reactive-gain .5 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset insane  \
+ --local-point-track false --local-point-track-scale 1.2 --local-point-track-pad-px 128  \
+ --local-point-track-max-points 0 --local-point-track-radius 128 --local-point-track-min-distance 128  \
+ --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77  \
+ --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1  \
+ --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .6 --start-y .3  \
+ --content-bbox-for-local false  \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.8  \
+ --voidstar-debug-bounds-hit-prob 0.25 \
+ --start 15 --duration 5 
+
+ python voidstar_dvd_logo.py \
+ "nightjar/jam0.mp4" \
+ "nightjar/flyer1_alpha.png" --speed 0 --logo-scale .5 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity 1 \
+ --audio-reactive-glow 2.0 --audio-reactive-scale 1 --audio-reactive-gain .5 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset wild  \
+ --local-point-track false --local-point-track-scale 1.2 --local-point-track-pad-px 128  \
+ --local-point-track-max-points 0 --local-point-track-radius 128 --local-point-track-min-distance 128  \
+ --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77  \
+ --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1  \
+ --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .6 --start-y .3  \
+ --content-bbox-for-local false  \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.8  \
+ --voidstar-debug-bounds-hit-prob 0.25 \
+ --start 15 --duration 5
+ 
+ 
+python voidstar_dvd_logo.py \
+ "nightjar/jam0.mp4" \
+ "nightjar/flyer1_alpha.png" --speed 0 --logo-scale .45 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity 1 \
+ --audio-reactive-glow 2.0 --audio-reactive-scale 1 --audio-reactive-gain .5 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset wild  \
+ --local-point-track false --local-point-track-scale 1.2 --local-point-track-pad-px 128  \
+ --local-point-track-max-points 0 --local-point-track-radius 128 --local-point-track-min-distance 128  \
+ --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77  \
+ --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1  \
+ --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .7 --start-y .5  \
+ --content-bbox-for-local false  \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.8  \
+ --voidstar-debug-bounds-hit-prob 0.25 \
+ --start 15 --duration 5
+
+ 
+
+python reels_cv_overlay.py "/mnt/c/users/brown/Videos/nightjar/jam0.mp4" \
+--min-det-conf 0.01 --min-trk-conf 0.5 --draw-ids false \
+--smear true --smear-frames 120 --smear-decay 0.999 \
+--trail true  --trail-alpha .999  --velocity-color false
+--start 0 --duration 5
+
+python reels_cv_overlay.py "/mnt/c/users/brown/Videos/nightjar/jam1.mp4" \
+--min-det-conf 0.01 --min-trk-conf 0.5 --draw-ids false \
+--smear true --smear-frames 120 --smear-decay 0.999 --trail true \
+--trail-alpha .999  --velocity-color false --velocity-color true --velocity-color-mult 10
+
+ python voidstar_dvd_logo.py \
+ "nightjar/jam0.mp4" \
+ "nightjar/flyer_alpha.png" --speed 20 --logo-scale .4 --logo-rotate-speed 0 \
+ --trails 0.85 --opacity .5 \
+ --audio-reactive-glow 1.0 --audio-reactive-scale 0.25 --audio-reactive-gain .25 \
+ --edge-margin-px 0 --reels-local-overlay false \
+ --voidstar-preset subtle  \
+ --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 256  \
+ --local-point-track-max-points 1024 --local-point-track-radius 1024 --local-point-track-min-distance 256  \
+ --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77  \
+ --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1  \
+ --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .5  \
+ --content-bbox-for-local false  \
+ --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch  \
+ --voidstar-debug-bounds-hit-threshold 0.8  \
+ --voidstar-debug-bounds-hit-prob 0.25 \
+ --start 0 --duration 5
+
