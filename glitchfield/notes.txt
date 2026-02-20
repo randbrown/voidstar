@@ -215,6 +215,7 @@ python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --color-mode input --input-palette-k 6 --palette-refresh 6 \
   --stutter-slice-prob 0.90 --stutter-slice-shift-max 180 \
   --stutter-frame-jitter 3 --stutter-jitter-prob 0.6 \
+  --min-gate-period 10 \
   --start 690 --duration 15 \
   --seed 1337
 

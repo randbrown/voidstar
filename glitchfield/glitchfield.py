@@ -59,6 +59,10 @@ def run_ffmpeg(cmd):
     subprocess.run(cmd, check=True)
 
 
+def gate_cooldown_frames(args, fps: float) -> int:
+    return max(0, int(round(max(0.0, args.min_gate_period) * fps)))
+
+
 # ============================================================
 # Glyphs + palettes
 # ============================================================
@@ -438,6 +442,8 @@ def run_cpu(args):
 
     # hold state so glyph mode persists briefly after a trigger
     hold_left = 0
+    next_gate_frame = 0
+    cooldown_frames = gate_cooldown_frames(args, fps)
     flash_left = 0
     custom_colors = parse_colors_arg(args.colors)
     cached_input_palette = None
@@ -462,8 +468,12 @@ def run_cpu(args):
                 # Trigger only when above threshold (probability-gated)
                 triggered = (e >= args.beat_threshold) and (rng.random() <= args.beat_prob)
 
+                if triggered and frame_idx < next_gate_frame:
+                    triggered = False
+
                 if triggered:
                     hold_left = max(hold_left, args.glitch_hold)
+                    next_gate_frame = frame_idx + cooldown_frames
                     if args.beat_flash:
                         flash_left = max(flash_left, args.beat_flash_frames)
 
@@ -693,6 +703,8 @@ def run_stutter_cpu(args):
 
     frame_history = []
     stutter_left = 0
+    next_gate_frame = 0
+    cooldown_frames = gate_cooldown_frames(args, fps)
     stutter_back = min_back
     freeze_left = 0
     freeze_frame = None
@@ -723,8 +735,12 @@ def run_stutter_cpu(args):
                 )
             triggered = gate_ok and (rng.random() <= trigger_prob)
 
+            if triggered and frame_idx < next_gate_frame:
+                triggered = False
+
             if triggered and stutter_left <= 0:
                 stutter_left = int(rng.integers(min_hold, max_hold + 1))
+                next_gate_frame = frame_idx + cooldown_frames
                 stutter_back = int(rng.integers(min_back, max_back + 1))
                 freeze_left = int(rng.integers(1, max(2, args.stutter_chunk + 1)))
                 freeze_frame = None
@@ -826,6 +842,8 @@ def run_combo_cpu(args):
     t0 = time.time()
 
     hold_left = 0
+    next_gate_frame = 0
+    cooldown_frames = gate_cooldown_frames(args, fps)
     active_effect = None
     last_effect = None
 
@@ -862,10 +880,14 @@ def run_combo_cpu(args):
             else:
                 triggered = (hold_left <= 0)
 
+            if triggered and frame_idx < next_gate_frame:
+                triggered = False
+
             if triggered and hold_left <= 0:
                 active_effect = pick_combo_effect(rng, args, last_effect)
                 last_effect = active_effect
                 hold_left = max(1, args.glitch_hold)
+                next_gate_frame = frame_idx + cooldown_frames
 
                 if active_effect == "stutter":
                     stutter_back = int(rng.integers(min_back, max_back + 1))
@@ -1177,6 +1199,8 @@ def parse_args():
                     help="energy threshold (0..1) to trigger glyph mode")
     ap.add_argument("--beat-prob", type=float, default=0.85,
                     help="probability to trigger when above threshold")
+    ap.add_argument("--min-gate-period", type=float, default=0.0,
+                    help="minimum seconds between new gate-on triggers (0 disables cooldown)")
     ap.add_argument("--glitch-hold", type=int, default=6,
                     help="hold glyph mode for N frames after trigger (prevents flicker)")
     ap.add_argument("--reactivity", type=float, default=1.0,
