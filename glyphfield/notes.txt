@@ -1,4 +1,25 @@
 
+// color reacts to audio intensity
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --audio-reactive \
+  --beat-threshold 0.60 \
+  --beat-prob 1.0 \
+  --glitch-hold 15 \
+  --reactivity 1.2 \
+  --cell 6 --density 1 --motion-weight 2.1 \
+  --start 90 --duration 15 \
+  --color-mode input --input-palette-k 6 --palette-refresh 6 \
+  --seed 1337
+
+// pretty cool for tensors chill!
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --audio-reactive \
+  --beat-threshold 0.60 --beat-prob 1.0 --glitch-hold 15 \
+  --reactivity 1.2 \
+  --cell 6 --density 1 --motion-weight 2.1 \
+  --start 90 --duration 15 \
+  --color-mode audio --palette fire --audio-color-reactive \
+  --seed 1337
 
 // audio reactive
 python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
