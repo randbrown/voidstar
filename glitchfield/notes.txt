@@ -1,6 +1,6 @@
 
 // color reacts to audio intensity
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --audio-reactive \
   --beat-threshold 0.60 \
   --beat-prob 1.0 \
@@ -12,7 +12,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --seed 1337
 
 // pretty cool for tensors chill!
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --audio-reactive \
   --beat-threshold 0.60 --beat-prob 1.0 --glitch-hold 15 \
   --reactivity 1.2 \
@@ -22,7 +22,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --seed 1337
 
 // audio reactive
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --audio-reactive \
   --beat-threshold 0.60 \
   --beat-prob 1.0 \
@@ -43,7 +43,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --beat-threshold 0.55
 
 // 5. Classic ASCII Wall
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 --cell 8 \
 --density 1.0 \
 --motion-weight 1.0 \
@@ -55,7 +55,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 
 
 // 4. Ultra Sparse Cosmic
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 --cell 18 \
 --density 0.28 \
 --motion-weight 1.4 \
@@ -66,7 +66,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 
 
 // 3. Aggressive Glitch Mode
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 --cell 8 \
 --density 0.85 \
 --motion-weight 3.2 \
@@ -77,7 +77,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 
 
 // 2. EQ Lock Mode (HIGHLY recommended for your videos)
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 --cell 10 \
 --density 0.75 \
 --motion-weight 2.2 \
@@ -88,7 +88,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 
 
 // 1. Cosmic Neural Field (your brand)
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 --cell 14 \
 --density 0.45 \
 --motion-weight 1.6 \
@@ -98,7 +98,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --duration 5
 
 
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --cell 10 \
   --density 0.75 \
   --motion-weight 2.0 \
@@ -110,7 +110,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 // ===== Stutter Presets (video-only effect, original audio muxed) =====
 
 // stutter 1: subtle
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --effect stutter \
   --audio-reactive \
   --stutter-threshold 0.62 \
@@ -123,7 +123,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --seed 1337
 
 // stutter 2: medium (good default)
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --effect stutter \
   --audio-reactive \
   --stutter-threshold 0.60 \
@@ -137,7 +137,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --seed 1337
 
 // stutter 3: insane
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --effect stutter \
   --audio-reactive \
   --stutter-threshold 0.52 \
@@ -151,7 +151,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --seed 1337
 
 // stutter 4: subtle tape wobble (light sync slip)
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --effect stutter \
   --audio-reactive \
   --stutter-threshold 0.60 \
@@ -171,7 +171,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --seed 1337
 
 // stutter 5: hard digital desync (aggressive sliced misalignment)
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --effect stutter \
   --audio-reactive \
   --stutter-threshold 0.50 \
@@ -194,7 +194,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
 // ===== Combo Presets (alternates glyph + stutter by weighted probability) =====
 
 // combo 1: glyph-heavy (mostly glyph, occasional stutter)
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --effect combo \
   --audio-reactive \
   --beat-threshold 0.60 --beat-prob 1.0 --glitch-hold 12 \
@@ -206,7 +206,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --seed 1337
 
 // combo 2: balanced (roughly alternating)
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --effect combo \
   --audio-reactive \
   --beat-threshold 0.58 --beat-prob 1.0 --glitch-hold 12 \
@@ -219,7 +219,7 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --seed 1337
 
 // combo 3: stutter-heavy (hard glitch with glyph accents)
-python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --effect combo \
   --audio-reactive \
   --beat-threshold 0.52 --beat-prob 1.0 --glitch-hold 14 \
