@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
 voidstar_glyphfield.py
-Voidstar glyph renderer with beat-gated audio reactivity.
+Voidstar renderer with beat-gated audio reactivity.
 
 Behavior (audio reactive):
 - Output is ORIGINAL frames unless audio energy >= beat threshold.
-- When triggered, switches to glyph mode (optionally held for N frames).
+- When triggered, switches to effect mode (optionally held for N frames).
 - Parameter aggressiveness scales with energy while in glyph mode.
+
+Effects:
+- glyph: glyphfield render
+- stutter: time stutter-shift glitch (video-only effect)
 
 Also:
 - --start/--duration are applied consistently to video processing and audio analysis
@@ -158,6 +162,49 @@ def palette_pick(palette, x01: float):
     return palette[i]
 
 
+def apply_slice_shift_glitch(frame: np.ndarray, rng, args, energy: float) -> np.ndarray:
+    """
+    Apply horizontal band slicing with per-band x-shifts.
+    Gives a sync-error / misaligned scanline chunk look.
+    """
+    h, w = frame.shape[:2]
+    if h <= 1 or w <= 1:
+        return frame
+
+    out = frame.copy()
+
+    bands_min = max(1, min(args.stutter_slice_min_bands, args.stutter_slice_max_bands))
+    bands_max = max(bands_min, args.stutter_slice_max_bands)
+    num_bands = int(rng.integers(bands_min, bands_max + 1))
+
+    y = 0
+    for _ in range(num_bands):
+        if y >= h:
+            break
+
+        remain = h - y
+        band_h_min = max(1, args.stutter_slice_min_height)
+        band_h_max = max(band_h_min, args.stutter_slice_max_height)
+        band_h = int(rng.integers(band_h_min, band_h_max + 1))
+        band_h = min(band_h, remain)
+
+        base_shift = int(rng.integers(-args.stutter_slice_shift_max, args.stutter_slice_shift_max + 1))
+        if args.stutter_slice_energy_scale > 0 and energy > 0:
+            scale = 1.0 + args.stutter_slice_energy_scale * energy
+            base_shift = int(np.clip(base_shift * scale, -w + 1, w - 1))
+
+        if base_shift != 0:
+            out[y:y + band_h] = np.roll(out[y:y + band_h], shift=base_shift, axis=1)
+
+        if args.stutter_slice_gap_max > 0:
+            gap = int(rng.integers(0, args.stutter_slice_gap_max + 1))
+        else:
+            gap = 0
+        y += band_h + gap
+
+    return out
+
+
 # ============================================================
 # Output naming (same folder as input)
 # ============================================================
@@ -167,16 +214,63 @@ def build_output_name(args) -> str:
     stem = in_path.stem
     out_dir = in_path.parent
     dur_str = "full" if args.duration is None else f"{args.duration:.2f}"
+    effect = getattr(args, "effect", "glyph")
 
-    filename = (
-        f"{stem}_glyph"
-        f"_st{args.start:.2f}"
-        f"_dur{dur_str}"
-        f"_c{args.cell}"
-        f"_d{args.density:.2f}"
-        f".mp4"
-    )
+    if effect == "stutter":
+        filename = (
+            f"{stem}_stutter"
+            f"_st{args.start:.2f}"
+            f"_dur{dur_str}"
+            f"_sb{args.stutter_min_back}-{args.stutter_max_back}"
+            f"_sh{args.stutter_min_hold}-{args.stutter_max_hold}"
+            f".mp4"
+        )
+    else:
+        filename = (
+            f"{stem}_glyph"
+            f"_st{args.start:.2f}"
+            f"_dur{dur_str}"
+            f"_c{args.cell}"
+            f"_d{args.density:.2f}"
+            f".mp4"
+        )
     return str(out_dir / filename)
+
+
+def mux_original_audio(args, tmp_video: str, out_path: str) -> None:
+    log("video render complete — starting audio mux")
+
+    tmp_audio = str(Path(tempfile.gettempdir()) / f"voidstar_audio_tmp_{int(time.time())}.aac")
+
+    cmd_extract = [
+        "ffmpeg", "-y",
+        "-hide_banner", "-loglevel", "error",
+        "-i", args.input,
+        "-ss", str(args.start),
+    ]
+    if args.duration is not None:
+        cmd_extract += ["-t", str(args.duration)]
+
+    cmd_extract += ["-vn", "-acodec", "copy", tmp_audio]
+    run_ffmpeg(cmd_extract)
+
+    cmd_mux = [
+        "ffmpeg", "-y",
+        "-hide_banner", "-loglevel", "error",
+        "-i", tmp_video,
+        "-i", tmp_audio,
+        "-c:v", "copy",
+        "-c:a", "copy",
+        "-shortest",
+        out_path,
+    ]
+    run_ffmpeg(cmd_mux)
+
+    try:
+        Path(tmp_video).unlink(missing_ok=True)
+        Path(tmp_audio).unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 # ============================================================
@@ -507,43 +601,146 @@ def run_cpu(args):
     cap.release()
     writer.release()
 
-    # ============================================================
-    # AUDIO MUX (lossless)
-    # ============================================================
-    log("video render complete — starting audio mux")
+    mux_original_audio(args, tmp_video, out_path)
 
-    tmp_audio = str(Path(tempfile.gettempdir()) / f"voidstar_audio_tmp_{int(time.time())}.aac")
+    log(f"✅ done → {out_path}")
 
-    # IMPORTANT: use same accurate trim ordering for stream copy
-    cmd_extract = [
-        "ffmpeg", "-y",
-        "-hide_banner", "-loglevel", "error",
-        "-i", args.input,
-        "-ss", str(args.start),
-    ]
-    if args.duration is not None:
-        cmd_extract += ["-t", str(args.duration)]
 
-    cmd_extract += ["-vn", "-acodec", "copy", tmp_audio]
-    run_ffmpeg(cmd_extract)
+def run_stutter_cpu(args):
+    log("mode=CPU effect=stutter")
 
-    cmd_mux = [
-        "ffmpeg", "-y",
-        "-hide_banner", "-loglevel", "error",
-        "-i", tmp_video,
-        "-i", tmp_audio,
-        "-c:v", "copy",
-        "-c:a", "copy",
-        "-shortest",
-        out_path,
-    ]
-    run_ffmpeg(cmd_mux)
+    rng = np.random.default_rng(args.seed)
 
-    try:
-        Path(tmp_video).unlink(missing_ok=True)
-        Path(tmp_audio).unlink(missing_ok=True)
-    except Exception:
-        pass
+    cap = cv2.VideoCapture(args.input)
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open input: {args.input}")
+
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    total_frames_input = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+
+    if width <= 0 or height <= 0:
+        raise RuntimeError("Could not read video dimensions.")
+
+    start_frame = int(round(args.start * fps))
+    if args.duration is None:
+        end_frame = total_frames_input if total_frames_input > 0 else 10**12
+    else:
+        end_frame = start_frame + int(round(args.duration * fps))
+
+    frames_to_process = max(0, end_frame - start_frame)
+
+    log(f"input={args.input}")
+    log(f"fps={fps:.3f} size={width}x{height}")
+    log(f"start={args.start:.3f}s -> start_frame={start_frame}")
+    log(f"frames_to_process={frames_to_process}")
+
+    if frames_to_process <= 0:
+        raise RuntimeError("Nothing to process (check --start/--duration).")
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+    out_path = build_output_name(args)
+    log(f"output={out_path}")
+
+    energy_curve = None
+    if args.audio_reactive:
+        energy_curve = analyze_audio_energy(args, fps, frames_to_process)
+
+    tmp_video = str(Path(tempfile.gettempdir()) / f"voidstar_stutter_tmp_{int(time.time())}.mp4")
+    log(f"temp_video={tmp_video}")
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(tmp_video, fourcc, fps, (width, height))
+
+    t0 = time.time()
+
+    max_back = max(1, args.stutter_max_back)
+    min_back = max(1, min(args.stutter_min_back, max_back))
+    min_hold = max(1, min(args.stutter_min_hold, args.stutter_max_hold))
+    max_hold = max(min_hold, args.stutter_max_hold)
+
+    frame_history = []
+    stutter_left = 0
+    stutter_back = min_back
+    freeze_left = 0
+    freeze_frame = None
+
+    with tqdm(total=frames_to_process) as pbar:
+        frame_idx = 0
+        while frame_idx < frames_to_process:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame_history.append(frame.copy())
+            if len(frame_history) > (max_back + 1):
+                frame_history.pop(0)
+
+            e = 0.0
+            if energy_curve is not None:
+                e = float(energy_curve[frame_idx])
+
+            gate_ok = (energy_curve is None) or (e >= args.stutter_threshold)
+
+            trigger_prob = args.stutter_prob
+            if args.audio_reactive and args.stutter_energy_boost > 0:
+                trigger_prob = np.clip(
+                    trigger_prob + args.stutter_energy_boost * max(0.0, e - args.stutter_threshold),
+                    0.0,
+                    1.0,
+                )
+            triggered = gate_ok and (rng.random() <= trigger_prob)
+
+            if triggered and stutter_left <= 0:
+                stutter_left = int(rng.integers(min_hold, max_hold + 1))
+                stutter_back = int(rng.integers(min_back, max_back + 1))
+                freeze_left = int(rng.integers(1, max(2, args.stutter_chunk + 1)))
+                freeze_frame = None
+
+            out = frame
+            mode = "orig"
+
+            if stutter_left > 0 and len(frame_history) > 1:
+                if freeze_left <= 0 or freeze_frame is None:
+                    delay = min(stutter_back, len(frame_history) - 1)
+                    src = frame_history[-1 - delay]
+                    freeze_frame = src.copy()
+                    freeze_left = int(rng.integers(1, max(2, args.stutter_chunk + 1)))
+                out = freeze_frame
+                freeze_left -= 1
+
+                if args.stutter_slice_shift_max > 0:
+                    slice_prob = args.stutter_slice_prob
+                    if args.audio_reactive and args.stutter_slice_energy_scale > 0:
+                        slice_prob = np.clip(slice_prob + 0.25 * args.stutter_slice_energy_scale * max(0.0, e), 0.0, 1.0)
+                    if rng.random() < slice_prob:
+                        out = apply_slice_shift_glitch(out, rng, args, e)
+
+                if args.stutter_frame_jitter > 0 and rng.random() < args.stutter_jitter_prob:
+                    jitter = int(rng.integers(-args.stutter_frame_jitter, args.stutter_frame_jitter + 1))
+                    stutter_back = int(np.clip(stutter_back + jitter, min_back, max_back))
+
+                mode = "stutter"
+                stutter_left -= 1
+
+            writer.write(out)
+
+            frame_idx += 1
+            if frame_idx % 10 == 0:
+                eta = format_eta(t0, frame_idx, frames_to_process)
+                if energy_curve is not None and frame_idx < len(energy_curve):
+                    log(f"frames={frame_idx}/{frames_to_process} e={e:.3f} mode={mode} hold={stutter_left} back={stutter_back} eta={eta}")
+                else:
+                    log(f"frames={frame_idx}/{frames_to_process} mode={mode} hold={stutter_left} back={stutter_back} eta={eta}")
+
+            pbar.update(1)
+
+    cap.release()
+    writer.release()
+
+    mux_original_audio(args, tmp_video, out_path)
 
     log(f"✅ done → {out_path}")
 
@@ -561,7 +758,14 @@ def run_gpu(args):
         return
 
     log("mode=GPU (delegating to CPU for now)")
-    run_cpu(args)
+    run_selected_cpu(args)
+
+
+def run_selected_cpu(args):
+    if args.effect == "stutter":
+        run_stutter_cpu(args)
+    else:
+        run_cpu(args)
 
 
 # ============================================================
@@ -573,6 +777,8 @@ def parse_args():
 
     ap.add_argument("input")
     ap.add_argument("--mode", default="auto", choices=["auto", "gpu", "cpu"])
+    ap.add_argument("--effect", default="glyph", choices=["glyph", "stutter"],
+                    help="glyph=ascii glyph field, stutter=time stutter-shift glitch")
 
     ap.add_argument("--start", type=float, default=0.0)
     ap.add_argument("--duration", type=float, default=None)
@@ -629,6 +835,44 @@ def parse_args():
     ap.add_argument("--seed", type=int, default=None,
                     help="random seed for deterministic beat/glitch randomness")
 
+    # Stutter effect controls
+    ap.add_argument("--stutter-threshold", type=float, default=0.60,
+                    help="energy threshold (0..1) to allow stutter triggers")
+    ap.add_argument("--stutter-prob", type=float, default=0.80,
+                    help="probability of starting a stutter event when gated")
+    ap.add_argument("--stutter-min-hold", type=int, default=4,
+                    help="minimum stutter event length in frames")
+    ap.add_argument("--stutter-max-hold", type=int, default=14,
+                    help="maximum stutter event length in frames")
+    ap.add_argument("--stutter-min-back", type=int, default=2,
+                    help="minimum backward frame offset used by stutter")
+    ap.add_argument("--stutter-max-back", type=int, default=12,
+                    help="maximum backward frame offset used by stutter")
+    ap.add_argument("--stutter-chunk", type=int, default=3,
+                    help="how many frames to repeat before picking a new delayed frame")
+    ap.add_argument("--stutter-frame-jitter", type=int, default=2,
+                    help="max +/- jitter applied to stutter back offset during event")
+    ap.add_argument("--stutter-jitter-prob", type=float, default=0.45,
+                    help="chance to jitter stutter back offset each output frame")
+    ap.add_argument("--stutter-energy-boost", type=float, default=0.5,
+                    help="extra trigger probability gain from high energy")
+    ap.add_argument("--stutter-slice-prob", type=float, default=0.75,
+                    help="chance to apply sliced sync-tear shifts on a stutter frame")
+    ap.add_argument("--stutter-slice-min-bands", type=int, default=2,
+                    help="minimum number of horizontal slice bands per sliced frame")
+    ap.add_argument("--stutter-slice-max-bands", type=int, default=7,
+                    help="maximum number of horizontal slice bands per sliced frame")
+    ap.add_argument("--stutter-slice-min-height", type=int, default=10,
+                    help="minimum slice band height in pixels")
+    ap.add_argument("--stutter-slice-max-height", type=int, default=80,
+                    help="maximum slice band height in pixels")
+    ap.add_argument("--stutter-slice-shift-max", type=int, default=120,
+                    help="max horizontal pixel shift for each slice band (0 disables slicing)")
+    ap.add_argument("--stutter-slice-gap-max", type=int, default=8,
+                    help="max vertical gap (pixels) between shifted slice bands")
+    ap.add_argument("--stutter-slice-energy-scale", type=float, default=0.8,
+                    help="scales slice shift amount with audio energy")
+
     # Audio reactive (gated)
     ap.add_argument("--audio-reactive", action="store_true",
                     help="gate glyph effect by audio energy; original frames otherwise")
@@ -663,7 +907,7 @@ def main():
     log("starting glyph field")
 
     if args.mode == "cpu":
-        run_cpu(args)
+        run_selected_cpu(args)
     elif args.mode == "gpu":
         run_gpu(args)
     else:
@@ -671,7 +915,7 @@ def main():
             import moderngl  # noqa: F401
             run_gpu(args)
         except Exception:
-            run_cpu(args)
+            run_selected_cpu(args)
 
 
 if __name__ == "__main__":

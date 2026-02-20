@@ -105,3 +105,87 @@ python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --edge-weight 1.4 \
   --start 90 \
   --duration 5
+
+
+// ===== Stutter Presets (video-only effect, original audio muxed) =====
+
+// stutter 1: subtle
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect stutter \
+  --audio-reactive \
+  --stutter-threshold 0.62 \
+  --stutter-prob 0.45 \
+  --stutter-min-hold 2 --stutter-max-hold 6 \
+  --stutter-min-back 1 --stutter-max-back 5 \
+  --stutter-chunk 2 \
+  --stutter-frame-jitter 1 --stutter-jitter-prob 0.25 \
+  --start 90 --duration 15 \
+  --seed 1337
+
+// stutter 2: medium (good default)
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect stutter \
+  --audio-reactive \
+  --stutter-threshold 0.60 \
+  --stutter-prob 1.0 \
+  --stutter-min-hold 7 --stutter-max-hold 15 \
+  --stutter-min-back 2 --stutter-max-back 12 \
+  --stutter-chunk 3 \
+  --stutter-frame-jitter 2 --stutter-jitter-prob 0.45 \
+  --stutter-energy-boost 0.5 \
+  --start 90 --duration 15 \
+  --seed 1337
+
+// stutter 3: insane
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect stutter \
+  --audio-reactive \
+  --stutter-threshold 0.52 \
+  --stutter-prob 1.0 \
+  --stutter-min-hold 10 --stutter-max-hold 28 \
+  --stutter-min-back 4 --stutter-max-back 24 \
+  --stutter-chunk 5 \
+  --stutter-frame-jitter 4 --stutter-jitter-prob 0.70 \
+  --stutter-energy-boost 0.9 \
+  --start 690 --duration 15 \
+  --seed 1337
+
+// stutter 4: subtle tape wobble (light sync slip)
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect stutter \
+  --audio-reactive \
+  --stutter-threshold 0.60 \
+  --stutter-prob 0.55 \
+  --stutter-min-hold 3 --stutter-max-hold 8 \
+  --stutter-min-back 1 --stutter-max-back 6 \
+  --stutter-chunk 2 \
+  --stutter-frame-jitter 1 --stutter-jitter-prob 0.35 \
+  --stutter-energy-boost 0.35 \
+  --stutter-slice-prob 0.55 \
+  --stutter-slice-min-bands 2 --stutter-slice-max-bands 5 \
+  --stutter-slice-min-height 18 --stutter-slice-max-height 96 \
+  --stutter-slice-shift-max 42 \
+  --stutter-slice-gap-max 4 \
+  --stutter-slice-energy-scale 0.5 \
+  --start 690 --duration 15 \
+  --seed 1337
+
+// stutter 5: hard digital desync (aggressive sliced misalignment)
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect stutter \
+  --audio-reactive \
+  --stutter-threshold 0.50 \
+  --stutter-prob 1.0 \
+  --stutter-min-hold 10 --stutter-max-hold 30 \
+  --stutter-min-back 4 --stutter-max-back 28 \
+  --stutter-chunk 5 \
+  --stutter-frame-jitter 4 --stutter-jitter-prob 0.75 \
+  --stutter-energy-boost 1.0 \
+  --stutter-slice-prob 0.95 \
+  --stutter-slice-min-bands 4 --stutter-slice-max-bands 12 \
+  --stutter-slice-min-height 6 --stutter-slice-max-height 52 \
+  --stutter-slice-shift-max 220 \
+  --stutter-slice-gap-max 10 \
+  --stutter-slice-energy-scale 1.2 \
+  --start 690 --duration 15 \
+  --seed 1337
