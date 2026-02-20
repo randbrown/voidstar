@@ -1,0 +1,65 @@
+
+
+// 5. Classic ASCII Wall
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+--cell 8 \
+--density 1.0 \
+--motion-weight 1.0 \
+--edge-weight 1.0 \
+--luma-weight 1.6 \
+  --start 90 \
+  --duration 5
+
+
+
+// 4. Ultra Sparse Cosmic
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+--cell 18 \
+--density 0.28 \
+--motion-weight 1.4 \
+--edge-weight 0.8 \
+--luma-weight 0.5 \
+  --start 90 \
+  --duration 5
+
+
+// 3. Aggressive Glitch Mode
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+--cell 8 \
+--density 0.85 \
+--motion-weight 3.2 \
+--edge-weight 2.0 \
+--luma-weight 0.5 \
+  --start 90 \
+  --duration 5
+
+
+// 2. EQ Lock Mode (HIGHLY recommended for your videos)
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+--cell 10 \
+--density 0.75 \
+--motion-weight 2.2 \
+--edge-weight 1.2 \
+--luma-weight 0.7 \
+  --start 90 \
+  --duration 5
+
+
+// 1. Cosmic Neural Field (your brand)
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+--cell 14 \
+--density 0.45 \
+--motion-weight 1.6 \
+--edge-weight 0.9 \
+--luma-weight 0.6 \
+  --start 90 \
+  --duration 5
+
+
+python voidstar_glyphfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --cell 10 \
+  --density 0.75 \
+  --motion-weight 2.0 \
+  --edge-weight 1.4 \
+  --start 90 \
+  --duration 5
