@@ -239,7 +239,7 @@ run_60s_start() {
         --start-seconds "$ss" --youtube-full-seconds "$full" --target-length-seconds 60 \
         --video-encoder libx264 --preset medium --out-dir "$OUTDIR" \
         --glitch-seconds "$GLITCH_SECONDS" --glitch-style vuwind --cps "$CPS" --loop-seam-seconds "$LOOP_SEAM_SECONDS" \
-        --sampling-mode uniform-spread --n-segments 8 --sample-seconds 8 --truncate-to-full-clips
+        --sampling-mode uniform-spread --n-segments 3 --sample-seconds 20 --truncate-to-full-clips
 
     local base_stem; base_stem="$(basename "${BASE_REELS_OVERLAY%.*}")"
     local divvy_src="$OUTDIR/${base_stem}__highlights__mode-uniform-spread__start-${ss}s__full-${full}s__target-60s.mp4"
@@ -405,7 +405,7 @@ run_60s_end() {
         --start-seconds "$ss" --youtube-full-seconds "$full" --target-length-seconds 60 \
         --video-encoder libx264 --preset medium --out-dir "$OUTDIR" \
         --glitch-seconds "$GLITCH_SECONDS" --glitch-style vuwind --cps "$CPS" --loop-seam-seconds "$LOOP_SEAM_SECONDS" \
-        --sampling-mode uniform-spread --n-segments 8 --sample-seconds 8 --sample-anchor end \
+        --sampling-mode uniform-spread --n-segments 3 --sample-seconds 20 --sample-anchor end \
         --truncate-to-full-clips
 
     local base_stem; base_stem="$(basename "${BASE_REELS_OVERLAY%.*}")"
@@ -518,16 +518,17 @@ run_180s_end() {
 }
 
 main() {
-    FORCE=0; END_ONLY=0; PREVIEW=0
+    FORCE=0; END_ONLY=0; PREVIEW=1
+    PIPELINE_MODE="preview"
     INPUT_VIDEO=""; OUTDIR=""
-    START_SECONDS=0; YOUTUBE_FULL_SECONDS=""; CPS=0.5; GLITCH_SECONDS=2; LOOP_SEAM_SECONDS=""
+    START_SECONDS=108; YOUTUBE_FULL_SECONDS="784"; CPS=0.5; GLITCH_SECONDS=0.5; LOOP_SEAM_SECONDS="0.5"
     LOGO_PATTERNS=()
     USE_REELS_CACHE=1
     ENABLE_GLITCHFIELD_STAGE=1
     USE_GLITCHFIELD_CACHE=1
-    GLITCHFIELD_PRESET="chaos"
+    GLITCHFIELD_PRESET="clean"
     GLITCHFIELD_SEED=1337
-    GLITCHFIELD_MIN_GATE_PERIOD=""
+    GLITCHFIELD_MIN_GATE_PERIOD="7"
     GLITCHFIELD_CUSTOM_ARGS=""
     JOBS=1
 
@@ -536,6 +537,29 @@ main() {
             --force|-f) FORCE=1; shift ;;
             --end-only) END_ONLY=1; shift ;;
             preview) PREVIEW=1; shift ;;
+            --mode)
+                case "$2" in
+                    preview)
+                        PREVIEW=1
+                        END_ONLY=0
+                        PIPELINE_MODE="preview"
+                        ;;
+                    end-only)
+                        END_ONLY=1
+                        PREVIEW=0
+                        PIPELINE_MODE="end-only"
+                        ;;
+                    all)
+                        PREVIEW=0
+                        END_ONLY=0
+                        PIPELINE_MODE="all"
+                        ;;
+                    *)
+                        die "Unknown --mode value: $2 (use preview|end-only|all)"
+                        ;;
+                esac
+                shift 2
+                ;;
             --input) INPUT_VIDEO="$2"; shift 2 ;;
             --outdir) OUTDIR="$2"; shift 2 ;;
             --start-seconds) START_SECONDS="$2"; shift 2 ;;
@@ -546,6 +570,7 @@ main() {
             --logo) LOGO_PATTERNS+=( "$2" ); shift 2 ;;
             --jobs|-j) JOBS="$2"; shift 2 ;;
             --no-reels-cache) USE_REELS_CACHE=0; shift ;;
+            --skip-reels-overlay) USE_REELS_CACHE=0; shift ;;
             --no-glitchfield) ENABLE_GLITCHFIELD_STAGE=0; shift ;;
             --no-glitchfield-cache) USE_GLITCHFIELD_CACHE=0; shift ;;
             --glitchfield-preset) GLITCHFIELD_PRESET="$2"; shift 2 ;;
