@@ -58,7 +58,7 @@ DETECT_AUDIO_START_END_DEFAULT=1
 
 # Timing/style defaults.
 CPS_DEFAULT=0.5
-GLITCH_SECONDS_DEFAULT=2
+GLITCH_SECONDS_DEFAULT=1
 LOOP_SEAM_SECONDS_DEFAULT=""
 
 # Reels overlay stage controls.
@@ -534,7 +534,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 20 3 ""
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
@@ -665,7 +665,7 @@ run_60s_end() {
     echo "--- 60s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 60 20 3 "end"
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
