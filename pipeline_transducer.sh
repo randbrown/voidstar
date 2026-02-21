@@ -37,20 +37,20 @@ set -euo pipefail
 #    PIPELINE_MODE_DEFAULT="preview"
 
 # Pipeline mode: all | end-only | preview | custom
-PIPELINE_MODE_DEFAULT="all"
+PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
 RUN_60S_START=1
-RUN_90S_START=1
-RUN_180S_START=1
+RUN_90S_START=0
+RUN_180S_START=0
 RUN_60S_END=1
-RUN_90S_END=1
-RUN_180S_END=1
-RUN_FULL=1
+RUN_90S_END=0
+RUN_180S_END=0
+RUN_FULL=0
 
 # Input/output defaults.
 INPUT_VIDEO_DEFAULT="~/WinVideos/transducer/transducer_voidstar_0.mp4"
-OUTDIR_DEFAULT=""
+OUTDIR_DEFAULT="~/WinVideos/transducer"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
 START_SECONDS_DEFAULT="501"
@@ -80,8 +80,8 @@ JOBS_DEFAULT=1
 FORCE_DEFAULT=0
 
 # Optional copy of final rendered outputs to Google Drive (WSL path style).
-ENABLE_GDRIVE_COPY_DEFAULT=0
-GDRIVE_OUTDIR_DEFAULT=""   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos
+ENABLE_GDRIVE_COPY_DEFAULT=1
+GDRIVE_OUTDIR_DEFAULT="/mnt/g/My Drive/Music/voidstar/transducer"   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos
 
 # Glitchfield preset examples (manual reference):
 # clean:
@@ -149,7 +149,7 @@ expand_logo_patterns() {
 
 find_void_logos_default() {
     # Default: all void*.png under project root (sorted for stable rotation)
-    find "$PROJECT_ROOT" -type f -iname "void*.png" | sort
+    find "$PROJECT_ROOT/art/logos_alpha" -type f -iname "void*.png" | sort
 }
 
 with_logo_suffix() {
@@ -418,7 +418,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 8 8 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 4 15 ""
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
@@ -537,7 +537,7 @@ run_60s_end() {
     echo "--- 60s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 8 8 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 60 4 15 "end"
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
@@ -626,7 +626,7 @@ main() {
     FORCE="$FORCE_DEFAULT"; END_ONLY=0; PREVIEW=0
     INPUT_VIDEO=""; OUTDIR=""
     START_SECONDS="$START_SECONDS_DEFAULT"; YOUTUBE_FULL_SECONDS="$YOUTUBE_FULL_SECONDS_DEFAULT"; DETECT_AUDIO_START_END="$DETECT_AUDIO_START_END_DEFAULT"; CPS="$CPS_DEFAULT"; GLITCH_SECONDS="$GLITCH_SECONDS_DEFAULT"; LOOP_SEAM_SECONDS="$LOOP_SEAM_SECONDS_DEFAULT"
-    LOGO_PATTERNS=()
+    LOGO_PATTERNS=("voidstar_emblem_text_0.png")
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
     JOBS="$JOBS_DEFAULT"
     PIPELINE_MODE="$PIPELINE_MODE_DEFAULT"
