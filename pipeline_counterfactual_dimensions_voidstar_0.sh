@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pipeline_counterfactual_dimensions_voidstar_0_gluons.sh
+# pipeline_counterfactual_dimensions_voidstar_0.sh
 # Based on pipeline_gluons.sh (keeps same flow and defaults, plus optional glitchfield layer).
 #
 # Performance optimizations:
