@@ -31,6 +31,7 @@ set -euo pipefail
 # 3) GLITCHFIELD EXPERIMENT (with presets from notes)
 #    ENABLE_REELS_OVERLAY_STEP=0        # optional: bypass reels for speed
 #    ENABLE_GLITCHFIELD_STAGE=1
+#    USE_GLITCHFIELD_CACHE_DEFAULT=1
 #    GLITCHFIELD_PRESET="clean"        # clean | gritty | chaos | custom
 #    GLITCHFIELD_START_SECONDS=690
 #    GLITCHFIELD_DURATION_SECONDS=15
@@ -68,6 +69,7 @@ USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-da
 
 # Optional glitchfield stage (runs after reels/input base, before divvy highlights).
 ENABLE_GLITCHFIELD_STAGE=1       # set 1 to enable
+USE_GLITCHFIELD_CACHE_DEFAULT=1  # if 1, reuse cached glitchfield base when up-to-date
 GLITCHFIELD_PRESET="chaos"      # clean | gritty | chaos | custom
 GLITCHFIELD_START_SECONDS=""      # empty => glitchfield default
 GLITCHFIELD_DURATION_SECONDS=""   # empty => glitchfield default
@@ -109,12 +111,77 @@ copy_to_gdrive_if_enabled() {
 
 should_rebuild() {
     local target="$1"
-    local script="$0"
+    shift || true
+
+    local -a deps=()
+    local cache_sig=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dep)
+                [[ $# -ge 2 ]] || die "should_rebuild: --dep requires a value"
+                deps+=("$2")
+                shift 2
+                ;;
+            --sig)
+                [[ $# -ge 2 ]] || die "should_rebuild: --sig requires a value"
+                cache_sig="$2"
+                shift 2
+                ;;
+            *)
+                deps+=("$1")
+                shift
+                ;;
+        esac
+    done
+
     if [[ "${FORCE:-0}" -eq 1 ]]; then return 0; fi
     if [[ ! -f "$target" ]]; then return 0; fi
-    if [[ "$script" -nt "$target" ]]; then return 0; fi
+
+    local dep
+    for dep in "${deps[@]}"; do
+        [[ -n "$dep" ]] || continue
+        [[ -e "$dep" ]] || continue
+        if [[ "$dep" -nt "$target" ]]; then
+            echo "Target $target is older than dependency $dep. Rebuilding."
+            return 0
+        fi
+    done
+
+    if [[ -n "$cache_sig" ]]; then
+        local sig_file="${target}.cachekey"
+        if [[ ! -f "$sig_file" ]]; then
+            echo "Target $target missing cache key. Rebuilding."
+            return 0
+        fi
+        local existing_sig
+        existing_sig="$(cat "$sig_file")"
+        if [[ "$existing_sig" != "$cache_sig" ]]; then
+            echo "Target $target cache key changed. Rebuilding."
+            return 0
+        fi
+    fi
+
     echo "Target $target is up-to-date. Skipping."
     return 1
+}
+
+write_cache_signature() {
+    local target="$1"
+    local cache_sig="$2"
+    [[ -n "$cache_sig" ]] || return 0
+    printf '%s' "$cache_sig" > "${target}.cachekey"
+}
+
+file_fingerprint() {
+    local path="$1"
+    if [[ ! -e "$path" ]]; then
+        echo "missing"
+        return 0
+    fi
+    local mtime size
+    mtime="$(stat -c '%Y' "$path" 2>/dev/null || echo 0)"
+    size="$(stat -c '%s' "$path" 2>/dev/null || echo 0)"
+    echo "${mtime}:${size}"
 }
 
 rename_output() {
@@ -214,8 +281,10 @@ _sem_release() { printf '.' >&9; }
 build_base_reels_overlay() {
     echo "--- Base reels overlay (cache) ---"
     local target="$BASE_REELS_OVERLAY"
+    local reels_cache_sig
+    reels_cache_sig="reels|input=${INPUT_VIDEO}|input_fp=$(file_fingerprint "$INPUT_VIDEO")|script=${REELS_OVERLAY}|script_fp=$(file_fingerprint "$REELS_OVERLAY")|min_det=0.05|min_trk=0.05|draw_ids=true|smear=true|smear_frames=17|smear_decay=0.99|trail=true|trail_alpha=.999|beat_sync=true|velocity_color=true|velocity_color_mult=10"
     if [[ "$USE_REELS_CACHE" -eq 1 ]]; then
-        should_rebuild "$target" || return 0
+        should_rebuild "$target" --dep "$INPUT_VIDEO" --dep "$REELS_OVERLAY" --sig "$reels_cache_sig" || return 0
     else
         echo "[reels] cache disabled: rebuilding base overlay"
     fi
@@ -226,6 +295,8 @@ build_base_reels_overlay() {
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color true --velocity-color-mult 10 \
         --output "$target"
+
+    write_cache_signature "$target" "$reels_cache_sig"
 
     # rename_output "$OUTDIR/${STEM}_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" \
     #     "$target"
@@ -240,11 +311,6 @@ run_optional_glitchfield_stage() {
 
     local preset_tag="${GLITCHFIELD_PRESET}"
     local target="$OUTDIR/${STEM}_base_glitchfield_${preset_tag}.mp4"
-    should_rebuild "$target" || {
-        BASE_REELS_OVERLAY="$target"
-        echo "[glitchfield] using cached: $BASE_REELS_OVERLAY"
-        return 0
-    }
 
     local -a gf_args
     case "$GLITCHFIELD_PRESET" in
@@ -322,6 +388,21 @@ run_optional_glitchfield_stage() {
         gf_time_args+=(--duration "$GLITCHFIELD_DURATION_SECONDS")
     fi
 
+    local gf_sig_args gf_sig_time glitchfield_cache_sig
+    gf_sig_args="${gf_args[*]}"
+    gf_sig_time="${gf_time_args[*]}"
+    glitchfield_cache_sig="glitchfield|input=${BASE_REELS_OVERLAY}|input_fp=$(file_fingerprint "$BASE_REELS_OVERLAY")|script=${glitchfield_script}|script_fp=$(file_fingerprint "$glitchfield_script")|preset=${GLITCHFIELD_PRESET}|seed=${GLITCHFIELD_SEED}|min_gate_period=${GLITCHFIELD_MIN_GATE_PERIOD:-}|args=${gf_sig_args}|time=${gf_sig_time}"
+
+    if [[ "$USE_GLITCHFIELD_CACHE" -eq 1 ]]; then
+        should_rebuild "$target" --dep "$BASE_REELS_OVERLAY" --dep "$glitchfield_script" --sig "$glitchfield_cache_sig" || {
+            BASE_REELS_OVERLAY="$target"
+            echo "[glitchfield] using cached: $BASE_REELS_OVERLAY"
+            return 0
+        }
+    else
+        echo "[glitchfield] cache disabled: rebuilding glitchfield base"
+    fi
+
     python3 "$glitchfield_script" "$BASE_REELS_OVERLAY" \
         "${gf_args[@]}" \
         "${gf_time_args[@]}" \
@@ -336,6 +417,8 @@ run_optional_glitchfield_stage() {
     else
         die "Could not locate glitchfield output for stem: $in_stem"
     fi
+
+    write_cache_signature "$target" "$glitchfield_cache_sig"
 
     BASE_REELS_OVERLAY="$target"
     echo "[glitchfield] staged base: $BASE_REELS_OVERLAY"
@@ -423,7 +506,7 @@ run_60s_start() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_60s_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target"; then
+    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
@@ -453,7 +536,7 @@ run_90s_start() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90s_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target"; then
+    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
@@ -483,7 +566,7 @@ run_180s_start() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_180s_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target"; then
+    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
@@ -512,7 +595,7 @@ run_full() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_full_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target"; then
+    if ! should_rebuild "$target" --dep "$base_overlay" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
@@ -542,7 +625,7 @@ run_60s_end() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_60t_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target"; then
+    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
@@ -572,7 +655,7 @@ run_90s_end() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90t_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target"; then
+    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
@@ -602,7 +685,7 @@ run_180s_end() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_180t_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target"; then
+    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
@@ -628,6 +711,7 @@ main() {
     START_SECONDS="$START_SECONDS_DEFAULT"; YOUTUBE_FULL_SECONDS="$YOUTUBE_FULL_SECONDS_DEFAULT"; DETECT_AUDIO_START_END="$DETECT_AUDIO_START_END_DEFAULT"; CPS="$CPS_DEFAULT"; GLITCH_SECONDS="$GLITCH_SECONDS_DEFAULT"; LOOP_SEAM_SECONDS="$LOOP_SEAM_SECONDS_DEFAULT"
     LOGO_PATTERNS=("voidstar_emblem_text_0.png")
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
+    USE_GLITCHFIELD_CACHE="$USE_GLITCHFIELD_CACHE_DEFAULT"
     JOBS="$JOBS_DEFAULT"
     PIPELINE_MODE="$PIPELINE_MODE_DEFAULT"
     ENABLE_GDRIVE_COPY="$ENABLE_GDRIVE_COPY_DEFAULT"
@@ -652,6 +736,7 @@ main() {
             --logo) LOGO_PATTERNS+=( "$2" ); shift 2 ;;
             --jobs|-j) JOBS="$2"; shift 2 ;;
             --no-reels-cache) USE_REELS_CACHE=0; shift ;;
+            --no-glitchfield-cache) USE_GLITCHFIELD_CACHE=0; shift ;;
             --copy-to-gdrive) ENABLE_GDRIVE_COPY=1; shift ;;
             --gdrive-outdir) GDRIVE_OUTDIR="$2"; shift 2 ;;
             -h|--help) sed -n '1,130p' "$0"; exit 0 ;;
@@ -702,7 +787,7 @@ main() {
     echo "Out:   $OUTDIR"
     echo "Dur:   ${INPUT_DURATION_SECONDS}s"
     echo "Args:  start=${start_dbg}s full=${full_dbg}s detect_audio=${detect_dbg} cps=${CPS} glitch=${GLITCH_SECONDS}s loop_seam=${LOOP_SEAM_SECONDS}s"
-    echo "Perf:  reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} jobs=${JOBS}"
+    echo "Perf:  reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} jobs=${JOBS}"
     echo "Sync:  gdrive_copy=${ENABLE_GDRIVE_COPY} gdrive_outdir=${GDRIVE_OUTDIR:-unset}"
 
     PROJECT_ROOT="/home/$USER/code/voidstar"
