@@ -232,3 +232,63 @@ python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
   --stutter-frame-jitter 4 --stutter-jitter-prob 0.75 \
   --start 690 --duration 15 \
   --seed 1337
+
+
+// ===== FX Stack Presets (new low-cost post FX) =====
+
+// fx 1: clean cyber (subtle polish)
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect combo \
+  --audio-reactive \
+  --beat-threshold 0.58 --beat-prob 1.0 --glitch-hold 12 \
+  --combo-glyph-prob 0.6 --combo-stutter-prob 0.4 --combo-alternate-bias 0.55 \
+  --color-mode input --input-palette-k 6 --palette-refresh 6 \
+  --stutter-slice-prob 0.75 --stutter-slice-shift-max 120 \
+  --fx-rgb-split --fx-rgb-shift-max 2 --fx-rgb-prob 0.45 \
+  --fx-trail-frames 1 --fx-trail-strength 0.18 \
+  --fx-scanline-jitter 0.08 --fx-scanline-step 2 --fx-scanline-shift-max 1 --fx-scanline-brightness 0.95 \
+  --fx-vhold-prob 0.03 --fx-vhold-max 4 \
+  --min-gate-period 6 \
+  --start 690 --duration 15 \
+  --seed 1337
+
+// fx 2: gritty tape (analog/damaged vibe)
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect combo \
+  --audio-reactive \
+  --beat-threshold 0.56 --beat-prob 1.0 --glitch-hold 13 \
+  --combo-glyph-prob 0.45 --combo-stutter-prob 0.55 --combo-alternate-bias 0.6 \
+  --color-mode audio --palette fire --audio-color-reactive \
+  --stutter-slice-prob 0.9 --stutter-slice-shift-max 170 \
+  --stutter-frame-jitter 3 --stutter-jitter-prob 0.65 \
+  --fx-rgb-split --fx-rgb-shift-max 3 --fx-rgb-prob 0.7 \
+  --fx-trail-frames 2 --fx-trail-strength 0.3 \
+  --fx-scanline-jitter 0.22 --fx-scanline-step 2 --fx-scanline-shift-max 2 --fx-scanline-brightness 0.9 \
+  --fx-line-dropout-prob 0.06 --fx-line-dropout-thickness 2 --fx-line-dropout-bright \
+  --fx-posterize-levels 6 \
+  --fx-vhold-prob 0.08 --fx-vhold-max 10 \
+  --min-gate-period 4 \
+  --start 690 --duration 15 \
+  --seed 1337
+
+// fx 3: chaos stack (hard digital corruption)
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect combo \
+  --audio-reactive \
+  --beat-threshold 0.52 --beat-prob 1.0 --glitch-hold 14 \
+  --combo-glyph-prob 0.3 --combo-stutter-prob 0.7 --combo-alternate-bias 0.45 \
+  --color-mode fixed --palette insane --glitch-prob 0.45 \
+  --stutter-slice-prob 0.95 --stutter-slice-shift-max 220 \
+  --stutter-slice-min-bands 4 --stutter-slice-max-bands 12 \
+  --stutter-frame-jitter 4 --stutter-jitter-prob 0.75 \
+  --fx-rgb-split --fx-rgb-shift-max 6 --fx-rgb-prob 0.9 \
+  --fx-trail-frames 3 --fx-trail-strength 0.38 \
+  --fx-scanline-jitter 0.3 --fx-scanline-step 2 --fx-scanline-shift-max 3 --fx-scanline-brightness 0.85 \
+  --fx-line-dropout-prob 0.12 --fx-line-dropout-thickness 3 --fx-line-dropout-bright \
+  --fx-block-jitter-prob 0.05 --fx-block-size 12 --fx-block-shift-max 4 \
+  --fx-posterize-levels 5 \
+  --fx-bitcrush-bits 6 \
+  --fx-vhold-prob 0.12 --fx-vhold-max 14 \
+  --min-gate-period 4 \
+  --start 690 --duration 15 \
+  --seed 1337

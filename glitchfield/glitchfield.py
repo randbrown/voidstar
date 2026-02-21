@@ -230,6 +230,106 @@ def pick_combo_effect(rng, args, last_effect):
     return "glyph" if r < glyph_w else "stutter"
 
 
+def _quantize_u8(img: np.ndarray, levels: int) -> np.ndarray:
+    levels = max(2, int(levels))
+    q = np.round((img.astype(np.float32) / 255.0) * (levels - 1))
+    q = (q / (levels - 1)) * 255.0
+    return np.clip(q, 0, 255).astype(np.uint8)
+
+
+def apply_optional_post_fx(frame: np.ndarray, rng, args, energy: float, trail_history) -> np.ndarray:
+    out = frame
+
+    # RGB split / chromatic aberration
+    if args.fx_rgb_split and args.fx_rgb_shift_max > 0 and rng.random() <= args.fx_rgb_prob:
+        max_shift = int(args.fx_rgb_shift_max)
+        shifted = []
+        for channel in range(3):
+            sx = int(rng.integers(-max_shift, max_shift + 1))
+            sy = int(rng.integers(-max_shift, max_shift + 1))
+            shifted.append(np.roll(out[:, :, channel], shift=(sy, sx), axis=(0, 1)))
+        out = cv2.merge(shifted)
+
+    # Subtle scanline jitter
+    if args.fx_scanline_jitter > 0 and args.fx_scanline_step > 0:
+        h, w = out.shape[:2]
+        step = max(1, args.fx_scanline_step)
+        jitter_max = max(0, args.fx_scanline_shift_max)
+        bright_mul = float(np.clip(args.fx_scanline_brightness, 0.25, 2.0))
+        for y in range(0, h, step):
+            if rng.random() <= args.fx_scanline_jitter:
+                if jitter_max > 0:
+                    sx = int(rng.integers(-jitter_max, jitter_max + 1))
+                    out[y:y + 1, :] = np.roll(out[y:y + 1, :], shift=sx, axis=1)
+                if bright_mul != 1.0:
+                    row = out[y:y + 1, :].astype(np.float32) * bright_mul
+                    out[y:y + 1, :] = np.clip(row, 0, 255).astype(np.uint8)
+
+    # Luma posterize
+    if args.fx_posterize_levels >= 2:
+        ycc = cv2.cvtColor(out, cv2.COLOR_BGR2YCrCb)
+        ycc[:, :, 0] = _quantize_u8(ycc[:, :, 0], args.fx_posterize_levels)
+        out = cv2.cvtColor(ycc, cv2.COLOR_YCrCb2BGR)
+
+    # Random line dropout / flash lines
+    if args.fx_line_dropout_prob > 0 and args.fx_line_dropout_thickness > 0:
+        h, _ = out.shape[:2]
+        lines = max(1, int(round(h / 120)))
+        thickness_max = max(1, args.fx_line_dropout_thickness)
+        for _ in range(lines):
+            if rng.random() <= args.fx_line_dropout_prob:
+                y0 = int(rng.integers(0, h))
+                th = int(rng.integers(1, thickness_max + 1))
+                y1 = min(h, y0 + th)
+                if args.fx_line_dropout_bright and rng.random() <= 0.4:
+                    out[y0:y1, :, :] = 255
+                else:
+                    out[y0:y1, :, :] = 0
+
+    # Block jitter (cheap codec-corruption look)
+    if args.fx_block_jitter_prob > 0 and args.fx_block_size > 1 and args.fx_block_shift_max > 0:
+        h, w = out.shape[:2]
+        bs = max(2, args.fx_block_size)
+        shift_max = max(1, args.fx_block_shift_max)
+        for y in range(0, h, bs):
+            y1 = min(h, y + bs)
+            for x in range(0, w, bs):
+                if rng.random() > args.fx_block_jitter_prob:
+                    continue
+                x1 = min(w, x + bs)
+                sx = int(rng.integers(-shift_max, shift_max + 1))
+                sy = int(rng.integers(-shift_max, shift_max + 1))
+                block = out[y:y1, x:x1, :]
+                out[y:y1, x:x1, :] = np.roll(block, shift=(sy, sx), axis=(0, 1))
+
+    # Bitcrush color
+    bits = int(np.clip(args.fx_bitcrush_bits, 1, 8))
+    if bits < 8:
+        step = 1 << (8 - bits)
+        out = ((out // step) * step).astype(np.uint8)
+
+    # Vertical hold roll
+    if args.fx_vhold_prob > 0 and args.fx_vhold_max > 0:
+        p = np.clip(args.fx_vhold_prob * (0.6 + 0.4 * max(0.0, energy)), 0.0, 1.0)
+        if rng.random() <= p:
+            sy = int(rng.integers(-args.fx_vhold_max, args.fx_vhold_max + 1))
+            out = np.roll(out, shift=sy, axis=0)
+
+    # Frame blend trail
+    trail_n = max(0, args.fx_trail_frames)
+    trail_s = float(np.clip(args.fx_trail_strength, 0.0, 1.0))
+    if trail_history is not None and trail_n > 0 and trail_s > 0:
+        if len(trail_history) > 0:
+            use_n = min(trail_n, len(trail_history))
+            hist_mean = np.mean(np.stack(trail_history[-use_n:], axis=0), axis=0).astype(np.uint8)
+            out = cv2.addWeighted(out, 1.0 - trail_s, hist_mean, trail_s, 0)
+        trail_history.append(out.copy())
+        if len(trail_history) > trail_n:
+            del trail_history[:-trail_n]
+
+    return out
+
+
 # ============================================================
 # Output naming (same folder as input)
 # ============================================================
@@ -445,6 +545,7 @@ def run_cpu(args):
     next_gate_frame = 0
     cooldown_frames = gate_cooldown_frames(args, fps)
     flash_left = 0
+    trail_history = []
     custom_colors = parse_colors_arg(args.colors)
     cached_input_palette = None
 
@@ -486,6 +587,8 @@ def run_cpu(args):
             if not glyph_on:
                 # Pass-through original frame (no glyph overlay)
                 writer.write(frame)
+                if trail_history:
+                    trail_history.clear()
                 frame_idx += 1
 
                 if flash_left > 0:
@@ -624,6 +727,8 @@ def run_cpu(args):
                         color, 1, cv2.LINE_AA
                     )
 
+            out = apply_optional_post_fx(out, rng, args, e, trail_history)
+
             writer.write(out)
 
             frame_idx += 1
@@ -705,6 +810,7 @@ def run_stutter_cpu(args):
     stutter_left = 0
     next_gate_frame = 0
     cooldown_frames = gate_cooldown_frames(args, fps)
+    trail_history = []
     stutter_back = min_back
     freeze_left = 0
     freeze_frame = None
@@ -770,6 +876,12 @@ def run_stutter_cpu(args):
 
                 mode = "stutter"
                 stutter_left -= 1
+            else:
+                if trail_history:
+                    trail_history.clear()
+
+            if mode != "orig":
+                out = apply_optional_post_fx(out, rng, args, e, trail_history)
 
             writer.write(out)
 
@@ -846,6 +958,7 @@ def run_combo_cpu(args):
     cooldown_frames = gate_cooldown_frames(args, fps)
     active_effect = None
     last_effect = None
+    trail_history = []
 
     prev_gray = None
     flash_left = 0
@@ -901,6 +1014,8 @@ def run_combo_cpu(args):
             if not effect_on:
                 out = frame
                 mode = "orig"
+                if trail_history:
+                    trail_history.clear()
             elif active_effect == "stutter":
                 out = frame
                 mode = "stutter"
@@ -1028,6 +1143,9 @@ def run_combo_cpu(args):
                             color = lerp_color(color, (255, 255, 255), args.beat_flash_strength * ft)
 
                         cv2.putText(out, ch, (x, y), cv2.FONT_HERSHEY_SIMPLEX, args.font_scale, color, 1, cv2.LINE_AA)
+
+            if mode != "orig":
+                out = apply_optional_post_fx(out, rng, args, e, trail_history)
 
             writer.write(out)
 
@@ -1191,6 +1309,53 @@ def parse_args():
                     help="relative weight for selecting stutter when combo gate triggers")
     ap.add_argument("--combo-alternate-bias", type=float, default=0.35,
                     help="extra weight applied to the opposite of previous combo effect")
+
+    # Optional low-cost post FX
+    ap.add_argument("--fx-rgb-split", action="store_true",
+                    help="enable RGB channel split effect")
+    ap.add_argument("--fx-rgb-shift-max", type=int, default=4,
+                    help="max pixel shift for RGB split")
+    ap.add_argument("--fx-rgb-prob", type=float, default=0.8,
+                    help="chance to apply RGB split on an effected frame")
+
+    ap.add_argument("--fx-trail-frames", type=int, default=0,
+                    help="number of recent effected frames to blend as trail (0 disables)")
+    ap.add_argument("--fx-trail-strength", type=float, default=0.35,
+                    help="trail blend amount (0..1)")
+
+    ap.add_argument("--fx-scanline-jitter", type=float, default=0.0,
+                    help="probability per scanline step of jitter/brightness modulation")
+    ap.add_argument("--fx-scanline-step", type=int, default=2,
+                    help="scanline step size in rows")
+    ap.add_argument("--fx-scanline-shift-max", type=int, default=3,
+                    help="max horizontal shift for jittered scanlines")
+    ap.add_argument("--fx-scanline-brightness", type=float, default=1.0,
+                    help="brightness multiplier on affected scanlines")
+
+    ap.add_argument("--fx-posterize-levels", type=int, default=0,
+                    help="luma posterize levels (>=2 enables)")
+
+    ap.add_argument("--fx-line-dropout-prob", type=float, default=0.0,
+                    help="probability for random horizontal dropout lines")
+    ap.add_argument("--fx-line-dropout-thickness", type=int, default=2,
+                    help="max thickness in pixels for dropout lines")
+    ap.add_argument("--fx-line-dropout-bright", action="store_true",
+                    help="allow occasional bright flash lines in dropout effect")
+
+    ap.add_argument("--fx-block-jitter-prob", type=float, default=0.0,
+                    help="probability per block for block jitter")
+    ap.add_argument("--fx-block-size", type=int, default=16,
+                    help="block size in pixels for block jitter")
+    ap.add_argument("--fx-block-shift-max", type=int, default=3,
+                    help="max per-block pixel shift")
+
+    ap.add_argument("--fx-bitcrush-bits", type=int, default=8,
+                    help="bit depth per channel (1..8, 8 disables)")
+
+    ap.add_argument("--fx-vhold-prob", type=float, default=0.0,
+                    help="chance to apply vertical hold roll")
+    ap.add_argument("--fx-vhold-max", type=int, default=12,
+                    help="max vertical roll in pixels")
 
     # Audio reactive (gated)
     ap.add_argument("--audio-reactive", action="store_true",
