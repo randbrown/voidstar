@@ -283,6 +283,95 @@ def probe_duration_and_audio(path: Path) -> tuple[float, bool]:
 	return dur, has_audio
 
 
+def detect_audio_active_window(path: Path, total_duration: float) -> tuple[float, float] | None:
+	"""
+	Detect first/last non-silent audio region using ffmpeg silencedetect.
+	Returns (start, end) in seconds, clamped to [0, total_duration].
+	Returns None if detection fails or no active region is found.
+	"""
+	cmd = [
+		"ffmpeg",
+		"-hide_banner",
+		"-nostats",
+		"-i",
+		str(path),
+		"-af",
+		"silencedetect=noise=-45dB:d=0.25",
+		"-f",
+		"null",
+		"-",
+	]
+	try:
+		proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+	except Exception:
+		return None
+
+	stderr = proc.stderr or ""
+	silences: list[tuple[float, float]] = []
+	pending_start: float | None = None
+
+	for raw in stderr.splitlines():
+		line = raw.strip()
+		m_start = re.search(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)", line)
+		if m_start:
+			try:
+				pending_start = float(m_start.group(1))
+			except ValueError:
+				pending_start = None
+			continue
+
+		m_end = re.search(r"silence_end:\s*([0-9]+(?:\.[0-9]+)?)", line)
+		if m_end:
+			try:
+				e = float(m_end.group(1))
+			except ValueError:
+				continue
+			s = pending_start if pending_start is not None else 0.0
+			silences.append((max(0.0, s), max(0.0, e)))
+			pending_start = None
+
+	if pending_start is not None:
+		silences.append((max(0.0, pending_start), max(0.0, total_duration)))
+
+	if not silences:
+		# No silence markers -> assume active for full duration.
+		if total_duration > 0:
+			return 0.0, total_duration
+		return None
+
+	silences.sort(key=lambda x: (x[0], x[1]))
+	merged: list[tuple[float, float]] = []
+	for s, e in silences:
+		s = min(max(0.0, s), total_duration)
+		e = min(max(0.0, e), total_duration)
+		if e <= s:
+			continue
+		if not merged or s > merged[-1][1] + 1e-6:
+			merged.append((s, e))
+		else:
+			merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+
+	active: list[tuple[float, float]] = []
+	cursor = 0.0
+	for s, e in merged:
+		if s > cursor + 1e-6:
+			active.append((cursor, s))
+		cursor = max(cursor, e)
+	if total_duration > cursor + 1e-6:
+		active.append((cursor, total_duration))
+
+	# Ignore tiny blips.
+	active = [(s, e) for (s, e) in active if (e - s) >= 0.05]
+	if not active:
+		return None
+
+	start = min(max(0.0, active[0][0]), total_duration)
+	end = min(max(start, active[-1][1]), total_duration)
+	if end <= start:
+		return None
+	return start, end
+
+
 def sanitize_tag(text: str) -> str:
 	t = re.sub(r"[^A-Za-z0-9._-]+", "-", text.strip())
 	t = re.sub(r"-+", "-", t).strip("-._")
@@ -424,8 +513,10 @@ def build_recombine_default_filename(segment_dir: Path, args: argparse.Namespace
 def build_highlights_default_filename(input_path: Path, args: argparse.Namespace) -> str:
 	mode_tag = sanitize_tag(args.sampling_mode)
 	target_tag = float_tag(max(0.0, args.target_length_seconds), digits=3)
-	start_tag = float_tag(max(0.0, args.start_seconds), digits=3)
-	full_tag = float_tag(max(0.0, args.youtube_full_seconds), digits=3)
+	start_seconds = 0.0 if args.start_seconds is None else float(args.start_seconds)
+	full_seconds = 0.0 if args.youtube_full_seconds is None else float(args.youtube_full_seconds)
+	start_tag = float_tag(max(0.0, start_seconds), digits=3)
+	full_tag = float_tag(max(0.0, full_seconds), digits=3)
 	return (
 		f"{input_path.stem}__highlights"
 		f"__mode-{mode_tag}"
@@ -641,14 +732,19 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 	ap.add_argument(
 		"--start-seconds",
 		type=float,
-		default=0.0,
-		help="Start time in source video for highlight sampling window",
+		default=None,
+		help="Start time in source video for highlight sampling window (default: 0, or auto-detected with --detect-audio-start-end)",
 	)
 	ap.add_argument(
 		"--youtube-full-seconds",
 		type=float,
-		required=True,
-		help="Total source window length from start-seconds to sample from",
+		default=None,
+		help="Total source window length from start-seconds to sample from (default: remaining duration, or auto-trimmed with --detect-audio-start-end)",
+	)
+	ap.add_argument(
+		"--detect-audio-start-end",
+		action="store_true",
+		help="Auto-detect first/last non-silent audio and use as default sampling window",
 	)
 	ap.add_argument(
 		"--target-length-seconds",
@@ -1258,8 +1354,6 @@ def run_highlights(args: argparse.Namespace) -> None:
 		out_path = input_path.parent / build_highlights_default_filename(input_path, args)
 	out_path.parent.mkdir(parents=True, exist_ok=True)
 
-	if args.youtube_full_seconds <= 0:
-		raise ValueError("--youtube-full-seconds must be > 0")
 	if args.target_length_seconds <= 0:
 		raise ValueError("--target-length-seconds must be > 0")
 	if args.recursive_min_segment_seconds <= 0:
@@ -1273,11 +1367,37 @@ def run_highlights(args: argparse.Namespace) -> None:
 	if video_duration <= 0:
 		raise RuntimeError("Could not determine input duration")
 
-	window_start = max(0.0, args.start_seconds)
+	detected_window: tuple[float, float] | None = None
+	if args.detect_audio_start_end and has_audio:
+		detected_window = detect_audio_active_window(input_path, video_duration)
+		if detected_window is not None:
+			print(
+				f"[voidstar] detect_audio_start_end=on "
+				f"detected_start={detected_window[0]:.3f}s detected_end={detected_window[1]:.3f}s"
+			)
+		else:
+			print("[voidstar] detect_audio_start_end=on detection_failed -> using full video window")
+
+	if args.start_seconds is None:
+		if detected_window is not None:
+			window_start = max(0.0, detected_window[0])
+		else:
+			window_start = 0.0
+	else:
+		window_start = max(0.0, args.start_seconds)
 	if window_start >= video_duration:
 		raise ValueError("--start-seconds is beyond input duration")
 
-	window_len = min(max(0.0, args.youtube_full_seconds), max(0.0, video_duration - window_start))
+	default_window_end = video_duration
+	if detected_window is not None:
+		default_window_end = min(video_duration, max(window_start, detected_window[1]))
+
+	if args.youtube_full_seconds is None:
+		window_len = max(0.0, default_window_end - window_start)
+	else:
+		if args.youtube_full_seconds <= 0:
+			raise ValueError("--youtube-full-seconds must be > 0")
+		window_len = min(max(0.0, args.youtube_full_seconds), max(0.0, video_duration - window_start))
 	if window_len <= 0:
 		raise ValueError("Sampling window length is zero after clamping to input duration")
 	window_end = window_start + window_len

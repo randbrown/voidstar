@@ -1,0 +1,56 @@
+
+  mp311 3.11.14   voidstar   main 
+
+❯  ./pipeline_transducer.sh --end-only --input /home/brown/WinVideos/transducer/transducer_voidstar_0.mp4 --outdir /home/brown/WinVideos/transducer
+
+
+./pipeline_transducer.sh preview --input /home/brown/WinVideos/transducer/transducer_voidstar_0.mp4 --outdir /home/brown/WinVideos/transducer
+
+
+
+
+python3 divvy.py highlights "$HOME/WinVideos/transducer/transducer_voidstar_0.mp4" \
+--detect-audio-start-end --target-length-seconds 60 --video-encoder libx264 --preset medium \
+--out-dir /mnt/c/users/brown/Videos/transducer \
+--glitch-seconds 2 --glitch-style vuwind \
+--cps 0.5 --loop-seam-seconds 2  --sampling-mode uniform-spread --sample-seconds 10 \
+--truncate-to-full-clips
+
+ python voidstar_dvd_logo.py "transducer.mp4" ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1
+
+
+
+python3 divvy.py highlights "$HOME/WinVideos/transducer.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  --sampling-mode polyrhythm --sample-seconds 16 --truncate-to-full-clips
+
+python3 divvy.py highlights "$HOME/WinVideos/transducer.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 1 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 1  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
+
+python3 divvy.py highlights "$HOME/WinVideos/transducer.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 1 --glitch-style circleclose --cps 0.5 --loop-seam-seconds 1  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
+
+python3 divvy.py highlights "$HOME/WinVideos/transducer.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 1 --glitch-style circleopen --cps 0.5 --loop-seam-seconds 1  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
+
+python3 divvy.py highlights "$HOME/WinVideos/transducer.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds .5 --glitch-style pixelize --cps 0.5 --loop-seam-seconds .5  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
+
+
+ python voidstar_dvd_logo.py "transducer__highlights__mode-n-averages__start-0s__full-1080s__target-90s.mp4" ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1
+
+
+python glitchfield.py ~/WinVideos/tensors_voidstar_6.mp4 \
+  --effect combo \
+  --audio-reactive \
+  --beat-threshold 0.52 --beat-prob 1.0 --glitch-hold 14 \
+  --combo-glyph-prob 0.3 --combo-stutter-prob 0.7 --combo-alternate-bias 0.45 \
+  --color-mode fixed --palette insane --glitch-prob 0.45 \
+  --stutter-slice-prob 0.95 --stutter-slice-shift-max 220 \
+  --stutter-slice-min-bands 4 --stutter-slice-max-bands 12 \
+  --stutter-frame-jitter 4 --stutter-jitter-prob 0.75 \
+  --fx-rgb-split --fx-rgb-shift-max 6 --fx-rgb-prob 0.9 \
+  --fx-trail-frames 3 --fx-trail-strength 0.38 \
+  --fx-scanline-jitter 0.3 --fx-scanline-step 2 --fx-scanline-shift-max 3 --fx-scanline-brightness 0.85 \
+  --fx-line-dropout-prob 0.12 --fx-line-dropout-thickness 3 --fx-line-dropout-bright \
+  --fx-block-jitter-prob 0.05 --fx-block-size 12 --fx-block-shift-max 4 \
+  --fx-posterize-levels 5 \
+  --fx-bitcrush-bits 6 \
+  --fx-vhold-prob 0.12 --fx-vhold-max 14 \
+  --min-gate-period 4 \
+  --start 690 --duration 15 \
+  --seed 1337
