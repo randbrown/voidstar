@@ -6,6 +6,9 @@
 
 ./pipeline_transducer.sh preview --input /home/brown/WinVideos/transducer/transducer_voidstar_0.mp4 --outdir /home/brown/WinVideos/transducer
 
+// 08:21.193 start of bass notes
+// 15037, 30.000
+// 501 seconds ish
 
 
 

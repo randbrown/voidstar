@@ -37,7 +37,7 @@ set -euo pipefail
 #    PIPELINE_MODE_DEFAULT="preview"
 
 # Pipeline mode: all | end-only | preview | custom
-PIPELINE_MODE_DEFAULT="preview"
+PIPELINE_MODE_DEFAULT="all"
 
 # For custom mode, choose exactly which targets run.
 RUN_60S_START=1
@@ -53,7 +53,7 @@ INPUT_VIDEO_DEFAULT="~/WinVideos/transducer/transducer_voidstar_0.mp4"
 OUTDIR_DEFAULT=""
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
-START_SECONDS_DEFAULT=""
+START_SECONDS_DEFAULT="501"
 YOUTUBE_FULL_SECONDS_DEFAULT=""
 DETECT_AUDIO_START_END_DEFAULT=1
 
@@ -68,7 +68,7 @@ USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-da
 
 # Optional glitchfield stage (runs after reels/input base, before divvy highlights).
 ENABLE_GLITCHFIELD_STAGE=1       # set 1 to enable
-GLITCHFIELD_PRESET="gritty"      # clean | gritty | chaos | custom
+GLITCHFIELD_PRESET="chaos"      # clean | gritty | chaos | custom
 GLITCHFIELD_START_SECONDS=""      # empty => glitchfield default
 GLITCHFIELD_DURATION_SECONDS=""   # empty => glitchfield default
 GLITCHFIELD_SEED=1337
@@ -78,6 +78,10 @@ GLITCHFIELD_CUSTOM_ARGS=""      # used when preset=custom
 # Optional parallelism and force rebuild.
 JOBS_DEFAULT=1
 FORCE_DEFAULT=0
+
+# Optional copy of final rendered outputs to Google Drive (WSL path style).
+ENABLE_GDRIVE_COPY_DEFAULT=0
+GDRIVE_OUTDIR_DEFAULT=""   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos
 
 # Glitchfield preset examples (manual reference):
 # clean:
@@ -90,6 +94,18 @@ FORCE_DEFAULT=0
 die() { echo "Error: $*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 require_file() { local label="$1" path="$2"; [[ -f "$path" ]] || die "Missing $label file: $path"; }
+
+copy_to_gdrive_if_enabled() {
+    local src="$1"
+    [[ "${ENABLE_GDRIVE_COPY:-0}" -eq 1 ]] || return 0
+    [[ -n "${GDRIVE_OUTDIR:-}" ]] || die "ENABLE_GDRIVE_COPY is on but GDRIVE_OUTDIR is empty"
+    [[ -f "$src" ]] || { echo "[gdrive] warning: source file not found: $src"; return 0; }
+
+    mkdir -p "$GDRIVE_OUTDIR"
+    local dst="$GDRIVE_OUTDIR/$(basename "$src")"
+    cp -f "$src" "$dst"
+    echo "[gdrive] copied: $dst"
+}
 
 should_rebuild() {
     local target="$1"
@@ -407,7 +423,10 @@ run_60s_start() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_60s_overlay_logo.mp4" "$tag")"
-    should_rebuild "$target" || return 0
+    if ! should_rebuild "$target"; then
+        copy_to_gdrive_if_enabled "$target"
+        return 0
+    fi
 
     python3 "$DVDLOGO" "$divvy_dst" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
@@ -417,10 +436,11 @@ run_60s_start() {
         --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .5 --start-y .83 \
         --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
         --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
         --output "$target"
+    copy_to_gdrive_if_enabled "$target"
 }
 
 run_90s_start() {
@@ -433,7 +453,10 @@ run_90s_start() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90s_overlay_logo.mp4" "$tag")"
-    should_rebuild "$target" || return 0
+    if ! should_rebuild "$target"; then
+        copy_to_gdrive_if_enabled "$target"
+        return 0
+    fi
 
     python3 "$DVDLOGO" "$divvy_dst" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
@@ -443,10 +466,11 @@ run_90s_start() {
         --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .5 --start-y .83 \
         --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
         --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
         --output "$target"
+    copy_to_gdrive_if_enabled "$target"
 }
 
 run_180s_start() {
@@ -459,7 +483,10 @@ run_180s_start() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_180s_overlay_logo.mp4" "$tag")"
-    should_rebuild "$target" || return 0
+    if ! should_rebuild "$target"; then
+        copy_to_gdrive_if_enabled "$target"
+        return 0
+    fi
 
     python3 "$DVDLOGO" "$divvy_dst" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
@@ -469,10 +496,11 @@ run_180s_start() {
         --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .5 --start-y .83 \
         --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
         --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
         --output "$target"
+    copy_to_gdrive_if_enabled "$target"
 }
 
 run_full() {
@@ -484,7 +512,10 @@ run_full() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_full_overlay_logo.mp4" "$tag")"
-    should_rebuild "$target" || return 0
+    if ! should_rebuild "$target"; then
+        copy_to_gdrive_if_enabled "$target"
+        return 0
+    fi
 
     python3 "$DVDLOGO" "$base_overlay" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
@@ -494,10 +525,11 @@ run_full() {
         --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .5 --start-y .83 \
         --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
         --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
         --output "$target"
+    copy_to_gdrive_if_enabled "$target"
 }
 
 run_60s_end() {
@@ -510,7 +542,10 @@ run_60s_end() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_60t_overlay_logo.mp4" "$tag")"
-    should_rebuild "$target" || return 0
+    if ! should_rebuild "$target"; then
+        copy_to_gdrive_if_enabled "$target"
+        return 0
+    fi
 
     python3 "$DVDLOGO" "$divvy_dst" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
@@ -520,10 +555,11 @@ run_60s_end() {
         --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .5 --start-y .83 \
         --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
         --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
         --output "$target"
+    copy_to_gdrive_if_enabled "$target"
 }
 
 run_90s_end() {
@@ -536,7 +572,10 @@ run_90s_end() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90t_overlay_logo.mp4" "$tag")"
-    should_rebuild "$target" || return 0
+    if ! should_rebuild "$target"; then
+        copy_to_gdrive_if_enabled "$target"
+        return 0
+    fi
 
     python3 "$DVDLOGO" "$divvy_dst" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
@@ -546,10 +585,11 @@ run_90s_end() {
         --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .5 --start-y .83 \
         --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
         --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
         --output "$target"
+    copy_to_gdrive_if_enabled "$target"
 }
 
 run_180s_end() {
@@ -562,7 +602,10 @@ run_180s_end() {
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_180t_overlay_logo.mp4" "$tag")"
-    should_rebuild "$target" || return 0
+    if ! should_rebuild "$target"; then
+        copy_to_gdrive_if_enabled "$target"
+        return 0
+    fi
 
     python3 "$DVDLOGO" "$divvy_dst" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
@@ -572,10 +615,11 @@ run_180s_end() {
         --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .5 --start-y .83 \
         --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
         --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
         --output "$target"
+    copy_to_gdrive_if_enabled "$target"
 }
 
 main() {
@@ -586,6 +630,8 @@ main() {
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
     JOBS="$JOBS_DEFAULT"
     PIPELINE_MODE="$PIPELINE_MODE_DEFAULT"
+    ENABLE_GDRIVE_COPY="$ENABLE_GDRIVE_COPY_DEFAULT"
+    GDRIVE_OUTDIR="$GDRIVE_OUTDIR_DEFAULT"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -606,7 +652,9 @@ main() {
             --logo) LOGO_PATTERNS+=( "$2" ); shift 2 ;;
             --jobs|-j) JOBS="$2"; shift 2 ;;
             --no-reels-cache) USE_REELS_CACHE=0; shift ;;
-            -h|--help) sed -n '1,130p' "$0"; return 0 ;;
+            --copy-to-gdrive) ENABLE_GDRIVE_COPY=1; shift ;;
+            --gdrive-outdir) GDRIVE_OUTDIR="$2"; shift 2 ;;
+            -h|--help) sed -n '1,130p' "$0"; exit 0 ;;
             *)
                 if [[ "$1" != -* ]]; then INPUT_VIDEO="$1"; shift
                 else die "Unknown arg: $1 (try --help)"; fi
@@ -631,6 +679,10 @@ main() {
         OUTDIR=$(eval echo "$OUTDIR")
     fi
 
+    if [[ "$ENABLE_GDRIVE_COPY" -eq 1 && -n "${GDRIVE_OUTDIR:-}" ]]; then
+        GDRIVE_OUTDIR=$(eval echo "$GDRIVE_OUTDIR")
+    fi
+
     require_cmd python3
     require_cmd ffprobe
     mkdir -p "$OUTDIR"
@@ -651,6 +703,7 @@ main() {
     echo "Dur:   ${INPUT_DURATION_SECONDS}s"
     echo "Args:  start=${start_dbg}s full=${full_dbg}s detect_audio=${detect_dbg} cps=${CPS} glitch=${GLITCH_SECONDS}s loop_seam=${LOOP_SEAM_SECONDS}s"
     echo "Perf:  reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} jobs=${JOBS}"
+    echo "Sync:  gdrive_copy=${ENABLE_GDRIVE_COPY} gdrive_outdir=${GDRIVE_OUTDIR:-unset}"
 
     PROJECT_ROOT="/home/$USER/code/voidstar"
     find_script() {
@@ -711,7 +764,7 @@ main() {
 
     if (( JOBS <= 1 )); then
         for fn in "${TARGETS[@]}"; do "$fn"; done
-        return 0
+        exit 0
     fi
 
     echo "--- Running targets in parallel (jobs=$JOBS) ---"
