@@ -33,8 +33,6 @@ set -euo pipefail
 #    ENABLE_GLITCHFIELD_STAGE=1
 #    USE_GLITCHFIELD_CACHE_DEFAULT=1
 #    GLITCHFIELD_PRESET="clean"        # clean | gritty | chaos | custom
-#    GLITCHFIELD_START_SECONDS=690
-#    GLITCHFIELD_DURATION_SECONDS=15
 #    PIPELINE_MODE_DEFAULT="preview"
 
 # Pipeline mode: all | end-only | preview | custom
@@ -67,12 +65,10 @@ LOOP_SEAM_SECONDS_DEFAULT=""
 ENABLE_REELS_OVERLAY_STEP=0      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
 
-# Optional glitchfield stage (runs after reels/input base, before divvy highlights).
+# Optional glitchfield stage (runs after divvy highlights, before dvdlogo).
 ENABLE_GLITCHFIELD_STAGE=1       # set 1 to enable
 USE_GLITCHFIELD_CACHE_DEFAULT=1  # if 1, reuse cached glitchfield base when up-to-date
 GLITCHFIELD_PRESET="chaos"      # clean | gritty | chaos | custom
-GLITCHFIELD_START_SECONDS=""      # empty => glitchfield default
-GLITCHFIELD_DURATION_SECONDS=""   # empty => glitchfield default
 GLITCHFIELD_SEED=1337
 GLITCHFIELD_MIN_GATE_PERIOD=
 GLITCHFIELD_CUSTOM_ARGS=""      # used when preset=custom
@@ -84,6 +80,9 @@ FORCE_DEFAULT=0
 # Optional copy of final rendered outputs to Google Drive (WSL path style).
 ENABLE_GDRIVE_COPY_DEFAULT=1
 GDRIVE_OUTDIR_DEFAULT="/mnt/g/My Drive/Music/voidstar/transducer"   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos
+
+# Logo file paths (explicit files only; no auto-find/globs).
+LOGO_PATHS_DEFAULT=("$HOME/code/voidstar/art/logos_alpha/voidstar_emblem_text_0.png")
 
 # Glitchfield preset examples (manual reference):
 # clean:
@@ -142,7 +141,7 @@ should_rebuild() {
         [[ -n "$dep" ]] || continue
         [[ -e "$dep" ]] || continue
         if [[ "$dep" -nt "$target" ]]; then
-            echo "Target $target is older than dependency $dep. Rebuilding."
+            echo "Target $target is older than dependency $dep. Rebuilding." >&2
             return 0
         fi
     done
@@ -150,18 +149,18 @@ should_rebuild() {
     if [[ -n "$cache_sig" ]]; then
         local sig_file="${target}.cachekey"
         if [[ ! -f "$sig_file" ]]; then
-            echo "Target $target missing cache key. Rebuilding."
+            echo "Target $target missing cache key. Rebuilding." >&2
             return 0
         fi
         local existing_sig
         existing_sig="$(cat "$sig_file")"
         if [[ "$existing_sig" != "$cache_sig" ]]; then
-            echo "Target $target cache key changed. Rebuilding."
+            echo "Target $target cache key changed. Rebuilding." >&2
             return 0
         fi
     fi
 
-    echo "Target $target is up-to-date. Skipping."
+    echo "Target $target is up-to-date. Skipping." >&2
     return 1
 }
 
@@ -186,7 +185,23 @@ file_fingerprint() {
 
 rename_output() {
     local src="$1" dst="$2"
-    if [[ -f "$src" ]]; then mv -v "$src" "$dst"; else echo "Warning: $src not found for renaming."; fi
+    if [[ ! -f "$src" ]]; then
+        echo "Warning: $src not found for renaming." >&2
+        return 1
+    fi
+
+    if mv -vf "$src" "$dst" >&2; then
+        return 0
+    fi
+
+    echo "Warning: mv failed for $src -> $dst; trying copy fallback" >&2
+    if cp -f "$src" "$dst" && rm -f "$src"; then
+        echo "copied '$src' -> '$dst' (fallback)" >&2
+        return 0
+    fi
+
+    echo "Error: could not stage output to target: $dst" >&2
+    return 1
 }
 
 get_video_duration_seconds() {
@@ -208,9 +223,41 @@ expand_logo_patterns() {
     for pat in "$@"; do
         local -a matches=( $pat )
         (( ${#matches[@]} > 0 )) || die "Logo pattern did not match any files: $pat"
-        out+=( "${matches[@]}" )
+        local m
+        for m in "${matches[@]}"; do
+            out+=( "$(readlink -f "$m")" )
+        done
     done
     shopt -u nullglob
+    printf '%s\n' "${out[@]}"
+}
+
+resolve_logo_patterns() {
+    local -a out=()
+    local pat
+    for pat in "$@"; do
+        if [[ "$pat" == */* || "$pat" == *"*"* || "$pat" == *"?"* || "$pat" == *"["* ]]; then
+            out+=("$pat")
+            continue
+        fi
+
+        if [[ -e "$pat" ]]; then
+            out+=("$pat")
+            continue
+        fi
+
+        if [[ -e "$PROJECT_ROOT/art/logos_alpha/$pat" ]]; then
+            out+=("$PROJECT_ROOT/art/logos_alpha/$pat")
+            continue
+        fi
+
+        if [[ -e "$PROJECT_ROOT/dvd_logo/$pat" ]]; then
+            out+=("$PROJECT_ROOT/dvd_logo/$pat")
+            continue
+        fi
+
+        out+=("$pat")
+    done
     printf '%s\n' "${out[@]}"
 }
 
@@ -239,11 +286,7 @@ logo_for_ordinal() {
 
 compute_60_window() {
     local ss="$START_SECONDS"
-    local full="$YOUTUBE_FULL_SECONDS"
-    if (( INPUT_DURATION_SECONDS > 600 )); then
-        ss=$(( (INPUT_DURATION_SECONDS - 600) / 2 ))
-        full=600
-    fi
+    local full=""
     echo "$ss|$full"
 }
 
@@ -302,15 +345,16 @@ build_base_reels_overlay() {
     #     "$target"
 }
 
-run_optional_glitchfield_stage() {
-    [[ "$ENABLE_GLITCHFIELD_STAGE" -eq 1 ]] || return 0
+run_optional_glitchfield_on_clip() {
+    local input_clip="$1"
+    local target="$2"
+    local stage_label="${3:-clip}"
 
-    echo "--- Optional glitchfield stage (${GLITCHFIELD_PRESET}) ---"
+    [[ "$ENABLE_GLITCHFIELD_STAGE" -eq 1 ]] || { echo "$input_clip"; return 0; }
+
+    echo "--- Optional glitchfield stage (${GLITCHFIELD_PRESET}) on ${stage_label} ---" >&2
     local glitchfield_script="${PROJECT_ROOT}/glitchfield/glitchfield.py"
     require_file "GLITCHFIELD" "$glitchfield_script"
-
-    local preset_tag="${GLITCHFIELD_PRESET}"
-    local target="$OUTDIR/${STEM}_base_glitchfield_${preset_tag}.mp4"
 
     local -a gf_args
     case "$GLITCHFIELD_PRESET" in
@@ -379,49 +423,38 @@ run_optional_glitchfield_stage() {
         gf_args+=(--min-gate-period "$GLITCHFIELD_MIN_GATE_PERIOD")
     fi
 
-    local -a gf_time_args
-    gf_time_args=()
-    if [[ -n "${GLITCHFIELD_START_SECONDS:-}" ]]; then
-        gf_time_args+=(--start "$GLITCHFIELD_START_SECONDS")
-    fi
-    if [[ -n "${GLITCHFIELD_DURATION_SECONDS:-}" ]]; then
-        gf_time_args+=(--duration "$GLITCHFIELD_DURATION_SECONDS")
-    fi
-
-    local gf_sig_args gf_sig_time glitchfield_cache_sig
+    local gf_sig_args glitchfield_cache_sig
     gf_sig_args="${gf_args[*]}"
-    gf_sig_time="${gf_time_args[*]}"
-    glitchfield_cache_sig="glitchfield|input=${BASE_REELS_OVERLAY}|input_fp=$(file_fingerprint "$BASE_REELS_OVERLAY")|script=${glitchfield_script}|script_fp=$(file_fingerprint "$glitchfield_script")|preset=${GLITCHFIELD_PRESET}|seed=${GLITCHFIELD_SEED}|min_gate_period=${GLITCHFIELD_MIN_GATE_PERIOD:-}|args=${gf_sig_args}|time=${gf_sig_time}"
+    glitchfield_cache_sig="glitchfield|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${glitchfield_script}|script_fp=$(file_fingerprint "$glitchfield_script")|preset=${GLITCHFIELD_PRESET}|seed=${GLITCHFIELD_SEED}|min_gate_period=${GLITCHFIELD_MIN_GATE_PERIOD:-}|args=${gf_sig_args}"
 
     if [[ "$USE_GLITCHFIELD_CACHE" -eq 1 ]]; then
-        should_rebuild "$target" --dep "$BASE_REELS_OVERLAY" --dep "$glitchfield_script" --sig "$glitchfield_cache_sig" || {
-            BASE_REELS_OVERLAY="$target"
-            echo "[glitchfield] using cached: $BASE_REELS_OVERLAY"
+        should_rebuild "$target" --dep "$input_clip" --dep "$glitchfield_script" --sig "$glitchfield_cache_sig" || {
+            echo "[glitchfield] using cached: $target" >&2
+            echo "$target"
             return 0
         }
     else
-        echo "[glitchfield] cache disabled: rebuilding glitchfield base"
+        echo "[glitchfield] cache disabled: rebuilding glitchfield clip" >&2
     fi
 
-    python3 "$glitchfield_script" "$BASE_REELS_OVERLAY" \
+    python3 "$glitchfield_script" "$input_clip" \
         "${gf_args[@]}" \
-        "${gf_time_args[@]}" \
-        --seed "$GLITCHFIELD_SEED"
+        --seed "$GLITCHFIELD_SEED" \
+        1>&2
 
     local generated_src in_dir in_stem
-    in_dir="$(dirname "$BASE_REELS_OVERLAY")"
-    in_stem="$(basename "${BASE_REELS_OVERLAY%.*}")"
+    in_dir="$(dirname "$input_clip")"
+    in_stem="$(basename "${input_clip%.*}")"
     generated_src="$(ls -t "$in_dir/${in_stem}"_*.mp4 2>/dev/null | head -n 1 || true)"
     if [[ -n "$generated_src" && -f "$generated_src" ]]; then
-        rename_output "$generated_src" "$target"
+        rename_output "$generated_src" "$target" || die "Could not stage glitchfield output to target: $target"
     else
         die "Could not locate glitchfield output for stem: $in_stem"
     fi
 
     write_cache_signature "$target" "$glitchfield_cache_sig"
-
-    BASE_REELS_OVERLAY="$target"
-    echo "[glitchfield] staged base: $BASE_REELS_OVERLAY"
+    echo "[glitchfield] staged clip: $target" >&2
+    echo "$target"
 }
 
 run_divvy_uniform_highlights() {
@@ -501,17 +534,21 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 4 15 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 6 10 ""
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local source_for_logo="$divvy_dst"
+    local glitch_dst="$OUTDIR/${STEM}_highlights_60s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "60s-start")"
+
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_60s_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
+    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
 
-    python3 "$DVDLOGO" "$divvy_dst" "$logo" \
+    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -535,13 +572,17 @@ run_90s_start() {
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local source_for_logo="$divvy_dst"
+    local glitch_dst="$OUTDIR/${STEM}_highlights_90s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "90s-start")"
+
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90s_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
+    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
 
-    python3 "$DVDLOGO" "$divvy_dst" "$logo" \
+    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -565,13 +606,17 @@ run_180s_start() {
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local source_for_logo="$divvy_dst"
+    local glitch_dst="$OUTDIR/${STEM}_highlights_180s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "180s-start")"
+
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_180s_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
+    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
 
-    python3 "$DVDLOGO" "$divvy_dst" "$logo" \
+    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -620,17 +665,21 @@ run_60s_end() {
     echo "--- 60s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 4 15 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 60 10 6 "end"
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local source_for_logo="$divvy_dst"
+    local glitch_dst="$OUTDIR/${STEM}_highlights_60t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "60s-end")"
+
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_60t_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
+    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
 
-    python3 "$DVDLOGO" "$divvy_dst" "$logo" \
+    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -654,13 +703,17 @@ run_90s_end() {
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local source_for_logo="$divvy_dst"
+    local glitch_dst="$OUTDIR/${STEM}_highlights_90t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "90s-end")"
+
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90t_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
+    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
 
-    python3 "$DVDLOGO" "$divvy_dst" "$logo" \
+    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -684,13 +737,17 @@ run_180s_end() {
 
     local picked logo tag target
     picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local source_for_logo="$divvy_dst"
+    local glitch_dst="$OUTDIR/${STEM}_highlights_180t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "180s-end")"
+
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_180t_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$divvy_dst" --dep "$logo" --dep "$DVDLOGO"; then
+    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
         return 0
     fi
 
-    python3 "$DVDLOGO" "$divvy_dst" "$logo" \
+    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild \
@@ -706,10 +763,10 @@ run_180s_end() {
 }
 
 main() {
-    FORCE="$FORCE_DEFAULT"; END_ONLY=0; PREVIEW=0
+    FORCE="$FORCE_DEFAULT"
     INPUT_VIDEO=""; OUTDIR=""
     START_SECONDS="$START_SECONDS_DEFAULT"; YOUTUBE_FULL_SECONDS="$YOUTUBE_FULL_SECONDS_DEFAULT"; DETECT_AUDIO_START_END="$DETECT_AUDIO_START_END_DEFAULT"; CPS="$CPS_DEFAULT"; GLITCH_SECONDS="$GLITCH_SECONDS_DEFAULT"; LOOP_SEAM_SECONDS="$LOOP_SEAM_SECONDS_DEFAULT"
-    LOGO_PATTERNS=("voidstar_emblem_text_0.png")
+    LOGO_PATHS=("${LOGO_PATHS_DEFAULT[@]}")
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
     USE_GLITCHFIELD_CACHE="$USE_GLITCHFIELD_CACHE_DEFAULT"
     JOBS="$JOBS_DEFAULT"
@@ -720,8 +777,7 @@ main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --force|-f) FORCE=1; shift ;;
-            --end-only) END_ONLY=1; shift ;;
-            preview) PREVIEW=1; shift ;;
+            --end-only) PIPELINE_MODE="end-only"; shift ;;
             --mode) PIPELINE_MODE="$2"; shift 2 ;;
             --input) INPUT_VIDEO="$2"; shift 2 ;;
             --outdir) OUTDIR="$2"; shift 2 ;;
@@ -733,7 +789,7 @@ main() {
             --cps) CPS="$2"; shift 2 ;;
             --glitch-seconds) GLITCH_SECONDS="$2"; shift 2 ;;
             --loop-seam-seconds) LOOP_SEAM_SECONDS="$2"; shift 2 ;;
-            --logo) LOGO_PATTERNS+=( "$2" ); shift 2 ;;
+            --logo) LOGO_PATHS+=( "$2" ); shift 2 ;;
             --jobs|-j) JOBS="$2"; shift 2 ;;
             --no-reels-cache) USE_REELS_CACHE=0; shift ;;
             --no-glitchfield-cache) USE_GLITCHFIELD_CACHE=0; shift ;;
@@ -756,9 +812,9 @@ main() {
 
     if [[ -z "${OUTDIR}" ]]; then
         if [[ -n "$OUTDIR_DEFAULT" ]]; then
-            OUTDIR=$(eval echo "${OUTDIR:-${VOIDSTAR_OUTDIR:-$OUTDIR_DEFAULT}}")
+            OUTDIR=$(eval echo "$OUTDIR_DEFAULT")
         else
-            OUTDIR=$(eval echo "${OUTDIR:-${VOIDSTAR_OUTDIR:-~/WinVideos/${STEM}/}}")
+            OUTDIR=$(eval echo "~/WinVideos/transducer")
         fi
     else
         OUTDIR=$(eval echo "$OUTDIR")
@@ -807,17 +863,17 @@ main() {
     require_file "DVDLOGO" "$DVDLOGO"
 
     LOGOS=()
-    if (( ${#LOGO_PATTERNS[@]} > 0 )); then
-        mapfile -t LOGOS < <(expand_logo_patterns "${LOGO_PATTERNS[@]}")
-        echo "Using user-specified logos (${#LOGOS[@]}):"
-        printf '  %s\n' "${LOGOS[@]}"
-    else
-        mapfile -t LOGOS < <(find_void_logos_default)
-        (( ${#LOGOS[@]} > 0 )) || die "Could not find any default logos matching void*.png in $PROJECT_ROOT (pass --logo to specify)"
-        for f in "${LOGOS[@]}"; do require_file "LOGO_IMG" "$f"; done
-        echo "Using default auto-detected void*.png logos (${#LOGOS[@]}):"
-        printf '  %s\n' "${LOGOS[@]}"
-    fi
+    (( ${#LOGO_PATHS[@]} > 0 )) || die "No logos configured. Set LOGO_PATHS_DEFAULT or pass --logo /absolute/path/to/logo.png"
+    local lp resolved_logo
+    for lp in "${LOGO_PATHS[@]}"; do
+        lp="$(eval echo "$lp")"
+        resolved_logo="$(readlink -f "$lp" 2>/dev/null || true)"
+        [[ -n "$resolved_logo" ]] || die "Logo path could not be resolved: $lp"
+        require_file "LOGO_IMG" "$resolved_logo"
+        LOGOS+=("$resolved_logo")
+    done
+    echo "Using configured logo paths (${#LOGOS[@]}):"
+    printf '  %s\n' "${LOGOS[@]}"
 
     BASE_REELS_OVERLAY="$OUTDIR/${STEM}_reels_base_overlay.mp4"
     if [[ "$ENABLE_REELS_OVERLAY_STEP" -eq 1 ]]; then
@@ -827,13 +883,11 @@ main() {
         BASE_REELS_OVERLAY="$INPUT_VIDEO"
     fi
 
-    run_optional_glitchfield_stage
-
     declare -a TARGETS=()
-    if [[ "$PREVIEW" -eq 1 || "$PIPELINE_MODE" == "preview" ]]; then
+    if [[ "$PIPELINE_MODE" == "preview" ]]; then
         TARGETS=(run_60s_start)
-    elif [[ "$END_ONLY" -eq 1 || "$PIPELINE_MODE" == "end-only" ]]; then
-        TARGETS=(run_60s_end run_90s_end run_180s_end)
+    elif [[ "$PIPELINE_MODE" == "end-only" ]]; then
+        TARGETS=(run_60s_end)
     elif [[ "$PIPELINE_MODE" == "custom" ]]; then
         (( RUN_60S_START == 1 )) && TARGETS+=(run_60s_start)
         (( RUN_90S_START == 1 )) && TARGETS+=(run_90s_start)
@@ -846,6 +900,8 @@ main() {
     else
         TARGETS=(run_60s_start run_90s_start run_180s_start run_60s_end run_90s_end run_180s_end run_full)
     fi
+
+    echo "Targets: ${TARGETS[*]}"
 
     if (( JOBS <= 1 )); then
         for fn in "${TARGETS[@]}"; do "$fn"; done
