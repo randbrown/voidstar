@@ -36,16 +36,16 @@ set -euo pipefail
 #    PIPELINE_MODE_DEFAULT="preview"
 
 # Pipeline mode: all | end-only | preview | custom
-PIPELINE_MODE_DEFAULT="preview"
+PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
 RUN_60S_START=1
-RUN_90S_START=0
-RUN_180S_START=0
-RUN_60S_END=1
+RUN_90S_START=1
+RUN_180S_START=1
+RUN_60S_END=0
 RUN_90S_END=0
 RUN_180S_END=0
-RUN_FULL=0
+RUN_FULL=1
 
 # Input/output defaults.
 INPUT_VIDEO_DEFAULT="~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0.mp4"
@@ -89,8 +89,10 @@ FORCE_DEFAULT=0
 ENABLE_GDRIVE_COPY_DEFAULT=1
 GDRIVE_OUTDIR_DEFAULT="/mnt/g/My Drive/Music/voidstar/antiparticles"   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos
 
-# Logo file paths (explicit files only; no auto-find/globs).
-LOGO_PATHS_DEFAULT=("$HOME/code/voidstar/art/logos_alpha/voidstar_emblem_text_0.png")
+# Logo assignment by target duration.
+LOGO_60_DEFAULT="voidstar_emblem_text_0.png"
+LOGO_90_DEFAULT="voidstar_emblem_cosmos_0.png"
+LOGO_180PLUS_DEFAULT="voidstar_logo_0.png"
 
 # Glitchfield preset examples (manual reference):
 # clean:
@@ -279,16 +281,38 @@ with_logo_suffix() {
     if [[ -z "$tag" ]]; then echo "$base_path"; else echo "${base_path%.mp4}_logo-${tag}.mp4"; fi
 }
 
-# Deterministic logo assignment that matches sequential target order:
-# logo_index = target_ordinal % num_logos
-logo_for_ordinal() {
-    local ordinal="$1"
-    local count="${#LOGOS[@]}"
-    (( count > 0 )) || die "Internal error: no logos available"
-    local idx=$(( ordinal % count ))
-    local logo="${LOGOS[$idx]}"
-    local tag=""
-    if (( count > 1 )); then tag="$(basename "${logo%.*}")"; fi
+resolve_logo_file() {
+    local candidate="$1"
+    local expanded
+    expanded="$(eval echo "$candidate")"
+
+    if [[ -f "$expanded" ]]; then
+        readlink -f "$expanded"
+        return 0
+    fi
+    if [[ -f "$PROJECT_ROOT/art/logos_alpha/$expanded" ]]; then
+        readlink -f "$PROJECT_ROOT/art/logos_alpha/$expanded"
+        return 0
+    fi
+    if [[ -f "$PROJECT_ROOT/dvd_logo/$expanded" ]]; then
+        readlink -f "$PROJECT_ROOT/dvd_logo/$expanded"
+        return 0
+    fi
+
+    die "Logo file could not be resolved: $candidate"
+}
+
+logo_for_target_bucket() {
+    local bucket="$1"
+    local logo=""
+    case "$bucket" in
+        60) logo="$LOGO_60" ;;
+        90) logo="$LOGO_90" ;;
+        180plus) logo="$LOGO_180PLUS" ;;
+        *) die "Unknown logo bucket: $bucket" ;;
+    esac
+    local tag
+    tag="$(basename "${logo%.*}")"
     echo "$logo|$tag"
 }
 
@@ -678,14 +702,13 @@ PY
 # Targets
 # ----------------------------
 run_60s_start() {
-    local ordinal=0
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 20 3 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 ""
 
     local picked logo tag target
-    picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    picked="$(logo_for_target_bucket "60")"; logo="${picked%%|*}"; tag="${picked##*|}"
     local source_for_logo="$divvy_dst"
     local glitch_dst="$OUTDIR/${STEM}_highlights_60s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
     source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "60s-start")"
@@ -712,14 +735,13 @@ run_60s_start() {
 }
 
 run_90s_start() {
-    local ordinal=1
     echo "--- 90s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90s_overlay.mp4"
 
     run_divvy_uniform_highlights "$divvy_dst" 90 16 "" ""
 
     local picked logo tag target
-    picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    picked="$(logo_for_target_bucket "90")"; logo="${picked%%|*}"; tag="${picked##*|}"
     local source_for_logo="$divvy_dst"
     local glitch_dst="$OUTDIR/${STEM}_highlights_90s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
     source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "90s-start")"
@@ -746,14 +768,13 @@ run_90s_start() {
 }
 
 run_180s_start() {
-    local ordinal=2
     echo "--- 180s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180s_overlay.mp4"
 
     run_divvy_uniform_highlights "$divvy_dst" 180 32 6 ""
 
     local picked logo tag target
-    picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    picked="$(logo_for_target_bucket "180plus")"; logo="${picked%%|*}"; tag="${picked##*|}"
     local source_for_logo="$divvy_dst"
     local glitch_dst="$OUTDIR/${STEM}_highlights_180s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
     source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "180s-start")"
@@ -780,13 +801,12 @@ run_180s_start() {
 }
 
 run_full() {
-    local ordinal=3
     echo "--- FULL (YouTube) ---"
     local base_overlay="$BASE_REELS_OVERLAY"
     require_file "BASE_REELS_OVERLAY" "$base_overlay"
 
     local picked logo tag target
-    picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    picked="$(logo_for_target_bucket "180plus")"; logo="${picked%%|*}"; tag="${picked##*|}"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_full_overlay_logo.mp4" "$tag")"
     if ! should_rebuild "$target" --dep "$base_overlay" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
@@ -809,14 +829,13 @@ run_full() {
 }
 
 run_60s_end() {
-    local ordinal=4
     echo "--- 60s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 20 3 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 "end"
 
     local picked logo tag target
-    picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    picked="$(logo_for_target_bucket "60")"; logo="${picked%%|*}"; tag="${picked##*|}"
     local source_for_logo="$divvy_dst"
     local glitch_dst="$OUTDIR/${STEM}_highlights_60t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
     source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "60s-end")"
@@ -843,14 +862,13 @@ run_60s_end() {
 }
 
 run_90s_end() {
-    local ordinal=5
     echo "--- 90s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90t_overlay.mp4"
 
     run_divvy_uniform_highlights "$divvy_dst" 90 16 "" "end"
 
     local picked logo tag target
-    picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    picked="$(logo_for_target_bucket "90")"; logo="${picked%%|*}"; tag="${picked##*|}"
     local source_for_logo="$divvy_dst"
     local glitch_dst="$OUTDIR/${STEM}_highlights_90t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
     source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "90s-end")"
@@ -877,14 +895,13 @@ run_90s_end() {
 }
 
 run_180s_end() {
-    local ordinal=6
     echo "--- 180s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180t_overlay.mp4"
 
     run_divvy_uniform_highlights "$divvy_dst" 180 32 6 "end"
 
     local picked logo tag target
-    picked="$(logo_for_ordinal "$ordinal")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    picked="$(logo_for_target_bucket "180plus")"; logo="${picked%%|*}"; tag="${picked##*|}"
     local source_for_logo="$divvy_dst"
     local glitch_dst="$OUTDIR/${STEM}_highlights_180t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
     source_for_logo="$(run_optional_glitchfield_on_clip "$divvy_dst" "$glitch_dst" "180s-end")"
@@ -914,7 +931,9 @@ main() {
     FORCE="$FORCE_DEFAULT"
     INPUT_VIDEO=""; OUTDIR=""
     START_SECONDS="$START_SECONDS_DEFAULT"; YOUTUBE_FULL_SECONDS="$YOUTUBE_FULL_SECONDS_DEFAULT"; DETECT_AUDIO_START_END="$DETECT_AUDIO_START_END_DEFAULT"; CPS="$CPS_DEFAULT"; GLITCH_SECONDS="$GLITCH_SECONDS_DEFAULT"; LOOP_SEAM_SECONDS="$LOOP_SEAM_SECONDS_DEFAULT"
-    LOGO_PATHS=("${LOGO_PATHS_DEFAULT[@]}")
+    LOGO_60="$LOGO_60_DEFAULT"
+    LOGO_90="$LOGO_90_DEFAULT"
+    LOGO_180PLUS="$LOGO_180PLUS_DEFAULT"
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
     USE_PRE_REELS_GLITCHFIELD_CACHE="$USE_PRE_REELS_GLITCHFIELD_CACHE_DEFAULT"
     USE_GLITCHFIELD_CACHE="$USE_GLITCHFIELD_CACHE_DEFAULT"
@@ -945,7 +964,15 @@ main() {
             --cps) CPS="$2"; shift 2 ;;
             --glitch-seconds) GLITCH_SECONDS="$2"; shift 2 ;;
             --loop-seam-seconds) LOOP_SEAM_SECONDS="$2"; shift 2 ;;
-            --logo) LOGO_PATHS+=( "$2" ); shift 2 ;;
+            --logo-60) LOGO_60="$2"; shift 2 ;;
+            --logo-90) LOGO_90="$2"; shift 2 ;;
+            --logo-180plus) LOGO_180PLUS="$2"; shift 2 ;;
+            --logo)
+                LOGO_60="$2"
+                LOGO_90="$2"
+                LOGO_180PLUS="$2"
+                shift 2
+                ;;
             --jobs|-j) JOBS="$2"; shift 2 ;;
             --no-reels-cache) USE_REELS_CACHE=0; shift ;;
             --no-glitchfield-cache) USE_GLITCHFIELD_CACHE=0; shift ;;
@@ -1020,18 +1047,16 @@ main() {
     require_file "DVDLOGO" "$DVDLOGO"
     require_file "GLITCHFIELD" "$GLITCHFIELD"
 
-    LOGOS=()
-    (( ${#LOGO_PATHS[@]} > 0 )) || die "No logos configured. Set LOGO_PATHS_DEFAULT or pass --logo /absolute/path/to/logo.png"
-    local lp resolved_logo
-    for lp in "${LOGO_PATHS[@]}"; do
-        lp="$(eval echo "$lp")"
-        resolved_logo="$(readlink -f "$lp" 2>/dev/null || true)"
-        [[ -n "$resolved_logo" ]] || die "Logo path could not be resolved: $lp"
-        require_file "LOGO_IMG" "$resolved_logo"
-        LOGOS+=("$resolved_logo")
-    done
-    echo "Using configured logo paths (${#LOGOS[@]}):"
-    printf '  %s\n' "${LOGOS[@]}"
+    LOGO_60="$(resolve_logo_file "$LOGO_60")"
+    LOGO_90="$(resolve_logo_file "$LOGO_90")"
+    LOGO_180PLUS="$(resolve_logo_file "$LOGO_180PLUS")"
+    require_file "LOGO_60" "$LOGO_60"
+    require_file "LOGO_90" "$LOGO_90"
+    require_file "LOGO_180PLUS" "$LOGO_180PLUS"
+    echo "Using logo mapping:"
+    echo "  60s      -> $LOGO_60"
+    echo "  90s      -> $LOGO_90"
+    echo "  180s+    -> $LOGO_180PLUS"
 
     BASE_REELS_OVERLAY="$OUTDIR/${STEM}_reels_base_overlay.mp4"
     REELS_INPUT_VIDEO="$INPUT_VIDEO"
