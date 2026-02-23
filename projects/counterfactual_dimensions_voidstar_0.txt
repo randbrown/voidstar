@@ -2,10 +2,13 @@
   mp311 3.11.14   voidstar   main 
 ./pipeline_counterfactual_dimensions_voidstar_0.sh preview --input /home/brown/WinVideos/counterfactual_dimensions_voidstar_0/counterfactual_dimensions_voidstar_0.mp4 --outdir /home/brown/WinVideos/counterfactual_dimensions_voidstar_0
 
+python divvy.py highlights /home/brown/WinVideos/counterfactual_dimensions_voidstar_0/counterfactual_dimensions_voidstar_0.mp4 \
+ --target-length-seconds 60 --start-seconds 108 --youtube-full-seconds 784 \
+ --sampling-mode groove-auto --n-segments 6 --sample-seconds 32 --truncate-to-full-clips \
 
 
 
-./pipeline_counterfactual_dimensions_voidstar_0.sh preview --no-reels-cache --input /home/brown/WinVideos/counterfactual_dimensions_voidstar_0/counterfactual_dimensions_voidstar_0.mp4 --outdir /home/brown/WinVideos/counterfactual_dimensions_voidstar_0
+./pipeline_counterfactual_dimensions_voidstar_0.sh preview --input /home/brown/WinVideos/counterfactual_dimensions_voidstar_0/counterfactual_dimensions_voidstar_0.mp4 --outdir /home/brown/WinVideos/counterfactual_dimensions_voidstar_0
 
 
 
