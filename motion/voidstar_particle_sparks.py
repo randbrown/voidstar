@@ -25,11 +25,26 @@ def log(msg: str) -> None:
     print(f"[voidstar] {msg}", flush=True)
 
 
-def run_cmd(cmd: List[str]) -> None:
+def run_cmd(cmd: List[str], heartbeat_label: str | None = None, heartbeat_interval_sec: float = 1.0) -> None:
     log("▶ " + " ".join(shlex.quote(c) for c in cmd))
-    p = subprocess.run(cmd)
-    if p.returncode != 0:
-        raise RuntimeError(f"Command failed with exit code {p.returncode}")
+    if heartbeat_label is None:
+        p = subprocess.run(cmd)
+        if p.returncode != 0:
+            raise RuntimeError(f"Command failed with exit code {p.returncode}")
+        return
+
+    proc = subprocess.Popen(cmd)
+    start = time.time()
+    interval = max(0.2, float(heartbeat_interval_sec))
+    while True:
+        rc = proc.poll()
+        if rc is not None:
+            if rc != 0:
+                raise RuntimeError(f"Command failed with exit code {rc}")
+            return
+        elapsed = time.time() - start
+        log(f"{heartbeat_label} ... elapsed={elapsed:.1f}s")
+        time.sleep(interval)
 
 
 def clamp01(value: float) -> float:
@@ -111,6 +126,15 @@ def rgb_to_bgr(rgb: Tuple[int, int, int]) -> Tuple[int, int, int]:
     return b, g, r
 
 
+def blend_bgr(a: Tuple[int, int, int], b: Tuple[int, int, int], t: float) -> Tuple[int, int, int]:
+    w = clamp01(t)
+    return (
+        int(round((1.0 - w) * a[0] + w * b[0])),
+        int(round((1.0 - w) * a[1] + w * b[1])),
+        int(round((1.0 - w) * a[2] + w * b[2])),
+    )
+
+
 def audio_level_to_bgr(audio_level: float) -> Tuple[int, int, int]:
     level = clamp01(audio_level)
     hue = (2.0 / 3.0) * (1.0 - level)
@@ -135,7 +159,7 @@ def extract_audio_envelope(input_path: Path, start: float, duration: float, fps:
             "-i", str(input_path),
             "-vn", "-ac", "1", "-ar", "48000", str(wav_path),
         ]
-        run_cmd(cmd)
+        run_cmd(cmd, heartbeat_label="audio envelope extraction", heartbeat_interval_sec=0.75)
 
         with wave.open(str(wav_path), "rb") as wavf:
             sr = wavf.getframerate()
@@ -186,6 +210,7 @@ class Spark:
     max_life: int
     radius: int
     color_bgr: Tuple[int, int, int]
+    charge: float = 0.0
 
 
 def main() -> None:
@@ -215,7 +240,7 @@ def main() -> None:
     ap.add_argument("--audio-reactive-gain", type=float, default=1.35, help="Audio intensity gain")
     ap.add_argument("--audio-reactive-smooth", type=float, default=0.70, help="Audio envelope smoothing")
 
-    ap.add_argument("--color-mode", default="white", help="white|rgb|random|audio-intensity")
+    ap.add_argument("--color-mode", default="white", help="white|rgb|random|audio-intensity|antiparticles")
     ap.add_argument("--color-rgb", default="255,255,255", help="Spark color as R,G,B (used when --color-mode rgb)")
     ap.add_argument("--log-interval", type=float, default=1.0, help="Progress print interval")
 
@@ -257,8 +282,8 @@ def main() -> None:
 
     encoder = pick_video_encoder(args.video_encoder)
     color_mode = str(args.color_mode).strip().lower()
-    if color_mode not in {"white", "rgb", "random", "audio-intensity"}:
-        raise ValueError("--color-mode must be white|rgb|random|audio-intensity")
+    if color_mode not in {"white", "rgb", "random", "audio-intensity", "antiparticles"}:
+        raise ValueError("--color-mode must be white|rgb|random|audio-intensity|antiparticles")
 
     rgb_color = parse_rgb(args.color_rgb)
     white_bgr = (255, 255, 255)
@@ -271,6 +296,14 @@ def main() -> None:
         (80, 235, 255),
         (180, 120, 255),
         (255, 120, 220),
+    ]
+    antiparticle_palette_bgr = [
+        (255, 255, 90),
+        (255, 120, 40),
+        (255, 90, 255),
+        (140, 255, 255),
+        (255, 70, 170),
+        (220, 130, 255),
     ]
 
     log(f"input={input_path}")
@@ -370,6 +403,8 @@ def main() -> None:
         audio_level = float(env[min(processed, len(env) - 1)]) if len(env) > 0 else 0.0
         reactive_mult = 1.0 + (0.8 * audio_level)
         spawn_prob = clamp01(float(args.spark_rate) * (0.35 + (0.65 * reactive_mult)))
+        if color_mode == "antiparticles":
+            spawn_prob = clamp01(spawn_prob * 1.25)
 
         for x, y, speed in movers:
             if random.random() > spawn_prob:
@@ -377,6 +412,8 @@ def main() -> None:
             n_spawn = 1
             if audio_level > 0.8 and random.random() < 0.35:
                 n_spawn = 2
+            if color_mode == "antiparticles" and random.random() < 0.45:
+                n_spawn += 1
             for _ in range(n_spawn):
                 angle = random.uniform(0.0, 2.0 * math.pi)
                 base_speed = float(args.spark_speed) * (0.65 + 0.45 * min(3.0, speed / 4.0))
@@ -391,9 +428,19 @@ def main() -> None:
                     spark_color_bgr = rgb_mode_bgr
                 elif color_mode == "random":
                     spark_color_bgr = random.choice(random_palette_bgr)
-                else:
+                elif color_mode == "audio-intensity":
                     spark_audio_level = clamp01(audio_level + random.uniform(-0.12, 0.12))
                     spark_color_bgr = audio_level_to_bgr(spark_audio_level)
+                else:
+                    speed_level = clamp01(speed / 6.0)
+                    anti_energy = clamp01((0.72 * audio_level) + (0.28 * speed_level) + random.uniform(-0.08, 0.08))
+                    palette_color = random.choice(antiparticle_palette_bgr)
+                    audio_color = audio_level_to_bgr(anti_energy)
+                    spark_color_bgr = blend_bgr(palette_color, audio_color, 0.58 + (0.30 * anti_energy))
+
+                charge = 0.0
+                if color_mode == "antiparticles":
+                    charge = 1.0 if random.random() < 0.5 else -1.0
 
                 sparks.append(
                     Spark(
@@ -405,17 +452,59 @@ def main() -> None:
                         max_life=life,
                         radius=radius,
                         color_bgr=spark_color_bgr,
+                        charge=charge,
                     )
                 )
+
+                if color_mode == "antiparticles" and random.random() < 0.8:
+                    anti_vx = -vx + random.uniform(-0.45, 0.45)
+                    anti_vy = -vy + random.uniform(-0.45, 0.45)
+                    anti_life = max(2, int(round(life * random.uniform(0.85, 1.15))))
+                    anti_radius = max(1, int(round(radius * random.uniform(0.85, 1.2))))
+                    complement_color = (
+                        max(0, min(255, 255 - spark_color_bgr[0] + random.randint(-25, 25))),
+                        max(0, min(255, 255 - spark_color_bgr[1] + random.randint(-25, 25))),
+                        max(0, min(255, 255 - spark_color_bgr[2] + random.randint(-25, 25))),
+                    )
+                    anti_audio_color = audio_level_to_bgr(clamp01(audio_level + random.uniform(0.05, 0.2)))
+                    anti_color = blend_bgr(complement_color, anti_audio_color, 0.42 + (0.30 * clamp01(audio_level)))
+                    sparks.append(
+                        Spark(
+                            x=x + random.uniform(-1.5, 1.5),
+                            y=y + random.uniform(-1.5, 1.5),
+                            vx=anti_vx,
+                            vy=anti_vy,
+                            life=anti_life,
+                            max_life=anti_life,
+                            radius=anti_radius,
+                            color_bgr=anti_color,
+                            charge=-charge,
+                        )
+                    )
 
         overlay = np.zeros_like(frame, dtype=np.uint8)
         alive: List[Spark] = []
 
         for sp in sparks:
+            if color_mode == "antiparticles":
+                cx = frame_w * 0.5
+                cy = frame_h * 0.5
+                dx = sp.x - cx
+                dy = sp.y - cy
+                dist = math.sqrt(dx * dx + dy * dy)
+                if dist > 1e-6:
+                    swirl = 0.15 * sp.charge / max(28.0, dist)
+                    sp.vx += -dy * swirl
+                    sp.vy += dx * swirl
+
             sp.x += sp.vx
             sp.y += sp.vy
-            sp.vx *= 0.96
-            sp.vy *= 0.96
+            if color_mode == "antiparticles":
+                sp.vx *= 0.972
+                sp.vy *= 0.972
+            else:
+                sp.vx *= 0.96
+                sp.vy *= 0.96
             sp.life -= 1
 
             if sp.life <= 0:
@@ -426,6 +515,8 @@ def main() -> None:
             life_ratio = sp.life / max(1, sp.max_life)
             radius = max(1, int(round(sp.radius * (0.65 + 0.7 * life_ratio))))
             cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, sp.color_bgr, -1, cv2.LINE_AA)
+            if color_mode == "antiparticles" and radius >= 2 and life_ratio > 0.35:
+                cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), 1, (255, 255, 255), -1, cv2.LINE_AA)
             alive.append(sp)
 
         sparks = alive
@@ -476,7 +567,7 @@ def main() -> None:
     if args.duration > 0:
         mux_cmd += ["-t", str(float(args.duration))]
     mux_cmd += [str(output_path)]
-    run_cmd(mux_cmd)
+    run_cmd(mux_cmd, heartbeat_label="audio mux", heartbeat_interval_sec=0.75)
 
     try:
         tmp_video.unlink(missing_ok=True)

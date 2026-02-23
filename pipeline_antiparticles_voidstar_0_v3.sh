@@ -83,15 +83,17 @@ GLITCHFIELD_MIN_GATE_PERIOD=11
 GLITCHFIELD_CUSTOM_ARGS=""      # used when preset=custom
 
 # Optional particle sparks stage (runs after divvy highlights, before dvdlogo).
-ENABLE_PARTICLE_SPARKS_STAGE=0
+ENABLE_PARTICLE_SPARKS_STAGE=1
 USE_PARTICLE_SPARKS_CACHE_DEFAULT=1
-PARTICLE_SPARKS_MAX_POINTS_DEFAULT=220
-PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT=1.2
-PARTICLE_SPARKS_RATE_DEFAULT=0.65
+PARTICLE_SPARKS_MAX_POINTS_DEFAULT=512
+PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT=0.25
+PARTICLE_SPARKS_RATE_DEFAULT=0.25
 PARTICLE_SPARKS_LIFE_FRAMES_DEFAULT=18
 PARTICLE_SPARKS_SPEED_DEFAULT=3.2
 PARTICLE_SPARKS_OPACITY_DEFAULT=0.70
 PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT=1.35
+PARTICLE_SPARKS_COLOR_MODE_DEFAULT="antiparticles"   # white | rgb | random | audio-intensity | antiparticles
+PARTICLE_SPARKS_COLOR_RGB_DEFAULT="255,255,255"
 
 # Optional parallelism and force rebuild.
 JOBS_DEFAULT=1
@@ -655,7 +657,7 @@ run_optional_particle_sparks_on_clip() {
     require_file "PARTICLE_SPARKS" "$PARTICLE_SPARKS"
 
     local sparks_cache_sig
-    sparks_cache_sig="particle_sparks|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${PARTICLE_SPARKS}|script_fp=$(file_fingerprint "$PARTICLE_SPARKS")|max_points=${PARTICLE_SPARKS_MAX_POINTS}|motion_threshold=${PARTICLE_SPARKS_MOTION_THRESHOLD}|spark_rate=${PARTICLE_SPARKS_RATE}|spark_life=${PARTICLE_SPARKS_LIFE_FRAMES}|spark_speed=${PARTICLE_SPARKS_SPEED}|spark_opacity=${PARTICLE_SPARKS_OPACITY}|audio_gain=${PARTICLE_SPARKS_AUDIO_GAIN}"
+    sparks_cache_sig="particle_sparks|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${PARTICLE_SPARKS}|script_fp=$(file_fingerprint "$PARTICLE_SPARKS")|max_points=${PARTICLE_SPARKS_MAX_POINTS}|motion_threshold=${PARTICLE_SPARKS_MOTION_THRESHOLD}|spark_rate=${PARTICLE_SPARKS_RATE}|spark_life=${PARTICLE_SPARKS_LIFE_FRAMES}|spark_speed=${PARTICLE_SPARKS_SPEED}|spark_opacity=${PARTICLE_SPARKS_OPACITY}|audio_gain=${PARTICLE_SPARKS_AUDIO_GAIN}|color_mode=${PARTICLE_SPARKS_COLOR_MODE}|color_rgb=${PARTICLE_SPARKS_COLOR_RGB}"
 
     if [[ "$USE_PARTICLE_SPARKS_CACHE" -eq 1 ]]; then
         should_rebuild "$target" --dep "$input_clip" --dep "$PARTICLE_SPARKS" --sig "$sparks_cache_sig" || {
@@ -678,6 +680,8 @@ run_optional_particle_sparks_on_clip() {
         --spark-opacity "$PARTICLE_SPARKS_OPACITY" \
         --audio-reactive true \
         --audio-reactive-gain "$PARTICLE_SPARKS_AUDIO_GAIN" \
+        --color-mode "$PARTICLE_SPARKS_COLOR_MODE" \
+        --color-rgb "$PARTICLE_SPARKS_COLOR_RGB" \
         1>&2
 
     [[ -f "$target" ]] || die "Particle sparks stage did not produce output: $target"
@@ -770,31 +774,35 @@ run_60s_start() {
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_60s_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "60s-start")"
-    local sparks_dst="$OUTDIR/${STEM}_highlights_60s_overlay_sparks.mp4"
-    local source_for_particles="$source_for_effects"
-    source_for_particles="$(run_optional_particle_sparks_on_clip "$source_for_effects" "$sparks_dst" "60s-start")"
-    local source_for_logo="$source_for_particles"
+    local source_for_logo="$source_for_effects"
     local glitch_dst="$OUTDIR/${STEM}_highlights_60s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_particles" "$glitch_dst" "60s-start")"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "60s-start")"
 
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_60s_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
-        copy_to_gdrive_if_enabled "$target"
-        return 0
+    local logo_stage="$target"
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
 
-    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-        --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-        --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-        --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-        --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-        --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-        --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
-        --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-        --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-        --output "$target"
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
+            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
+            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
+            --output "$logo_stage"
+    fi
+
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "60s-start-post-logo" >/dev/null
+    fi
+
     copy_to_gdrive_if_enabled "$target"
 }
 
@@ -810,31 +818,35 @@ run_90s_start() {
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_90s_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "90s-start")"
-    local sparks_dst="$OUTDIR/${STEM}_highlights_90s_overlay_sparks.mp4"
-    local source_for_particles="$source_for_effects"
-    source_for_particles="$(run_optional_particle_sparks_on_clip "$source_for_effects" "$sparks_dst" "90s-start")"
-    local source_for_logo="$source_for_particles"
+    local source_for_logo="$source_for_effects"
     local glitch_dst="$OUTDIR/${STEM}_highlights_90s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_particles" "$glitch_dst" "90s-start")"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "90s-start")"
 
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90s_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
-        copy_to_gdrive_if_enabled "$target"
-        return 0
+    local logo_stage="$target"
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
 
-    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-        --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-        --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-        --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-        --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-        --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-        --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
-        --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-        --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-        --output "$target"
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
+            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
+            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
+            --output "$logo_stage"
+    fi
+
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "90s-start-post-logo" >/dev/null
+    fi
+
     copy_to_gdrive_if_enabled "$target"
 }
 
@@ -850,31 +862,35 @@ run_180s_start() {
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_180s_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "180s-start")"
-    local sparks_dst="$OUTDIR/${STEM}_highlights_180s_overlay_sparks.mp4"
-    local source_for_particles="$source_for_effects"
-    source_for_particles="$(run_optional_particle_sparks_on_clip "$source_for_effects" "$sparks_dst" "180s-start")"
-    local source_for_logo="$source_for_particles"
+    local source_for_logo="$source_for_effects"
     local glitch_dst="$OUTDIR/${STEM}_highlights_180s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_particles" "$glitch_dst" "180s-start")"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "180s-start")"
 
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_180s_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
-        copy_to_gdrive_if_enabled "$target"
-        return 0
+    local logo_stage="$target"
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
 
-    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-        --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-        --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-        --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
-        --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
-        --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-        --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
-        --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-        --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-        --output "$target"
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
+            --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
+            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
+            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
+            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
+            --output "$logo_stage"
+    fi
+
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "180s-start-post-logo" >/dev/null
+    fi
+
     copy_to_gdrive_if_enabled "$target"
 }
 
@@ -886,30 +902,36 @@ run_full() {
     local source_for_effects="$base_overlay"
     local reels_dst="$OUTDIR/${STEM}_full_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$base_overlay" "$reels_dst" "full")"
-    local sparks_dst="$OUTDIR/${STEM}_full_overlay_sparks.mp4"
-    source_for_effects="$(run_optional_particle_sparks_on_clip "$source_for_effects" "$sparks_dst" "full")"
+    local source_for_logo="$source_for_effects"
 
     local logo tag target
     logo="$LOGO_180PLUS"
     tag="$(basename "${logo%.*}")"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_full_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$source_for_effects" --dep "$logo" --dep "$DVDLOGO"; then
-        copy_to_gdrive_if_enabled "$target"
-        return 0
+    local logo_stage="$target"
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
 
-    python3 "$DVDLOGO" "$source_for_effects" "$logo" \
-        --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-        --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-        --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
-        --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
-        --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-        --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
-        --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-        --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-        --output "$target"
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
+            --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
+            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
+            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
+            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
+            --output "$logo_stage"
+    fi
+
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "full-post-logo" >/dev/null
+    fi
+
     copy_to_gdrive_if_enabled "$target"
 }
 
@@ -925,31 +947,35 @@ run_60s_end() {
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_60t_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "60s-end")"
-    local sparks_dst="$OUTDIR/${STEM}_highlights_60t_overlay_sparks.mp4"
-    local source_for_particles="$source_for_effects"
-    source_for_particles="$(run_optional_particle_sparks_on_clip "$source_for_effects" "$sparks_dst" "60s-end")"
-    local source_for_logo="$source_for_particles"
+    local source_for_logo="$source_for_effects"
     local glitch_dst="$OUTDIR/${STEM}_highlights_60t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_particles" "$glitch_dst" "60s-end")"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "60s-end")"
 
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_60t_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
-        copy_to_gdrive_if_enabled "$target"
-        return 0
+    local logo_stage="$target"
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
 
-    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-        --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-        --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-        --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-        --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-        --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-        --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
-        --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-        --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-        --output "$target"
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
+            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
+            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
+            --output "$logo_stage"
+    fi
+
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "60s-end-post-logo" >/dev/null
+    fi
+
     copy_to_gdrive_if_enabled "$target"
 }
 
@@ -965,31 +991,35 @@ run_90s_end() {
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_90t_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "90s-end")"
-    local sparks_dst="$OUTDIR/${STEM}_highlights_90t_overlay_sparks.mp4"
-    local source_for_particles="$source_for_effects"
-    source_for_particles="$(run_optional_particle_sparks_on_clip "$source_for_effects" "$sparks_dst" "90s-end")"
-    local source_for_logo="$source_for_particles"
+    local source_for_logo="$source_for_effects"
     local glitch_dst="$OUTDIR/${STEM}_highlights_90t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_particles" "$glitch_dst" "90s-end")"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "90s-end")"
 
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90t_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
-        copy_to_gdrive_if_enabled "$target"
-        return 0
+    local logo_stage="$target"
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
 
-    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-        --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-        --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-        --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-        --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-        --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-        --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
-        --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-        --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-        --output "$target"
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
+            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
+            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
+            --output "$logo_stage"
+    fi
+
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "90s-end-post-logo" >/dev/null
+    fi
+
     copy_to_gdrive_if_enabled "$target"
 }
 
@@ -1005,31 +1035,35 @@ run_180s_end() {
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_180t_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "180s-end")"
-    local sparks_dst="$OUTDIR/${STEM}_highlights_180t_overlay_sparks.mp4"
-    local source_for_particles="$source_for_effects"
-    source_for_particles="$(run_optional_particle_sparks_on_clip "$source_for_effects" "$sparks_dst" "180s-end")"
-    local source_for_logo="$source_for_particles"
+    local source_for_logo="$source_for_effects"
     local glitch_dst="$OUTDIR/${STEM}_highlights_180t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_particles" "$glitch_dst" "180s-end")"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "180s-end")"
 
     target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_180t_overlay_logo.mp4" "$tag")"
-    if ! should_rebuild "$target" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
-        copy_to_gdrive_if_enabled "$target"
-        return 0
+    local logo_stage="$target"
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
 
-    python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-        --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-        --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-        --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
-        --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
-        --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-        --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-        --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
-        --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-        --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-        --output "$target"
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
+            --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
+            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
+            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
+            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
+            --output "$logo_stage"
+    fi
+
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "180s-end-post-logo" >/dev/null
+    fi
+
     copy_to_gdrive_if_enabled "$target"
 }
 
@@ -1052,6 +1086,8 @@ main() {
     PARTICLE_SPARKS_SPEED="$PARTICLE_SPARKS_SPEED_DEFAULT"
     PARTICLE_SPARKS_OPACITY="$PARTICLE_SPARKS_OPACITY_DEFAULT"
     PARTICLE_SPARKS_AUDIO_GAIN="$PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT"
+    PARTICLE_SPARKS_COLOR_MODE="$PARTICLE_SPARKS_COLOR_MODE_DEFAULT"
+    PARTICLE_SPARKS_COLOR_RGB="$PARTICLE_SPARKS_COLOR_RGB_DEFAULT"
     JOBS="$JOBS_DEFAULT"
     PIPELINE_MODE="$PIPELINE_MODE_DEFAULT"
     ENABLE_GDRIVE_COPY="$ENABLE_GDRIVE_COPY_DEFAULT"
@@ -1087,6 +1123,8 @@ main() {
             --particle-sparks-speed) PARTICLE_SPARKS_SPEED="$2"; shift 2 ;;
             --particle-sparks-opacity) PARTICLE_SPARKS_OPACITY="$2"; shift 2 ;;
             --particle-sparks-audio-gain) PARTICLE_SPARKS_AUDIO_GAIN="$2"; shift 2 ;;
+            --particle-sparks-color-mode) PARTICLE_SPARKS_COLOR_MODE="$2"; shift 2 ;;
+            --particle-sparks-color-rgb) PARTICLE_SPARKS_COLOR_RGB="$2"; shift 2 ;;
             --cps) CPS="$2"; shift 2 ;;
             --glitch-seconds) GLITCH_SECONDS="$2"; shift 2 ;;
             --loop-seam-seconds) LOOP_SEAM_SECONDS="$2"; shift 2 ;;
@@ -1148,7 +1186,7 @@ main() {
     echo "Out:   $OUTDIR"
     echo "Dur:   ${INPUT_DURATION_SECONDS}s"
     echo "Args:  start=${start_dbg}s full=${full_dbg}s detect_audio=${detect_dbg} cps=${CPS} glitch=${GLITCH_SECONDS}s loop_seam=${LOOP_SEAM_SECONDS}s"
-    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} jobs=${JOBS}"
+    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} jobs=${JOBS}"
     echo "Sync:  gdrive_copy=${ENABLE_GDRIVE_COPY} gdrive_outdir=${GDRIVE_OUTDIR:-unset}"
 
     PROJECT_ROOT="/home/$USER/code/voidstar"
