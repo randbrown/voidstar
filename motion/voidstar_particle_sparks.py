@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import colorsys
 import math
 import os
 import random
@@ -90,6 +91,35 @@ def output_path_for(input_path: Path, out_dir: Path, args: argparse.Namespace) -
     return out_dir / name
 
 
+def parse_rgb(rgb_text: str) -> Tuple[int, int, int]:
+    try:
+        parts = [int(x.strip()) for x in rgb_text.split(",")]
+    except Exception as exc:
+        raise ValueError(f"Invalid --color-rgb value: {rgb_text!r}") from exc
+
+    if len(parts) != 3:
+        raise ValueError(f"Invalid --color-rgb value (need R,G,B): {rgb_text!r}")
+
+    r = max(0, min(255, parts[0]))
+    g = max(0, min(255, parts[1]))
+    b = max(0, min(255, parts[2]))
+    return r, g, b
+
+
+def rgb_to_bgr(rgb: Tuple[int, int, int]) -> Tuple[int, int, int]:
+    r, g, b = rgb
+    return b, g, r
+
+
+def audio_level_to_bgr(audio_level: float) -> Tuple[int, int, int]:
+    level = clamp01(audio_level)
+    hue = (2.0 / 3.0) * (1.0 - level)
+    sat = 1.0
+    val = 1.0
+    r_f, g_f, b_f = colorsys.hsv_to_rgb(hue, sat, val)
+    return int(round(b_f * 255)), int(round(g_f * 255)), int(round(r_f * 255))
+
+
 def extract_audio_envelope(input_path: Path, start: float, duration: float, fps: float, gain: float, smooth: float) -> np.ndarray:
     with tempfile.NamedTemporaryFile(prefix="voidstar_sparks_audio_", suffix=".wav", delete=False) as tmp:
         wav_path = Path(tmp.name)
@@ -155,6 +185,7 @@ class Spark:
     life: int
     max_life: int
     radius: int
+    color_bgr: Tuple[int, int, int]
 
 
 def main() -> None:
@@ -184,7 +215,8 @@ def main() -> None:
     ap.add_argument("--audio-reactive-gain", type=float, default=1.35, help="Audio intensity gain")
     ap.add_argument("--audio-reactive-smooth", type=float, default=0.70, help="Audio envelope smoothing")
 
-    ap.add_argument("--color-rgb", default="180,235,255", help="Spark color as R,G,B")
+    ap.add_argument("--color-mode", default="white", help="white|rgb|random|audio-intensity")
+    ap.add_argument("--color-rgb", default="255,255,255", help="Spark color as R,G,B (used when --color-mode rgb)")
     ap.add_argument("--log-interval", type=float, default=1.0, help="Progress print interval")
 
     args = ap.parse_args()
@@ -224,9 +256,30 @@ def main() -> None:
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     encoder = pick_video_encoder(args.video_encoder)
+    color_mode = str(args.color_mode).strip().lower()
+    if color_mode not in {"white", "rgb", "random", "audio-intensity"}:
+        raise ValueError("--color-mode must be white|rgb|random|audio-intensity")
+
+    rgb_color = parse_rgb(args.color_rgb)
+    white_bgr = (255, 255, 255)
+    rgb_mode_bgr = rgb_to_bgr(rgb_color)
+    random_palette_bgr = [
+        (255, 80, 80),
+        (255, 180, 80),
+        (255, 255, 80),
+        (100, 255, 120),
+        (80, 235, 255),
+        (180, 120, 255),
+        (255, 120, 220),
+    ]
+
     log(f"input={input_path}")
     log(f"output={output_path}")
     log(f"resolution={frame_w}x{frame_h} fps={src_fps:.2f} encoder={encoder}")
+    if color_mode == "rgb":
+        log(f"color_mode={color_mode} color_rgb={rgb_color[0]},{rgb_color[1]},{rgb_color[2]}")
+    else:
+        log(f"color_mode={color_mode}")
 
     audio_reactive = args.audio_reactive.lower() in {"1", "true", "yes", "on"}
     if audio_reactive:
@@ -260,9 +313,6 @@ def main() -> None:
     ffmpeg_cmd += ["-pix_fmt", "yuv420p", str(tmp_video)]
 
     proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
-
-    r, g, b = [int(max(0, min(255, int(x.strip())))) for x in args.color_rgb.split(",")]
-    color_bgr = (b, g, r)
 
     prev_gray = None
     prev_points = np.empty((0, 1, 2), dtype=np.float32)
@@ -335,7 +385,28 @@ def main() -> None:
                 vy = math.sin(angle) * vel + random.uniform(-float(args.spark_jitter), float(args.spark_jitter))
                 life = max(2, int(round(float(args.spark_life_frames) * (0.8 + 0.5 * audio_level))))
                 radius = max(1, int(round(float(args.spark_size) * (0.8 + 0.6 * audio_level))))
-                sparks.append(Spark(x=x, y=y, vx=vx, vy=vy, life=life, max_life=life, radius=radius))
+                if color_mode == "white":
+                    spark_color_bgr = white_bgr
+                elif color_mode == "rgb":
+                    spark_color_bgr = rgb_mode_bgr
+                elif color_mode == "random":
+                    spark_color_bgr = random.choice(random_palette_bgr)
+                else:
+                    spark_audio_level = clamp01(audio_level + random.uniform(-0.12, 0.12))
+                    spark_color_bgr = audio_level_to_bgr(spark_audio_level)
+
+                sparks.append(
+                    Spark(
+                        x=x,
+                        y=y,
+                        vx=vx,
+                        vy=vy,
+                        life=life,
+                        max_life=life,
+                        radius=radius,
+                        color_bgr=spark_color_bgr,
+                    )
+                )
 
         overlay = np.zeros_like(frame, dtype=np.uint8)
         alive: List[Spark] = []
@@ -354,7 +425,7 @@ def main() -> None:
 
             life_ratio = sp.life / max(1, sp.max_life)
             radius = max(1, int(round(sp.radius * (0.65 + 0.7 * life_ratio))))
-            cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, color_bgr, -1, cv2.LINE_AA)
+            cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, sp.color_bgr, -1, cv2.LINE_AA)
             alive.append(sp)
 
         sparks = alive
