@@ -1,0 +1,34 @@
+
+
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60s_overlay_logo_logo-voidstar_emblem_text_0.mp4 \
+--output /home/brown/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60s_overlay_sparks_test.mp4 \
+--video-encoder auto --preset fast --max-points 512 --motion-threshold 0.05 \
+--spark-rate 0.25 --spark-life-frames 15 --spark-speed 1.0 --spark-opacity 0.5 \
+--audio-reactive true --audio-reactive-gain 1.5 --audio-reactive-smooth 0.7 \
+--log-interval 1.0 --start 40 --duration 10
+
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60s_overlay_logo_logo-voidstar_emblem_text_0.mp4 \
+--output /home/brown/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60s_overlay_sparks_test.mp4 \
+--video-encoder auto --preset fast --max-points 512 --motion-threshold 0.5 \
+--spark-rate 0.25 --spark-life-frames 15 --spark-speed 1.0 --spark-opacity 0.5 \
+--audio-reactive true --audio-reactive-gain 1.5 --audio-reactive-smooth 0.7 \
+--log-interval 1.0 --start 40 --duration 10
+
+
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60s_overlay_logo_logo-voidstar_emblem_text_0.mp4 \
+--output /home/brown/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60s_overlay_sparks_test.mp4 \
+--video-encoder auto --preset fast --max-points 400 --motion-threshold 1.0 \
+--spark-rate 0.5 --spark-life-frames 15 --spark-speed 2.0 --spark-opacity 0.5 \
+--audio-reactive true --audio-reactive-gain 1.5 --audio-reactive-smooth 0.7 \
+--log-interval 1.0 --start 30 --duration 10
+
+cd /home/brown/code/voidstar && conda run -n mp311 python motion/voidstar_particle_sparks.py /home/brown/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60s_overlay_logo_logo-voidstar_emblem_text_0.mp4 --output /home/brown/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60s_overlay_sparks_test.mp4 --video-encoder auto --preset fast --max-points 260 --motion-threshold 1.1 --spark-rate 0.8 --spark-life-frames 20 --spark-speed 3.6 --spark-opacity 0.75 --audio-reactive true --audio-reactive-gain 1.5 --audio-reactive-smooth 0.7 --log-interval 1.0 --start 30 --duration 5
+
+
+

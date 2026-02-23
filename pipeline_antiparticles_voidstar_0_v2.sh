@@ -91,9 +91,9 @@ ENABLE_GDRIVE_COPY_DEFAULT=1
 GDRIVE_OUTDIR_DEFAULT="/mnt/g/My Drive/Music/voidstar/antiparticles"   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos
 
 # Logo assignment by target duration.
-LOGO_60_DEFAULT="voidstar_emblem_text_0.png"
-LOGO_90_DEFAULT="voidstar_emblem_cosmos_0.png"
-LOGO_180PLUS_DEFAULT="voidstar_logo_0.png"
+LOGO_60_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_text_0.png"
+LOGO_90_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png"
+LOGO_180PLUS_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_logo_0.png"
 
 # Glitchfield preset examples (manual reference):
 # clean:
@@ -280,41 +280,6 @@ find_void_logos_default() {
 with_logo_suffix() {
     local base_path="$1" tag="$2"
     if [[ -z "$tag" ]]; then echo "$base_path"; else echo "${base_path%.mp4}_logo-${tag}.mp4"; fi
-}
-
-resolve_logo_file() {
-    local candidate="$1"
-    local expanded
-    expanded="$(eval echo "$candidate")"
-
-    if [[ -f "$expanded" ]]; then
-        readlink -f "$expanded"
-        return 0
-    fi
-    if [[ -f "$PROJECT_ROOT/art/logos_alpha/$expanded" ]]; then
-        readlink -f "$PROJECT_ROOT/art/logos_alpha/$expanded"
-        return 0
-    fi
-    if [[ -f "$PROJECT_ROOT/dvd_logo/$expanded" ]]; then
-        readlink -f "$PROJECT_ROOT/dvd_logo/$expanded"
-        return 0
-    fi
-
-    die "Logo file could not be resolved: $candidate"
-}
-
-logo_for_target_bucket() {
-    local bucket="$1"
-    local logo=""
-    case "$bucket" in
-        60) logo="$LOGO_60" ;;
-        90) logo="$LOGO_90" ;;
-        180plus) logo="$LOGO_180PLUS" ;;
-        *) die "Unknown logo bucket: $bucket" ;;
-    esac
-    local tag
-    tag="$(basename "${logo%.*}")"
-    echo "$logo|$tag"
 }
 
 compute_60_window() {
@@ -746,8 +711,9 @@ run_60s_start() {
 
     run_divvy_uniform_highlights "$divvy_dst" 60 15 4 ""
 
-    local picked logo tag target
-    picked="$(logo_for_target_bucket "60")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local logo tag target
+    logo="$LOGO_60"
+    tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_60s_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "60s-start")"
@@ -782,8 +748,9 @@ run_90s_start() {
 
     run_divvy_uniform_highlights "$divvy_dst" 90 16 "" ""
 
-    local picked logo tag target
-    picked="$(logo_for_target_bucket "90")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local logo tag target
+    logo="$LOGO_90"
+    tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_90s_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "90s-start")"
@@ -818,8 +785,9 @@ run_180s_start() {
 
     run_divvy_uniform_highlights "$divvy_dst" 180 32 6 ""
 
-    local picked logo tag target
-    picked="$(logo_for_target_bucket "180plus")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local logo tag target
+    logo="$LOGO_180PLUS"
+    tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_180s_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "180s-start")"
@@ -837,8 +805,8 @@ run_180s_start() {
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-        --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
+        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
+        --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
         --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
@@ -857,8 +825,9 @@ run_full() {
     local reels_dst="$OUTDIR/${STEM}_full_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$base_overlay" "$reels_dst" "full")"
 
-    local picked logo tag target
-    picked="$(logo_for_target_bucket "180plus")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local logo tag target
+    logo="$LOGO_180PLUS"
+    tag="$(basename "${logo%.*}")"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_full_overlay_logo.mp4" "$tag")"
     if ! should_rebuild "$target" --dep "$source_for_effects" --dep "$logo" --dep "$DVDLOGO"; then
         copy_to_gdrive_if_enabled "$target"
@@ -869,8 +838,8 @@ run_full() {
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-        --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
+        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
+        --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
         --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
@@ -886,8 +855,9 @@ run_60s_end() {
 
     run_divvy_uniform_highlights "$divvy_dst" 60 15 4 "end"
 
-    local picked logo tag target
-    picked="$(logo_for_target_bucket "60")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local logo tag target
+    logo="$LOGO_60"
+    tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_60t_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "60s-end")"
@@ -922,8 +892,9 @@ run_90s_end() {
 
     run_divvy_uniform_highlights "$divvy_dst" 90 16 "" "end"
 
-    local picked logo tag target
-    picked="$(logo_for_target_bucket "90")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local logo tag target
+    logo="$LOGO_90"
+    tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_90t_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "90s-end")"
@@ -958,8 +929,9 @@ run_180s_end() {
 
     run_divvy_uniform_highlights "$divvy_dst" 180 32 6 "end"
 
-    local picked logo tag target
-    picked="$(logo_for_target_bucket "180plus")"; logo="${picked%%|*}"; tag="${picked##*|}"
+    local logo tag target
+    logo="$LOGO_180PLUS"
+    tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_180t_overlay_reels.mp4"
     source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "180s-end")"
@@ -977,8 +949,8 @@ run_180s_end() {
         --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
         --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
         --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-        --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
+        --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
+        --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
         --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
         --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
         --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
@@ -1027,15 +999,6 @@ main() {
             --cps) CPS="$2"; shift 2 ;;
             --glitch-seconds) GLITCH_SECONDS="$2"; shift 2 ;;
             --loop-seam-seconds) LOOP_SEAM_SECONDS="$2"; shift 2 ;;
-            --logo-60) LOGO_60="$2"; shift 2 ;;
-            --logo-90) LOGO_90="$2"; shift 2 ;;
-            --logo-180plus) LOGO_180PLUS="$2"; shift 2 ;;
-            --logo)
-                LOGO_60="$2"
-                LOGO_90="$2"
-                LOGO_180PLUS="$2"
-                shift 2
-                ;;
             --jobs|-j) JOBS="$2"; shift 2 ;;
             --no-reels-cache) USE_REELS_CACHE=0; shift ;;
             --no-glitchfield-cache) USE_GLITCHFIELD_CACHE=0; shift ;;
@@ -1115,9 +1078,9 @@ main() {
     require_file "DVDLOGO" "$DVDLOGO"
     require_file "GLITCHFIELD" "$GLITCHFIELD"
 
-    LOGO_60="$(resolve_logo_file "$LOGO_60")"
-    LOGO_90="$(resolve_logo_file "$LOGO_90")"
-    LOGO_180PLUS="$(resolve_logo_file "$LOGO_180PLUS")"
+    LOGO_60="$(eval echo "$LOGO_60")"
+    LOGO_90="$(eval echo "$LOGO_90")"
+    LOGO_180PLUS="$(eval echo "$LOGO_180PLUS")"
     require_file "LOGO_60" "$LOGO_60"
     require_file "LOGO_90" "$LOGO_90"
     require_file "LOGO_180PLUS" "$LOGO_180PLUS"
