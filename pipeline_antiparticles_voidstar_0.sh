@@ -39,7 +39,7 @@ set -euo pipefail
 PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
-RUN_60S_START=1
+RUN_60S_START=0
 RUN_90S_START=1
 RUN_180S_START=1
 RUN_60S_END=0
@@ -53,7 +53,7 @@ OUTDIR_DEFAULT="~/WinVideos/antiparticles_voidstar_0"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
 START_SECONDS_DEFAULT="4.37"
-YOUTUBE_FULL_SECONDS_DEFAULT="1200"
+YOUTUBE_FULL_SECONDS_DEFAULT="1294"
 DETECT_AUDIO_START_END_DEFAULT=0
 
 # Timing/style defaults.
@@ -106,7 +106,8 @@ GDRIVE_OUTDIR_DEFAULT="/mnt/g/My Drive/Music/voidstar/antiparticles"   # e.g. /m
 # Logo assignment by target duration.
 LOGO_60_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_text_0.png"
 LOGO_90_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png"
-LOGO_180PLUS_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_logo_0.png"
+# LOGO_180PLUS_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_logo_0.png"
+LOGO_180PLUS_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png"
 
 # Glitchfield preset examples (manual reference):
 # clean:
@@ -709,7 +710,7 @@ run_divvy_uniform_highlights() {
             --video-encoder libx264 --preset medium --out-dir "$OUTDIR"
             --output "$output_path"
             --glitch-seconds "$glitch_try" --glitch-style vuwind --cps "$CPS" --loop-seam-seconds "$LOOP_SEAM_SECONDS"
-            --sampling-mode uniform-spread --sample-seconds "$sample_seconds" --truncate-to-full-clips
+            --sampling-mode uniform-spread --sample-seconds "$sample_seconds" #--truncate-to-full-clips
         )
 
         if [[ -n "$n_segments" ]]; then
@@ -810,7 +811,7 @@ run_90s_start() {
     echo "--- 90s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 90 16 "" ""
+    run_divvy_uniform_highlights "$divvy_dst" 90 16 6 ""
 
     local logo tag target
     logo="$LOGO_90"
@@ -854,7 +855,7 @@ run_180s_start() {
     echo "--- 180s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 32 6 ""
+    run_divvy_uniform_highlights "$divvy_dst" 180 20 9 ""
 
     local logo tag target
     logo="$LOGO_180PLUS"
@@ -881,7 +882,7 @@ run_180s_start() {
             --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
             --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
             --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
