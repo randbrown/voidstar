@@ -39,7 +39,7 @@ set -euo pipefail
 PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
-RUN_60S_START=0
+RUN_60S_START=1
 RUN_90S_START=1
 RUN_180S_START=1
 RUN_60S_END=0
@@ -878,8 +878,8 @@ run_180s_start() {
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
-            --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
             --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
             --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
             --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
@@ -919,8 +919,8 @@ run_full() {
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
-            --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
             --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
             --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
             --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
@@ -1051,8 +1051,8 @@ run_180s_end() {
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 96 \
-            --local-point-track-max-points 256 --local-point-track-radius 300 --local-point-track-min-distance 128 \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
             --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
             --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
             --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
