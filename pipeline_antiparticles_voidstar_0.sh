@@ -208,6 +208,13 @@ file_fingerprint() {
     echo "${mtime}:${size}"
 }
 
+dvdlogo_cache_signature() {
+    local profile="$1"
+    local source_clip="$2"
+    local logo_path="$3"
+    echo "dvdlogo|profile=${profile}|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${DVDLOGO}|script_fp=$(file_fingerprint "$DVDLOGO")"
+}
+
 rename_output() {
     local src="$1" dst="$2"
     if [[ ! -f "$src" ]]; then
@@ -784,8 +791,11 @@ run_60s_start() {
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
         logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
+    local dvdlogo_profile="cinema_local_track_v1_start083"
+    local dvdlogo_sig
+    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
@@ -798,6 +808,7 @@ run_60s_start() {
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
+            write_cache_signature "$logo_stage" "$dvdlogo_sig"
     fi
 
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
@@ -828,8 +839,11 @@ run_90s_start() {
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
         logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
+    local dvdlogo_profile="cinema_local_track_v1_start083"
+    local dvdlogo_sig
+    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
@@ -842,6 +856,7 @@ run_90s_start() {
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
+            write_cache_signature "$logo_stage" "$dvdlogo_sig"
     fi
 
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
@@ -872,8 +887,11 @@ run_180s_start() {
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
         logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
+    local dvdlogo_profile="cinema_local_track_v1_start083"
+    local dvdlogo_sig
+    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
@@ -886,6 +904,7 @@ run_180s_start() {
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
+            write_cache_signature "$logo_stage" "$dvdlogo_sig"
     fi
 
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
@@ -913,8 +932,11 @@ run_full() {
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
         logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
+    local dvdlogo_profile="cinema_local_track_v1_start077"
+    local dvdlogo_sig
+    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
@@ -927,6 +949,7 @@ run_full() {
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
+            write_cache_signature "$logo_stage" "$dvdlogo_sig"
     fi
 
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
@@ -957,8 +980,11 @@ run_60s_end() {
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
         logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
+    local dvdlogo_profile="cinema_local_track_v1_start083"
+    local dvdlogo_sig
+    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
@@ -971,6 +997,7 @@ run_60s_end() {
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
+            write_cache_signature "$logo_stage" "$dvdlogo_sig"
     fi
 
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
@@ -1001,8 +1028,11 @@ run_90s_end() {
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
         logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
+    local dvdlogo_profile="cinema_local_track_v1_start083"
+    local dvdlogo_sig
+    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
@@ -1015,6 +1045,7 @@ run_90s_end() {
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
+            write_cache_signature "$logo_stage" "$dvdlogo_sig"
     fi
 
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
@@ -1045,8 +1076,11 @@ run_180s_end() {
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
         logo_stage="${target%.mp4}_pre_sparks.mp4"
     fi
+    local dvdlogo_profile="cinema_local_track_v1_start077"
+    local dvdlogo_sig
+    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO"; then
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
@@ -1059,6 +1093,7 @@ run_180s_end() {
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
+            write_cache_signature "$logo_stage" "$dvdlogo_sig"
     fi
 
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
