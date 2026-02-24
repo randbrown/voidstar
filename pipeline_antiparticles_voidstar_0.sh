@@ -94,6 +94,11 @@ PARTICLE_SPARKS_OPACITY_DEFAULT=0.5
 PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT=1.35
 PARTICLE_SPARKS_COLOR_MODE_DEFAULT="antiparticles"   # white | rgb | random | audio-intensity | antiparticles
 PARTICLE_SPARKS_COLOR_RGB_DEFAULT="255,255,255"
+PARTICLE_SPARKS_FLOOD_IN_OUT_DEFAULT=1
+PARTICLE_SPARKS_FLOOD_SECONDS_DEFAULT=2.0
+PARTICLE_SPARKS_FLOOD_SPAWN_MULT_DEFAULT=3.0
+PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT=128
+PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=1.35
 
 # Optional parallelism and force rebuild.
 JOBS_DEFAULT=1
@@ -665,7 +670,7 @@ run_optional_particle_sparks_on_clip() {
     require_file "PARTICLE_SPARKS" "$PARTICLE_SPARKS"
 
     local sparks_cache_sig
-    sparks_cache_sig="particle_sparks|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${PARTICLE_SPARKS}|script_fp=$(file_fingerprint "$PARTICLE_SPARKS")|max_points=${PARTICLE_SPARKS_MAX_POINTS}|motion_threshold=${PARTICLE_SPARKS_MOTION_THRESHOLD}|spark_rate=${PARTICLE_SPARKS_RATE}|spark_life=${PARTICLE_SPARKS_LIFE_FRAMES}|spark_speed=${PARTICLE_SPARKS_SPEED}|spark_opacity=${PARTICLE_SPARKS_OPACITY}|audio_gain=${PARTICLE_SPARKS_AUDIO_GAIN}|color_mode=${PARTICLE_SPARKS_COLOR_MODE}|color_rgb=${PARTICLE_SPARKS_COLOR_RGB}"
+    sparks_cache_sig="particle_sparks|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${PARTICLE_SPARKS}|script_fp=$(file_fingerprint "$PARTICLE_SPARKS")|max_points=${PARTICLE_SPARKS_MAX_POINTS}|motion_threshold=${PARTICLE_SPARKS_MOTION_THRESHOLD}|spark_rate=${PARTICLE_SPARKS_RATE}|spark_life=${PARTICLE_SPARKS_LIFE_FRAMES}|spark_speed=${PARTICLE_SPARKS_SPEED}|spark_opacity=${PARTICLE_SPARKS_OPACITY}|audio_gain=${PARTICLE_SPARKS_AUDIO_GAIN}|color_mode=${PARTICLE_SPARKS_COLOR_MODE}|color_rgb=${PARTICLE_SPARKS_COLOR_RGB}|flood_in_out=${PARTICLE_SPARKS_FLOOD_IN_OUT}|flood_seconds=${PARTICLE_SPARKS_FLOOD_SECONDS}|flood_spawn_mult=${PARTICLE_SPARKS_FLOOD_SPAWN_MULT}|flood_extra_sources=${PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES}|flood_velocity_mult=${PARTICLE_SPARKS_FLOOD_VELOCITY_MULT}"
 
     if [[ "$USE_PARTICLE_SPARKS_CACHE" -eq 1 ]]; then
         should_rebuild "$target" --dep "$input_clip" --dep "$PARTICLE_SPARKS" --sig "$sparks_cache_sig" || {
@@ -690,6 +695,11 @@ run_optional_particle_sparks_on_clip() {
         --audio-reactive-gain "$PARTICLE_SPARKS_AUDIO_GAIN" \
         --color-mode "$PARTICLE_SPARKS_COLOR_MODE" \
         --color-rgb "$PARTICLE_SPARKS_COLOR_RGB" \
+        --flood-in-out "$( [[ "$PARTICLE_SPARKS_FLOOD_IN_OUT" -eq 1 ]] && echo true || echo false )" \
+        --flood-seconds "$PARTICLE_SPARKS_FLOOD_SECONDS" \
+        --flood-spawn-mult "$PARTICLE_SPARKS_FLOOD_SPAWN_MULT" \
+        --flood-extra-sources "$PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES" \
+        --flood-velocity-mult "$PARTICLE_SPARKS_FLOOD_VELOCITY_MULT" \
         1>&2
 
     [[ -f "$target" ]] || die "Particle sparks stage did not produce output: $target"
@@ -1124,6 +1134,11 @@ main() {
     PARTICLE_SPARKS_AUDIO_GAIN="$PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT"
     PARTICLE_SPARKS_COLOR_MODE="$PARTICLE_SPARKS_COLOR_MODE_DEFAULT"
     PARTICLE_SPARKS_COLOR_RGB="$PARTICLE_SPARKS_COLOR_RGB_DEFAULT"
+    PARTICLE_SPARKS_FLOOD_IN_OUT="$PARTICLE_SPARKS_FLOOD_IN_OUT_DEFAULT"
+    PARTICLE_SPARKS_FLOOD_SECONDS="$PARTICLE_SPARKS_FLOOD_SECONDS_DEFAULT"
+    PARTICLE_SPARKS_FLOOD_SPAWN_MULT="$PARTICLE_SPARKS_FLOOD_SPAWN_MULT_DEFAULT"
+    PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES="$PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT"
+    PARTICLE_SPARKS_FLOOD_VELOCITY_MULT="$PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT"
     JOBS="$JOBS_DEFAULT"
     PIPELINE_MODE="$PIPELINE_MODE_DEFAULT"
     ENABLE_GDRIVE_COPY="$ENABLE_GDRIVE_COPY_DEFAULT"
@@ -1161,6 +1176,11 @@ main() {
             --particle-sparks-audio-gain) PARTICLE_SPARKS_AUDIO_GAIN="$2"; shift 2 ;;
             --particle-sparks-color-mode) PARTICLE_SPARKS_COLOR_MODE="$2"; shift 2 ;;
             --particle-sparks-color-rgb) PARTICLE_SPARKS_COLOR_RGB="$2"; shift 2 ;;
+            --particle-sparks-flood-in-out) PARTICLE_SPARKS_FLOOD_IN_OUT="$2"; shift 2 ;;
+            --particle-sparks-flood-seconds) PARTICLE_SPARKS_FLOOD_SECONDS="$2"; shift 2 ;;
+            --particle-sparks-flood-spawn-mult) PARTICLE_SPARKS_FLOOD_SPAWN_MULT="$2"; shift 2 ;;
+            --particle-sparks-flood-extra-sources) PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES="$2"; shift 2 ;;
+            --particle-sparks-flood-velocity-mult) PARTICLE_SPARKS_FLOOD_VELOCITY_MULT="$2"; shift 2 ;;
             --cps) CPS="$2"; shift 2 ;;
             --glitch-seconds) GLITCH_SECONDS="$2"; shift 2 ;;
             --loop-seam-seconds) LOOP_SEAM_SECONDS="$2"; shift 2 ;;
@@ -1201,6 +1221,12 @@ main() {
     case "$REELS_CACHE_MODE" in
         base|per-target) ;;
         *) die "Unknown --reels-cache-mode value: $REELS_CACHE_MODE (use base|per-target)" ;;
+    esac
+
+    case "${PARTICLE_SPARKS_FLOOD_IN_OUT}" in
+        1|true|TRUE|True|yes|YES|on|ON) PARTICLE_SPARKS_FLOOD_IN_OUT=1 ;;
+        0|false|FALSE|False|no|NO|off|OFF) PARTICLE_SPARKS_FLOOD_IN_OUT=0 ;;
+        *) die "Unknown --particle-sparks-flood-in-out value: ${PARTICLE_SPARKS_FLOOD_IN_OUT} (use 1|0|true|false)" ;;
     esac
 
     require_cmd python3

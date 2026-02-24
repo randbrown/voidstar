@@ -51,6 +51,10 @@ def clamp01(value: float) -> float:
     return float(max(0.0, min(1.0, value)))
 
 
+def parse_bool(text: str) -> bool:
+    return str(text).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def safe_slug(text: str) -> str:
     out = text.strip().replace(" ", "_")
     return "".join(ch for ch in out if ch.isalnum() or ch in "._-")
@@ -236,6 +240,12 @@ def main() -> None:
     ap.add_argument("--spark-size", type=float, default=2.2, help="Base spark radius in pixels")
     ap.add_argument("--spark-opacity", type=float, default=0.70, help="Overlay opacity multiplier")
 
+    ap.add_argument("--flood-in-out", type=str, default="false", help="true|false, add mirrored particle bursts at clip start/end")
+    ap.add_argument("--flood-seconds", type=float, default=2.0, help="Duration in seconds for flood burst at start and end")
+    ap.add_argument("--flood-spawn-mult", type=float, default=3.0, help="Peak multiplier for spawn probability during flood window")
+    ap.add_argument("--flood-extra-sources", type=int, default=180, help="Peak extra random spawn sources per frame during flood")
+    ap.add_argument("--flood-velocity-mult", type=float, default=1.35, help="Velocity multiplier at flood peak")
+
     ap.add_argument("--audio-reactive", type=str, default="true", help="true|false")
     ap.add_argument("--audio-reactive-gain", type=float, default=1.35, help="Audio intensity gain")
     ap.add_argument("--audio-reactive-smooth", type=float, default=0.70, help="Audio envelope smoothing")
@@ -314,7 +324,21 @@ def main() -> None:
     else:
         log(f"color_mode={color_mode}")
 
-    audio_reactive = args.audio_reactive.lower() in {"1", "true", "yes", "on"}
+    audio_reactive = parse_bool(args.audio_reactive)
+    flood_in_out = parse_bool(args.flood_in_out)
+    flood_seconds = max(0.0, float(args.flood_seconds))
+    flood_spawn_mult = max(1.0, float(args.flood_spawn_mult))
+    flood_extra_sources = max(0, int(args.flood_extra_sources))
+    flood_velocity_mult = max(1.0, float(args.flood_velocity_mult))
+
+    if flood_in_out:
+        log(
+            "flood_in_out=true "
+            f"flood_seconds={flood_seconds:.2f} "
+            f"flood_spawn_mult={flood_spawn_mult:.2f} "
+            f"flood_extra_sources={flood_extra_sources} "
+            f"flood_velocity_mult={flood_velocity_mult:.2f}"
+        )
     if audio_reactive:
         log("analyzing audio envelope...")
         env = extract_audio_envelope(
@@ -402,9 +426,35 @@ def main() -> None:
 
         audio_level = float(env[min(processed, len(env) - 1)]) if len(env) > 0 else 0.0
         reactive_mult = 1.0 + (0.8 * audio_level)
+
+        flood_strength = 0.0
+        if flood_in_out and flood_seconds > 0.0:
+            elapsed_sec = processed / max(1e-6, src_fps)
+            if elapsed_sec < flood_seconds:
+                flood_strength = max(flood_strength, 1.0 - (elapsed_sec / flood_seconds))
+            if total_frames > 0:
+                remaining_frames = max(0, total_frames - processed - 1)
+                remaining_sec = remaining_frames / max(1e-6, src_fps)
+                if remaining_sec < flood_seconds:
+                    flood_strength = max(flood_strength, 1.0 - (remaining_sec / flood_seconds))
+
         spawn_prob = clamp01(float(args.spark_rate) * (0.35 + (0.65 * reactive_mult)))
+        if flood_strength > 0.0:
+            spawn_prob = clamp01(spawn_prob * (1.0 + (flood_spawn_mult - 1.0) * flood_strength))
         if color_mode == "antiparticles":
             spawn_prob = clamp01(spawn_prob * 1.25)
+
+        if flood_strength > 0.0 and flood_extra_sources > 0:
+            extra_count = int(round(flood_extra_sources * flood_strength))
+            extra_speed = max(float(args.motion_threshold), 1.0) * (1.0 + (0.75 * flood_strength))
+            for _ in range(extra_count):
+                movers.append(
+                    (
+                        random.uniform(0.0, frame_w - 1.0),
+                        random.uniform(0.0, frame_h - 1.0),
+                        extra_speed,
+                    )
+                )
 
         for x, y, speed in movers:
             if random.random() > spawn_prob:
@@ -418,6 +468,8 @@ def main() -> None:
                 angle = random.uniform(0.0, 2.0 * math.pi)
                 base_speed = float(args.spark_speed) * (0.65 + 0.45 * min(3.0, speed / 4.0))
                 vel = base_speed * reactive_mult
+                if flood_strength > 0.0:
+                    vel *= 1.0 + ((flood_velocity_mult - 1.0) * flood_strength)
                 vx = math.cos(angle) * vel + random.uniform(-float(args.spark_jitter), float(args.spark_jitter))
                 vy = math.sin(angle) * vel + random.uniform(-float(args.spark_jitter), float(args.spark_jitter))
                 life = max(2, int(round(float(args.spark_life_frames) * (0.8 + 0.5 * audio_level))))
