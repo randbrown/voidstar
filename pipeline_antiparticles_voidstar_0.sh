@@ -41,11 +41,11 @@ PIPELINE_MODE_DEFAULT="custom"
 # For custom mode, choose exactly which targets run.
 RUN_60S_START=1
 RUN_90S_START=1
-RUN_180S_START=1
-RUN_60S_END=0
-RUN_90S_END=0
-RUN_180S_END=0
-RUN_FULL=1
+RUN_180S_START=0
+RUN_60S_END=1
+RUN_90S_END=1
+RUN_180S_END=1
+RUN_FULL=0
 
 # Input/output defaults.
 INPUT_VIDEO_DEFAULT="~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0.mp4"
@@ -784,7 +784,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 10 6 ""
 
     local logo tag target
     logo="$LOGO_60"
@@ -832,7 +832,7 @@ run_90s_start() {
     echo "--- 90s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 90 16 6 ""
+    run_divvy_uniform_highlights "$divvy_dst" 90 10 90 ""
 
     local logo tag target
     logo="$LOGO_90"
@@ -973,7 +973,7 @@ run_60s_end() {
     echo "--- 60s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 60 10 6 "end"
 
     local logo tag target
     logo="$LOGO_60"
@@ -1021,7 +1021,7 @@ run_90s_end() {
     echo "--- 90s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 90 16 "" "end"
+    run_divvy_uniform_highlights "$divvy_dst" 90 10 9 "end"
 
     local logo tag target
     logo="$LOGO_90"
@@ -1069,7 +1069,7 @@ run_180s_end() {
     echo "--- 180s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 32 6 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 180 20 9 "end"
 
     local logo tag target
     logo="$LOGO_180PLUS"
