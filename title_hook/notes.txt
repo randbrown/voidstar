@@ -1,0 +1,77 @@
+VoidStar Title Hook examples
+
+Input video:
+~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60t_overlay_logo_logo-voidstar_emblem_text_0.mp4
+
+1) IG default title hook (auto output name in same folder)
+python3 ~/code/voidstar/title_hook/voidstar_title_hook.py \
+  ~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60t_overlay_logo_logo-voidstar_emblem_text_0.mp4 \
+  --outdir ~/WinVideos/antiparticles_voidstar_0 \
+  --title "ANTIPARTICLES" \
+  --secondary-text "VOIDSTAR // #livecoding #pedalsteel #improvisedmusic #opencvpython #vibecoding"
+
+2) Stronger glitch + logo intensity + longer end reveal
+python3 ~/code/voidstar/title_hook/voidstar_title_hook.py \
+  ~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60t_overlay_logo_logo-voidstar_emblem_text_0.mp4 \
+  --outdir ~/WinVideos/antiparticles_voidstar_0 \
+  --title "// antiparticles (hi60t) @by voidstar" \
+  --secondary-text "VOIDSTAR\n#livecoding\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding" \
+  --duration 4.0 \
+  --fade-out-duration 1.3 \
+  --logo ~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png \
+  --logo-intensity 1.9 \
+  --logo-opacity 0.9
+
+
+  python3 ~/code/voidstar/title_hook/voidstar_title_hook.py \
+  ~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60t_overlay_logo_logo-voidstar_emblem_text_0.mp4 \
+  --outdir ~/WinVideos/antiparticles_voidstar_0 \
+  --title "// @title antiparticles (hi60t)\n// @by voidstar" \
+  --secondary-text "#livecoding\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding" \
+  --duration 4.0 \
+  --fade-out-duration 1.3 \
+  --logo ~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png \
+  --logo-intensity 1.9 \
+  --logo-x-ratio 0.5 --logo-y-ratio 0.24 \
+  --logo-motion-track-scale 2.4 --logo-motion-track-radius 512 --logo-motion-track-link-neighbors 4 \
+  --logo-opacity 0.9 
+
+  python3 ~/code/voidstar/title_hook/voidstar_title_hook.py \
+  ~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60t_overlay_logo_logo-voidstar_emblem_text_0.mp4 \
+  --outdir ~/WinVideos/antiparticles_voidstar_0 \
+  --title "// @title antiparticles (hi60t)\n// @by voidstar" \
+  --secondary-text "#livecoding\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding" \
+  --duration 4.0 \
+  --fade-out-duration 1.3 \
+  --logo ~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png \
+  --logo-intensity 1.9 \
+  --logo-x-ratio 0.5 --logo-y-ratio 0.24 \
+  --logo-motion-track-scale 2.4 --logo-motion-track-radius 512 --logo-motion-track-link-neighbors 4 \
+  --logo-opacity 0.9 
+
+
+    python3 ~/code/voidstar/title_hook/voidstar_title_hook.py \
+  ~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60t_overlay_logo_logo-voidstar_emblem_text_0.mp4 \
+  --outdir ~/WinVideos/antiparticles_voidstar_0 \
+  --title "// @title antiparticles (hi60t)\n// @by voidstar" \
+  --secondary-text "#livecoding\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding" \
+  --duration 4.0 \
+  --fade-out-duration 1.3 \
+  --logo ~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png \
+  --logo-intensity 1.9 \
+  --logo-x-ratio 0.5 --logo-y-ratio 0.24 \
+  --logo-motion-track-scale 1 --logo-motion-track-radius 512 --logo-motion-track-link-neighbors 4 \
+  --logo-opacity 0.9 
+
+
+
+3) Fast, punchy short hook with custom output file
+python3 ~/code/voidstar/title_hook/voidstar_title_hook.py \
+  ~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0_highlights_60t_overlay_logo_logo-voidstar_emblem_text_0.mp4 \
+  --output ~/WinVideos/antiparticles_voidstar_0/antiparticles_titlehook_reelcut.mp4 \
+  --title "VOIDSTAR" \
+  --secondary-text "SCROLL STOPPER" \
+  --duration 2.6 \
+  --fade-out-duration 0.8 \
+  --logo ~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png \
+  --logo-intensity 1.5
