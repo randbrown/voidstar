@@ -42,10 +42,12 @@ PIPELINE_MODE_DEFAULT="custom"
 RUN_60S_START=0
 RUN_90S_START=0
 RUN_180S_START=0
+RUN_360S_START=0
 RUN_600S_START=1
 RUN_60S_END=0
 RUN_90S_END=0
 RUN_180S_END=0
+RUN_360S_END=0
 RUN_600S_END=1
 RUN_FULL=0
 
@@ -106,10 +108,11 @@ PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=2
 ENABLE_TITLE_HOOK_STAGE=1
 USE_TITLE_HOOK_CACHE_DEFAULT=1
 TITLE_HOOK_DURATION_DEFAULT=4.0
+TITLE_HOOK_DURATION_600_DEFAULT=8.0
 TITLE_HOOK_FADE_OUT_DURATION_DEFAULT=1.3
-TITLE_HOOK_TITLE_DEFAULT='// @title antiparticles (hi60t)\n// @by voidstar'
+TITLE_HOOK_TITLE_DEFAULT='// antiparticles (hi60t)\n// voidstar'
 TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#livecoding\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding'
-TITLE_HOOK_LOGO_DEFAULT='~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png'
+TITLE_HOOK_LOGO_DEFAULT='~/code/voidstar/art/logos_alpha/voidstar_logo_0.png'
 TITLE_HOOK_LOGO_INTENSITY_DEFAULT=1.9
 TITLE_HOOK_LOGO_X_RATIO_DEFAULT=0.5
 TITLE_HOOK_LOGO_Y_RATIO_DEFAULT=0.24
@@ -117,7 +120,7 @@ TITLE_HOOK_LOGO_MOTION_TRACK_SCALE_DEFAULT=0.67
 TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS_DEFAULT=256
 TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS_DEFAULT=4
 TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE_DEFAULT=64
-TITLE_HOOK_LOGO_OPACITY_DEFAULT=0.9
+TITLE_HOOK_LOGO_OPACITY_DEFAULT=0.5
 TITLE_HOOK_BACKGROUND_DIM_DEFAULT=0.123
 TITLE_HOOK_TITLE_LAYER_DIM_DEFAULT=0.02
 TITLE_HOOK_SPARKS_DEFAULT=1
@@ -305,6 +308,25 @@ titlehook_cache_signature() {
     local logo_path="$2"
     local args_sig="$3"
     echo "titlehook|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${TITLE_HOOK_SCRIPT}|script_fp=$(file_fingerprint "$TITLE_HOOK_SCRIPT")|args=${args_sig}"
+}
+
+title_hook_duration_for_target_seconds() {
+    local target_seconds="$1"
+    awk -v d60="$TITLE_HOOK_DURATION" -v d600="$TITLE_HOOK_DURATION_600" -v t="$target_seconds" '
+        BEGIN {
+            if (t <= 60) {
+                printf "%.3f", d60
+                exit
+            }
+            if (t >= 600) {
+                printf "%.3f", d600
+                exit
+            }
+            w = (t - 60.0) / (600.0 - 60.0)
+            out = d60 + ((d600 - d60) * w)
+            printf "%.3f", out
+        }
+    '
 }
 
 rename_output() {
@@ -1084,7 +1106,63 @@ run_180s_start() {
 
     local final_target="$target"
     local title_hook_target="${target%.mp4}_titlehook.mp4"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "180s-start-title-hook" "hi180s")"
+    local hook_duration
+    hook_duration="$(title_hook_duration_for_target_seconds 180)"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "180s-start-title-hook" "hi180s" "$hook_duration")"
+
+    copy_to_gdrive_if_enabled "$final_target"
+}
+
+run_360s_start() {
+    echo "--- 360s highlight (START) ---"
+    local divvy_dst="$OUTDIR/${STEM}_highlights_360s_overlay.mp4"
+
+    run_divvy_uniform_highlights "$divvy_dst" 360 20 18 ""
+
+    local logo tag target
+    logo="$LOGO_180PLUS"
+    tag="$(basename "${logo%.*}")"
+    local source_for_effects="$divvy_dst"
+    local reels_dst="$OUTDIR/${STEM}_highlights_360s_overlay_reels.mp4"
+    source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "360s-start")"
+    local source_for_logo="$source_for_effects"
+    local glitch_dst="$OUTDIR/${STEM}_highlights_360s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "360s-start")"
+
+    target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_360s_overlay_logo.mp4" "$tag")"
+    local logo_stage="$target"
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        logo_stage="${target%.mp4}_pre_sparks.mp4"
+    fi
+    local dvdlogo_profile="cinema_local_track_v1_start083"
+    local dvdlogo_sig
+    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
+
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
+        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
+            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
+            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
+            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
+            --output "$logo_stage"
+            write_cache_signature "$logo_stage" "$dvdlogo_sig"
+    fi
+
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "360s-start-post-logo" >/dev/null
+    fi
+
+    local final_target="$target"
+    local title_hook_target="${target%.mp4}_titlehook.mp4"
+    local hook_duration
+    hook_duration="$(title_hook_duration_for_target_seconds 360)"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "360s-start-title-hook" "hi360s" "$hook_duration")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1136,7 +1214,9 @@ run_600s_start() {
 
     local final_target="$target"
     local title_hook_target="${target%.mp4}_titlehook.mp4"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "600s-start-title-hook" "hi600s" "8.0")"
+    local hook_duration
+    hook_duration="$(title_hook_duration_for_target_seconds 600)"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "600s-start-title-hook" "hi600s" "$hook_duration")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1185,7 +1265,9 @@ run_full() {
 
     local final_target="$target"
     local title_hook_target="${target%.mp4}_titlehook.mp4"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "full-title-hook" "full")"
+    local hook_duration
+    hook_duration="$(title_hook_duration_for_target_seconds "$INPUT_DURATION_SECONDS")"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "full-title-hook" "full" "$hook_duration")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1237,7 +1319,9 @@ run_60s_end() {
 
     local final_target="$target"
     local title_hook_target="${target%.mp4}_titlehook.mp4"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "60s-end-title-hook" "hi60t")"
+    local hook_duration
+    hook_duration="$(title_hook_duration_for_target_seconds 60)"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "60s-end-title-hook" "hi60t" "$hook_duration")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1289,7 +1373,9 @@ run_90s_end() {
 
     local final_target="$target"
     local title_hook_target="${target%.mp4}_titlehook.mp4"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "90s-end-title-hook" "hi90t")"
+    local hook_duration
+    hook_duration="$(title_hook_duration_for_target_seconds 90)"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "90s-end-title-hook" "hi90t" "$hook_duration")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1341,7 +1427,63 @@ run_180s_end() {
 
     local final_target="$target"
     local title_hook_target="${target%.mp4}_titlehook.mp4"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "180s-end-title-hook" "hi180t")"
+    local hook_duration
+    hook_duration="$(title_hook_duration_for_target_seconds 180)"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "180s-end-title-hook" "hi180t" "$hook_duration")"
+
+    copy_to_gdrive_if_enabled "$final_target"
+}
+
+run_360s_end() {
+    echo "--- 360s highlight (END) ---"
+    local divvy_dst="$OUTDIR/${STEM}_highlights_360t_overlay.mp4"
+
+    run_divvy_uniform_highlights "$divvy_dst" 360 20 18 "end"
+
+    local logo tag target
+    logo="$LOGO_180PLUS"
+    tag="$(basename "${logo%.*}")"
+    local source_for_effects="$divvy_dst"
+    local reels_dst="$OUTDIR/${STEM}_highlights_360t_overlay_reels.mp4"
+    source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "360s-end")"
+    local source_for_logo="$source_for_effects"
+    local glitch_dst="$OUTDIR/${STEM}_highlights_360t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
+    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "360s-end")"
+
+    target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_360t_overlay_logo.mp4" "$tag")"
+    local logo_stage="$target"
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        logo_stage="${target%.mp4}_pre_sparks.mp4"
+    fi
+    local dvdlogo_profile="cinema_local_track_v1_start077"
+    local dvdlogo_sig
+    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
+
+    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
+        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
+            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
+            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
+            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
+            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
+            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
+            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
+            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
+            --output "$logo_stage"
+            write_cache_signature "$logo_stage" "$dvdlogo_sig"
+    fi
+
+    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "360s-end-post-logo" >/dev/null
+    fi
+
+    local final_target="$target"
+    local title_hook_target="${target%.mp4}_titlehook.mp4"
+    local hook_duration
+    hook_duration="$(title_hook_duration_for_target_seconds 360)"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "360s-end-title-hook" "hi360t" "$hook_duration")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1393,7 +1535,9 @@ run_600s_end() {
 
     local final_target="$target"
     local title_hook_target="${target%.mp4}_titlehook.mp4"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "600s-end-title-hook" "hi600t" "8.0")"
+    local hook_duration
+    hook_duration="$(title_hook_duration_for_target_seconds 600)"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "600s-end-title-hook" "hi600t" "$hook_duration")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1426,6 +1570,7 @@ main() {
     PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES="$PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT"
     PARTICLE_SPARKS_FLOOD_VELOCITY_MULT="$PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT"
     TITLE_HOOK_DURATION="$TITLE_HOOK_DURATION_DEFAULT"
+    TITLE_HOOK_DURATION_600="$TITLE_HOOK_DURATION_600_DEFAULT"
     TITLE_HOOK_FADE_OUT_DURATION="$TITLE_HOOK_FADE_OUT_DURATION_DEFAULT"
     TITLE_HOOK_TITLE="$TITLE_HOOK_TITLE_DEFAULT"
     TITLE_HOOK_SECONDARY_TEXT="$TITLE_HOOK_SECONDARY_TEXT_DEFAULT"
@@ -1623,15 +1768,17 @@ main() {
         (( RUN_60S_START == 1 )) && TARGETS+=(run_60s_start)
         (( RUN_90S_START == 1 )) && TARGETS+=(run_90s_start)
         (( RUN_180S_START == 1 )) && TARGETS+=(run_180s_start)
+        (( RUN_360S_START == 1 )) && TARGETS+=(run_360s_start)
         (( RUN_600S_START == 1 )) && TARGETS+=(run_600s_start)
         (( RUN_60S_END == 1 )) && TARGETS+=(run_60s_end)
         (( RUN_90S_END == 1 )) && TARGETS+=(run_90s_end)
         (( RUN_180S_END == 1 )) && TARGETS+=(run_180s_end)
+        (( RUN_360S_END == 1 )) && TARGETS+=(run_360s_end)
         (( RUN_600S_END == 1 )) && TARGETS+=(run_600s_end)
         (( RUN_FULL == 1 )) && TARGETS+=(run_full)
         (( ${#TARGETS[@]} > 0 )) || die "PIPELINE_MODE=custom but no RUN_* targets enabled"
     else
-        TARGETS=(run_60s_start run_90s_start run_180s_start run_600s_start run_60s_end run_90s_end run_180s_end run_600s_end run_full)
+        TARGETS=(run_60s_start run_90s_start run_180s_start run_360s_start run_600s_start run_60s_end run_90s_end run_180s_end run_360s_end run_600s_end run_full)
     fi
 
     echo "Targets: ${TARGETS[*]}"
