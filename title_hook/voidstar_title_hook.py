@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -230,6 +231,46 @@ def overlay_rgba(frame: np.ndarray, rgba: np.ndarray, x: int, y: int, opacity: f
     a = (sub[:, :, 3].astype(np.float32) / 255.0) * float(opacity)
     out = roi.astype(np.float32) * (1.0 - a[:, :, None]) + rgb * a[:, :, None]
     frame[y0:y1, x0:x1] = np.clip(out, 0, 255).astype(np.uint8)
+
+
+def build_localized_dim_mask(
+    width: int,
+    height: int,
+    text_line_rects: list[tuple[int, int, int, int]],
+    logo_rect: tuple[int, int, int, int] | None,
+) -> np.ndarray:
+    mask = np.zeros((height, width), dtype=np.float32)
+
+    if text_line_rects:
+        pad_x = max(10, int(round(width * 0.012)))
+        pad_y = max(8, int(round(height * 0.010)))
+        for tx, ty, tw, th in text_line_rects:
+            if tw <= 0 or th <= 0:
+                continue
+            x0 = max(0, tx - pad_x)
+            y0 = max(0, ty - pad_y)
+            x1 = min(width, tx + tw + pad_x)
+            y1 = min(height, ty + th + pad_y)
+            cv2.rectangle(mask, (x0, y0), (x1, y1), 1.0, thickness=-1)
+
+    if logo_rect is not None:
+        lx, ly, lw, lh = logo_rect
+        if lw > 0 and lh > 0:
+            logo_pad_x = max(6, int(round(lw * 0.10)))
+            logo_pad_y = max(6, int(round(lh * 0.12)))
+            x0 = max(0, lx - logo_pad_x)
+            y0 = max(0, ly - logo_pad_y)
+            x1 = min(width, lx + lw + logo_pad_x)
+            y1 = min(height, ly + lh + logo_pad_y)
+            cv2.rectangle(mask, (x0, y0), (x1, y1), 1.0, thickness=-1)
+
+    if np.any(mask > 0.0):
+        blur_k = max(3, int(round(min(width, height) * 0.0035)))
+        if (blur_k % 2) == 0:
+            blur_k += 1
+        mask = cv2.GaussianBlur(mask, (blur_k, blur_k), 0)
+        mask = np.clip(mask * 1.22, 0.0, 1.0)
+    return np.clip(mask, 0.0, 1.0)
 
 
 def hue_to_bgr_tint(hue_deg: float) -> np.ndarray:
@@ -456,29 +497,37 @@ def build_title_layer(
     text_margin_ratio: float,
     title_max_height_ratio: float,
     secondary_max_height_ratio: float,
-) -> np.ndarray:
+    text_align: str,
+    title_jitter_audio_multiplier: float,
+    font_family: str,
+) -> tuple[np.ndarray, list[tuple[int, int, int, int]]]:
     layer = np.zeros((height, width, 3), dtype=np.uint8)
+    text_line_rects: list[tuple[int, int, int, int]] = []
 
     if base_alpha <= 0:
-        return layer
+        return layer, text_line_rects
 
     dim_level = float(np.clip(dim_strength, 0.0, 1.0)) * base_alpha
     dim = np.full_like(layer, int(255 * dim_level), dtype=np.uint8)
     layer = alpha_blend(layer, dim, np.full((height, width), 1.0, dtype=np.float32))
 
-    band_strength = 0.18 + 0.22 * min(1.8, audio_level)
-    for y in range(0, height, 4):
-        value = int(max(0, min(255, 15 + 55 * band_strength * (0.5 + 0.5 * math.sin((y + frame_idx * 2) * 0.045)))))
-        layer[y : y + 1, :, :] = np.maximum(layer[y : y + 1, :, :], value)
+    if dim_strength > 1e-6:
+        band_strength = 0.18 + 0.22 * min(1.8, audio_level)
+        for y in range(0, height, 4):
+            value = int(max(0, min(255, 15 + 55 * band_strength * (0.5 + 0.5 * math.sin((y + frame_idx * 2) * 0.045)))))
+            layer[y : y + 1, :, :] = np.maximum(layer[y : y + 1, :, :], value)
 
-    noise = rng.normal(0, 14 + 22 * min(2.0, audio_level), size=(height, width, 1)).astype(np.float32)
-    layer = np.clip(layer.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+        noise = rng.normal(0, 14 + 22 * min(2.0, audio_level), size=(height, width, 1)).astype(np.float32)
+        layer = np.clip(layer.astype(np.float32) + noise, 0, 255).astype(np.uint8)
 
-    title_font = cv2.FONT_HERSHEY_DUPLEX
-    subtitle_font = cv2.FONT_HERSHEY_SIMPLEX
+    if font_family == "monospace":
+        title_font = cv2.FONT_HERSHEY_PLAIN
+        subtitle_font = cv2.FONT_HERSHEY_PLAIN
+    else:
+        title_font = cv2.FONT_HERSHEY_DUPLEX
+        subtitle_font = cv2.FONT_HERSHEY_SIMPLEX
 
-    title_scale = max(1.2, min(4.4, width / 300.0))
-    secondary_scale = max(0.55, title_scale * 0.48)
+    title_scale = max(2.0, min(8.0, width / 165.0))
 
     def fit_text_block(
         lines: list[str],
@@ -527,28 +576,74 @@ def build_title_layer(
         max_width=max_text_w,
         max_height=title_max_h,
     )
+    secondary_start_scale = max(0.42, title_scale * 0.78)
     secondary_scale, secondary_th, secondary_line_step, secondary_sizes = fit_text_block(
         lines=secondary_lines,
         font=subtitle_font,
-        start_scale=secondary_scale,
+        start_scale=secondary_start_scale,
         min_scale=0.42,
         thickness_mul=1.8,
         line_spacing=1.18,
         max_width=max_text_w,
         max_height=secondary_max_h,
     )
+    if secondary_scale >= title_scale:
+        secondary_scale = max(0.42, title_scale * 0.96)
+        secondary_th = max(1, int(secondary_scale * 1.8))
+        secondary_sizes = [
+            cv2.getTextSize(line if line else " ", subtitle_font, secondary_scale, secondary_th)
+            for line in secondary_lines
+        ]
+        secondary_line_step = max(1, int(max(sz[1] + bl for sz, bl in secondary_sizes) * 1.18))
 
     title_block_h = max(1, (len(title_lines) - 1) * title_line_step + max(sz[1] for sz, _ in title_sizes))
     secondary_block_h = max(1, (len(secondary_lines) - 1) * secondary_line_step + max(sz[1] for sz, _ in secondary_sizes))
+    title_block_w = max(sz[0] for sz, _ in title_sizes)
+    secondary_block_w = max(sz[0] for sz, _ in secondary_sizes)
 
     title_center_y = int(height * 0.48)
     secondary_center_y = int(height * 0.63)
-    title_block_y0 = title_center_y - title_block_h // 2 + max(sz[1] for sz, _ in title_sizes)
-    secondary_block_y0 = secondary_center_y - secondary_block_h // 2 + max(sz[1] for sz, _ in secondary_sizes)
+    title_top = title_center_y - title_block_h // 2
+    secondary_top = secondary_center_y - secondary_block_h // 2
 
-    jitter = int(3 + 12 * min(2.0, audio_level))
+    top_margin = int(height * 0.05)
+    bottom_margin = int(height * 0.05)
+    min_gap = max(8, int(height * 0.02))
+
+    secondary_top = max(secondary_top, title_top + title_block_h + min_gap)
+
+    bottom_limit = height - bottom_margin
+    overflow = (secondary_top + secondary_block_h) - bottom_limit
+    if overflow > 0:
+        title_top -= overflow
+        secondary_top -= overflow
+
+    if title_top < top_margin:
+        shift = top_margin - title_top
+        title_top += shift
+        secondary_top += shift
+
+    secondary_top = max(secondary_top, title_top + title_block_h + min_gap)
+    secondary_top = min(secondary_top, max(top_margin, bottom_limit - secondary_block_h))
+
+    if secondary_top < title_top + title_block_h + min_gap:
+        need = (title_top + title_block_h + min_gap) - secondary_top
+        title_top = max(top_margin, title_top - need)
+        secondary_top = min(max(top_margin, title_top + title_block_h + min_gap), max(top_margin, bottom_limit - secondary_block_h))
+
+    title_block_y0 = title_top + max(sz[1] for sz, _ in title_sizes)
+    secondary_block_y0 = secondary_top + max(sz[1] for sz, _ in secondary_sizes)
+
+    jitter_multiplier = max(0.0, float(title_jitter_audio_multiplier))
+    jitter_audio = min(2.0, max(0.0, audio_level * jitter_multiplier))
+    jitter_base = 0 if jitter_multiplier <= 1e-6 else 3
+    jitter = int(jitter_base + 12 * jitter_audio)
     ox = int(rng.integers(-jitter, jitter + 1))
     oy = int(rng.integers(-jitter, jitter + 1))
+
+    align_mode = text_align if text_align in {"center", "left"} else "center"
+    shared_block_w = max(title_block_w, secondary_block_w)
+    shared_left = max(text_margin_px, min(width - text_margin_px - shared_block_w, cx - shared_block_w // 2))
 
     red = (40, 30, 245)
     cyan = (245, 245, 40)
@@ -557,17 +652,31 @@ def build_title_layer(
 
     for i, line in enumerate(title_lines):
         line_for_size = line if line else " "
-        line_size, _ = cv2.getTextSize(line_for_size, title_font, title_scale, title_th)
-        title_x = cx - line_size[0] // 2
+        line_size, line_baseline = cv2.getTextSize(line_for_size, title_font, title_scale, title_th)
+        if align_mode == "left":
+            title_x = int(shared_left)
+        else:
+            title_x = cx - line_size[0] // 2
         title_y = title_block_y0 + i * title_line_step
         cv2.putText(layer, line, (title_x - 3 + ox, title_y + oy), title_font, title_scale, cyan, title_th, cv2.LINE_AA)
         cv2.putText(layer, line, (title_x + 3 + ox, title_y - oy), title_font, title_scale, red, title_th, cv2.LINE_AA)
         cv2.putText(layer, line, (title_x + ox, title_y + oy), title_font, title_scale, white, title_th + 1, cv2.LINE_AA)
+        text_line_rects.append(
+            (
+                int(title_x + ox - 7),
+                int(title_y + oy - line_size[1] - 7),
+                int(line_size[0] + 14),
+                int(line_size[1] + line_baseline + 14),
+            )
+        )
 
     for i, line in enumerate(secondary_lines):
         line_for_size = line if line else " "
-        line_size, _ = cv2.getTextSize(line_for_size, subtitle_font, secondary_scale, secondary_th)
-        subtitle_x = cx - line_size[0] // 2
+        line_size, line_baseline = cv2.getTextSize(line_for_size, subtitle_font, secondary_scale, secondary_th)
+        if align_mode == "left":
+            subtitle_x = int(shared_left)
+        else:
+            subtitle_x = cx - line_size[0] // 2
         subtitle_y = secondary_block_y0 + i * secondary_line_step
         cv2.putText(
             layer,
@@ -589,6 +698,14 @@ def build_title_layer(
             secondary_th,
             cv2.LINE_AA,
         )
+        text_line_rects.append(
+            (
+                int(subtitle_x - 5),
+                int(subtitle_y - line_size[1] - 6),
+                int(line_size[0] + 10),
+                int(line_size[1] + line_baseline + 12),
+            )
+        )
 
     if (frame_idx % 5) == 0:
         gline_y = int(height * (0.35 + 0.3 * rng.random()))
@@ -597,7 +714,7 @@ def build_title_layer(
         band = layer[gline_y : min(height, gline_y + gline_h), :, :].copy()
         layer[gline_y : min(height, gline_y + gline_h), :, :] = np.roll(band, x_shift, axis=1)
 
-    return layer
+    return layer, text_line_rects
 
 
 def resize_logo_rgba(logo_rgba: np.ndarray, target_w: int) -> np.ndarray:
@@ -841,6 +958,9 @@ def main() -> None:
     parser.add_argument("--background-dim", type=float, default=0.2, help="Background dim amount [0..1], lower keeps more source visible")
     parser.add_argument("--title-layer-dim", type=float, default=0.1, help="Gray title-layer shade amount [0..1] behind glitch text")
     parser.add_argument("--text-margin-ratio", type=float, default=0.05, help="Horizontal text margins as frame-width ratio [0.02..0.25]")
+    parser.add_argument("--text-align", choices=["center", "left"], default="center", help="Text alignment mode for title and secondary blocks")
+    parser.add_argument("--font-family", choices=["classic", "monospace"], default="classic", help="Title text font family style")
+    parser.add_argument("--title-jitter-audio-multiplier", type=float, default=1.0, help="Multiplier for audio reactivity driving title text jitter")
     parser.add_argument("--title-max-height-ratio", type=float, default=0.66, help="Max title block height as frame-height ratio")
     parser.add_argument("--secondary-max-height-ratio", type=float, default=0.66, help="Max secondary block height as frame-height ratio")
     parser.add_argument("--duration", type=float, default=3.2, help="Hook duration in seconds for start and end windows")
@@ -960,10 +1080,14 @@ def main() -> None:
     print(f"[voidstar-title-hook] dur:    {duration:.2f}s  hook={args.duration:.2f}s fade={args.fade_out_duration:.2f}s")
     print(f"[voidstar-title-hook] encoder:{encoder} bitrate={bitrate if bitrate > 0 else 'auto-crf'}")
 
+    print("[voidstar-title-hook] phase: audio envelope extraction...")
+    audio_env_t0 = time.monotonic()
     audio_env = build_audio_envelope(input_path, fps=fps, target_frames=frame_count)
+    print(f"[voidstar-title-hook] phase: audio envelope ready in {time.monotonic() - audio_env_t0:.2f}s")
 
     enc_cmd = build_video_encoder_cmd(width, height, fps, encoder, bitrate, temp_video)
     ffmpeg_proc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)
+    print("[voidstar-title-hook] phase: frame processing + encode...")
 
     rng = np.random.default_rng(args.seed)
     track_prev_gray = None
@@ -995,6 +1119,9 @@ def main() -> None:
     background_dim = float(np.clip(args.background_dim, 0.0, 1.0))
     title_layer_dim = float(np.clip(args.title_layer_dim, 0.0, 1.0))
     text_margin_ratio = float(np.clip(args.text_margin_ratio, 0.02, 0.25))
+    text_align = args.text_align
+    font_family = args.font_family
+    title_jitter_audio_multiplier = max(0.0, float(args.title_jitter_audio_multiplier))
     title_max_height_ratio = float(np.clip(args.title_max_height_ratio, 0.08, 0.40))
     secondary_max_height_ratio = float(np.clip(args.secondary_max_height_ratio, 0.06, 0.45))
 
@@ -1004,6 +1131,8 @@ def main() -> None:
 
     try:
         idx = 0
+        progress_interval_frames = max(1, int(round(fps)))
+        encode_t0 = time.monotonic()
         while True:
             ok, frame = cap.read()
             if not ok:
@@ -1018,10 +1147,8 @@ def main() -> None:
 
             if hook_alpha > 0.0:
                 motion_boost = min(1.0, (0.4 + audio_level * 0.45) * hook_alpha)
-                dark = np.clip(frame.astype(np.float32) * (1.0 - 0.34 * background_dim * hook_alpha), 0, 255).astype(np.uint8)
-                frame = alpha_blend(frame, dark, np.full((height, width), background_dim * hook_alpha, dtype=np.float32))
 
-                title_layer = build_title_layer(
+                title_layer, text_line_rects = build_title_layer(
                     width=width,
                     height=height,
                     title=title_text,
@@ -1034,48 +1161,76 @@ def main() -> None:
                     text_margin_ratio=text_margin_ratio,
                     title_max_height_ratio=title_max_height_ratio,
                     secondary_max_height_ratio=secondary_max_height_ratio,
+                    text_align=text_align,
+                    title_jitter_audio_multiplier=title_jitter_audio_multiplier,
+                    font_family=font_family,
                 )
-                frame = alpha_blend(frame, title_layer, np.full((height, width), 0.68 * hook_alpha, dtype=np.float32))
 
+                logo_scaled = None
+                logo_x = 0
+                logo_y = 0
+                logo_w = 0
+                logo_h = 0
                 if logo_rgba is not None:
-                    pulse = 1.0 + (0.025 + 0.03 * args.logo_intensity) * min(2.0, audio_level)
-                    pulse += 0.012 * math.sin(idx * 0.23)
-                    logo_w = max(1, int(width * args.logo_width_ratio * pulse))
+                    logo_pulse = 1.0 + (0.025 + 0.03 * args.logo_intensity) * min(2.0, audio_level)
+                    logo_pulse += 0.012 * math.sin(idx * 0.23)
+                    logo_w = max(1, int(width * args.logo_width_ratio * logo_pulse))
                     logo_scaled = resize_logo_rgba(logo_rgba, logo_w)
+                    logo_h, logo_w = logo_scaled.shape[:2]
 
-                    lh, lw = logo_scaled.shape[:2]
                     cx_ratio = 0.5 if args.logo_x_ratio is None else clamp(float(args.logo_x_ratio), 0.0, 1.0)
                     cy_ratio = None if args.logo_y_ratio is None else clamp(float(args.logo_y_ratio), 0.0, 1.0)
-                    x = int(round((width * cx_ratio) - (lw * 0.5)))
+                    logo_x = int(round((width * cx_ratio) - (logo_w * 0.5)))
                     if cy_ratio is None:
-                        y = int(height * 0.50 - lh * 0.56)
+                        logo_y = int(height * 0.50 - logo_h * 0.56)
                     else:
-                        y = int(round((height * cy_ratio) - (lh * 0.5)))
+                        logo_y = int(round((height * cy_ratio) - (logo_h * 0.5)))
 
+                if background_dim > 1e-6:
+                    logo_rect = (logo_x, logo_y, logo_w, logo_h) if logo_scaled is not None else None
+                    local_dim_mask = build_localized_dim_mask(
+                        width=width,
+                        height=height,
+                        text_line_rects=text_line_rects,
+                        logo_rect=logo_rect,
+                    )
+                    dim_alpha = np.clip(local_dim_mask * (1.30 * background_dim * hook_alpha), 0.0, 1.0)
+                    if np.any(dim_alpha > 1e-6):
+                        black = np.zeros_like(frame, dtype=np.uint8)
+                        frame = alpha_blend(frame, black, dim_alpha)
+
+                title_alpha_map = np.full((height, width), 0.68 * hook_alpha, dtype=np.float32)
+                if title_layer_dim <= 1e-6:
+                    text_mask = cv2.cvtColor(title_layer, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+                    text_mask = np.clip(text_mask * 1.25, 0.0, 1.0)
+                    title_alpha_map *= text_mask
+                frame = alpha_blend(frame, title_layer, title_alpha_map)
+
+                if logo_scaled is not None:
                     glow = logo_scaled.copy()
                     glow[:, :, 0] = np.clip(glow[:, :, 0].astype(np.float32) * (1.05 + 0.35 * audio_level), 0, 255).astype(np.uint8)
                     glow[:, :, 1] = np.clip(glow[:, :, 1].astype(np.float32) * (1.08 + 0.45 * audio_level), 0, 255).astype(np.uint8)
                     glow[:, :, 2] = np.clip(glow[:, :, 2].astype(np.float32) * (1.08 + 0.52 * audio_level), 0, 255).astype(np.uint8)
-                    overlay_rgba(frame, glow, x, y, opacity=float(min(1.0, args.logo_opacity * hook_alpha * (0.70 + 0.45 * audio_level))))
+                    overlay_rgba(frame, glow, logo_x, logo_y, opacity=float(min(1.0, args.logo_opacity * hook_alpha * (0.70 + 0.45 * audio_level))))
 
                     ch_x = int(2 + 4 * min(2.0, audio_level) * args.logo_intensity)
                     if ch_x > 0:
                         shifted = np.roll(logo_scaled, ch_x, axis=1)
                         shifted[:, :, 1] = 0
                         shifted[:, :, 0] = 0
-                        overlay_rgba(frame, shifted, x - ch_x, y, opacity=float(0.22 * hook_alpha))
+                        overlay_rgba(frame, shifted, logo_x - ch_x, logo_y, opacity=float(0.22 * hook_alpha))
 
-                    overlay_rgba(frame, logo_scaled, x, y, opacity=float(args.logo_opacity * hook_alpha))
+                    overlay_rgba(frame, logo_scaled, logo_x, logo_y, opacity=float(args.logo_opacity * hook_alpha))
                     pulse = float(np.clip(audio_level, 0.0, 1.0))
                     track_prev_gray, track_points, point_track_layer = apply_dvd_local_point_track(
                         frame=frame,
                         point_track_layer=point_track_layer,
                         track_prev_gray=track_prev_gray,
                         track_points=track_points,
-                        logo_x=x,
-                        logo_y=y,
-                        logo_w=lw,
-                        logo_h=lh,
+                        logo_x=logo_x,
+                        logo_y=logo_y,
+                        logo_w=logo_w,
+                        logo_h=logo_h,
                         phase_idx=idx,
                         fps=fps,
                         pulse=pulse,
@@ -1132,13 +1287,33 @@ def main() -> None:
             ffmpeg_proc.stdin.write(frame.tobytes())
             idx += 1
 
+            if idx == 1 or idx % progress_interval_frames == 0 or idx >= frame_count:
+                elapsed = max(1e-6, time.monotonic() - encode_t0)
+                proc_fps = idx / elapsed
+                remain = max(0, frame_count - idx)
+                eta = remain / max(1e-6, proc_fps)
+                pct = (100.0 * idx / max(1, frame_count))
+                if hook_sparks_enabled:
+                    print(
+                        f"[voidstar-title-hook] frame={idx}/{frame_count} ({pct:.1f}%) fps={proc_fps:.2f} eta={eta:.1f}s sparks={len(hook_sparks)}",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[voidstar-title-hook] frame={idx}/{frame_count} ({pct:.1f}%) fps={proc_fps:.2f} eta={eta:.1f}s",
+                        flush=True,
+                    )
+
         if ffmpeg_proc.stdin is not None:
             ffmpeg_proc.stdin.close()
         rc = ffmpeg_proc.wait()
         if rc != 0:
             die("FFmpeg video encoding failed")
 
+        print("[voidstar-title-hook] phase: mux original audio...")
+        mux_t0 = time.monotonic()
         mux_original_audio(temp_video, input_path, output_path)
+        print(f"[voidstar-title-hook] phase: mux finished in {time.monotonic() - mux_t0:.2f}s")
         print(f"[voidstar-title-hook] done: {output_path}")
 
     finally:

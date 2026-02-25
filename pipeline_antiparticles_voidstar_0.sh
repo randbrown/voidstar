@@ -39,17 +39,17 @@ set -euo pipefail
 PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
-RUN_60S_START=0
-RUN_90S_START=0
-RUN_180S_START=0
-RUN_360S_START=0
+RUN_60S_START=1
+RUN_90S_START=1
+RUN_180S_START=1
+RUN_360S_START=1
 RUN_600S_START=1
-RUN_60S_END=0
-RUN_90S_END=0
-RUN_180S_END=0
-RUN_360S_END=0
+RUN_60S_END=1
+RUN_90S_END=1
+RUN_180S_END=1
+RUN_360S_END=1
 RUN_600S_END=1
-RUN_FULL=0
+RUN_FULL=1
 
 # Input/output defaults.
 INPUT_VIDEO_DEFAULT="~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0.mp4"
@@ -116,16 +116,18 @@ TITLE_HOOK_LOGO_DEFAULT='~/code/voidstar/art/logos_alpha/voidstar_logo_0.png'
 TITLE_HOOK_LOGO_INTENSITY_DEFAULT=1.9
 TITLE_HOOK_LOGO_X_RATIO_DEFAULT=0.5
 TITLE_HOOK_LOGO_Y_RATIO_DEFAULT=0.24
-TITLE_HOOK_LOGO_MOTION_TRACK_SCALE_DEFAULT=0.67
+TITLE_HOOK_LOGO_MOTION_TRACK_SCALE_DEFAULT=0.25
 TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS_DEFAULT=256
 TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS_DEFAULT=4
 TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE_DEFAULT=64
 TITLE_HOOK_LOGO_OPACITY_DEFAULT=0.5
-TITLE_HOOK_BACKGROUND_DIM_DEFAULT=0.123
-TITLE_HOOK_TITLE_LAYER_DIM_DEFAULT=0.02
+TITLE_HOOK_BACKGROUND_DIM_DEFAULT=0.0
+TITLE_HOOK_TITLE_LAYER_DIM_DEFAULT=0.0
+TITLE_HOOK_TEXT_ALIGN_DEFAULT="left"
+TITLE_HOOK_TITLE_JITTER_AUDIO_MULTIPLIER_DEFAULT=0.01
 TITLE_HOOK_SPARKS_DEFAULT=1
 TITLE_HOOK_SPARKS_RATE_DEFAULT=1
-TITLE_HOOK_SPARKS_MOTION_THRESHOLD_DEFAULT=0.02
+TITLE_HOOK_SPARKS_MOTION_THRESHOLD_DEFAULT=0.5
 TITLE_HOOK_SPARKS_OPACITY_DEFAULT=0.7
 
 # Optional parallelism and force rebuild.
@@ -136,11 +138,9 @@ FORCE_DEFAULT=0
 ENABLE_GDRIVE_COPY_DEFAULT=1
 GDRIVE_OUTDIR_DEFAULT="/mnt/g/My Drive/Music/voidstar/antiparticles"   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos
 
-# Logo assignment by target duration.
-LOGO_60_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_text_0.png"
-LOGO_90_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png"
-# LOGO_180PLUS_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_logo_0.png"
-LOGO_180PLUS_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png"
+# Logo assignment by target direction.
+LOGO_START_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png"
+LOGO_END_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_text_0.png"
 
 # Glitchfield preset examples (manual reference):
 # clean:
@@ -176,27 +176,37 @@ initialize_gdrive_mount_once() {
     [[ -n "${GDRIVE_OUTDIR:-}" ]] || die "ENABLE_GDRIVE_COPY is on but GDRIVE_OUTDIR is empty"
 
     local mnt=/mnt/g
-    echo "[gdrive] startup init: validating sudo credentials and ensuring mount"
-
-    if ! sudo -v; then
-        echo "[gdrive] warning: sudo authentication failed; disabling Google Drive copy"
-        ENABLE_GDRIVE_COPY=0
+    # Fast path: already mounted and readable; no sudo required.
+    if ensure_gdrive_mount >/dev/null 2>&1; then
+        echo "[gdrive] startup init: mount already ready (no sudo needed)"
+        GDRIVE_READY=1
         return 0
     fi
 
-    sudo mkdir -p "$mnt"
+    echo "[gdrive] startup init: mount not ready; attempting repair/mount"
 
-  # If it's mounted but stale/bad, lazy-unmount it
-  if mountpoint -q "$mnt"; then
-    if ! ls "$mnt" >/dev/null 2>&1; then
-      sudo umount -l "$mnt" || true
+    # Create mountpoint only if missing (may require sudo).
+    if [[ ! -d "$mnt" ]]; then
+        if ! sudo mkdir -p "$mnt"; then
+            echo "[gdrive] warning: could not create $mnt; disabling Google Drive copy"
+            ENABLE_GDRIVE_COPY=0
+            return 0
+        fi
     fi
-  fi
 
-  # Mount if not mounted
-  if ! mountpoint -q "$mnt"; then
-    sudo mount -t drvfs G: "$mnt"
-  fi
+    # If mounted but stale/bad, lazy-unmount it (requires sudo).
+    if mountpoint -q "$mnt" && ! ls "$mnt" >/dev/null 2>&1; then
+        sudo umount -l "$mnt" || true
+    fi
+
+    # Mount if not currently mounted.
+    if ! mountpoint -q "$mnt"; then
+        if ! sudo mount -t drvfs G: "$mnt"; then
+            echo "[gdrive] warning: mount command failed; disabling Google Drive copy"
+            ENABLE_GDRIVE_COPY=0
+            return 0
+        fi
+    fi
 
     ensure_gdrive_mount || {
         echo "[gdrive] warning: mount validation failed; disabling Google Drive copy"
@@ -415,6 +425,24 @@ find_void_logos_default() {
 with_logo_suffix() {
     local base_path="$1" tag="$2"
     if [[ -z "$tag" ]]; then echo "$base_path"; else echo "${base_path%.mp4}_logo-${tag}.mp4"; fi
+}
+
+canonical_target_output_path() {
+    local target_abbrev="$1"
+    echo "$OUTDIR/${STEM}_${target_abbrev}.mp4"
+}
+
+finalize_target_output_name() {
+    local produced_path="$1"
+    local target_abbrev="$2"
+    local canonical_path
+    canonical_path="$(canonical_target_output_path "$target_abbrev")"
+
+    if [[ "$produced_path" != "$canonical_path" ]]; then
+        rename_output "$produced_path" "$canonical_path" || die "Could not stage final output: $canonical_path"
+    fi
+
+    echo "$canonical_path"
 }
 
 compute_60_window() {
@@ -838,7 +866,7 @@ run_optional_title_hook_on_clip() {
     local args_sig
     local resolved_title
     resolved_title="${TITLE_HOOK_TITLE//hi60t/${title_token}}"
-    args_sig="duration=${hook_duration}|fade=${TITLE_HOOK_FADE_OUT_DURATION}|title=${resolved_title}|secondary=${TITLE_HOOK_SECONDARY_TEXT}|logo_intensity=${TITLE_HOOK_LOGO_INTENSITY}|logo_x=${TITLE_HOOK_LOGO_X_RATIO}|logo_y=${TITLE_HOOK_LOGO_Y_RATIO}|track_scale=${TITLE_HOOK_LOGO_MOTION_TRACK_SCALE}|track_radius=${TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS}|track_neighbors=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS}|track_min_distance=${TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE}|logo_opacity=${TITLE_HOOK_LOGO_OPACITY}|background_dim=${TITLE_HOOK_BACKGROUND_DIM}|title_layer_dim=${TITLE_HOOK_TITLE_LAYER_DIM}|sparks=${TITLE_HOOK_SPARKS}|sparks_rate=${TITLE_HOOK_SPARKS_RATE}|sparks_motion_threshold=${TITLE_HOOK_SPARKS_MOTION_THRESHOLD}|sparks_opacity=${TITLE_HOOK_SPARKS_OPACITY}|token=${title_token}"
+    args_sig="duration=${hook_duration}|fade=${TITLE_HOOK_FADE_OUT_DURATION}|title=${resolved_title}|secondary=${TITLE_HOOK_SECONDARY_TEXT}|logo_intensity=${TITLE_HOOK_LOGO_INTENSITY}|logo_x=${TITLE_HOOK_LOGO_X_RATIO}|logo_y=${TITLE_HOOK_LOGO_Y_RATIO}|track_scale=${TITLE_HOOK_LOGO_MOTION_TRACK_SCALE}|track_radius=${TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS}|track_neighbors=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS}|track_min_distance=${TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE}|logo_opacity=${TITLE_HOOK_LOGO_OPACITY}|background_dim=${TITLE_HOOK_BACKGROUND_DIM}|title_layer_dim=${TITLE_HOOK_TITLE_LAYER_DIM}|text_align=${TITLE_HOOK_TEXT_ALIGN}|title_jitter_audio_multiplier=${TITLE_HOOK_TITLE_JITTER_AUDIO_MULTIPLIER}|sparks=${TITLE_HOOK_SPARKS}|sparks_rate=${TITLE_HOOK_SPARKS_RATE}|sparks_motion_threshold=${TITLE_HOOK_SPARKS_MOTION_THRESHOLD}|sparks_opacity=${TITLE_HOOK_SPARKS_OPACITY}|token=${title_token}"
 
     local titlehook_sig
     titlehook_sig="$(titlehook_cache_signature "$input_clip" "$TITLE_HOOK_LOGO" "$args_sig")"
@@ -870,6 +898,8 @@ run_optional_title_hook_on_clip() {
         --logo-opacity "$TITLE_HOOK_LOGO_OPACITY" \
         --background-dim "$TITLE_HOOK_BACKGROUND_DIM" \
         --title-layer-dim "$TITLE_HOOK_TITLE_LAYER_DIM" \
+        --text-align "$TITLE_HOOK_TEXT_ALIGN" \
+        --title-jitter-audio-multiplier "$TITLE_HOOK_TITLE_JITTER_AUDIO_MULTIPLIER" \
         --title-hook-sparks-rate "$TITLE_HOOK_SPARKS_RATE" \
         --title-hook-sparks-motion-threshold "$TITLE_HOOK_SPARKS_MOTION_THRESHOLD" \
         --title-hook-sparks-opacity "$TITLE_HOOK_SPARKS_OPACITY" \
@@ -962,7 +992,7 @@ run_60s_start() {
     run_divvy_uniform_highlights "$divvy_dst" 60 10 6 ""
 
     local logo tag target
-    logo="$LOGO_60"
+    logo="$LOGO_START"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_60s_overlay_reels.mp4"
@@ -1003,6 +1033,7 @@ run_60s_start() {
     local final_target="$target"
     local title_hook_target="${target%.mp4}_titlehook.mp4"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "60s-start-title-hook" "hi60s")"
+    final_target="$(finalize_target_output_name "$final_target" "hi60s")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1014,7 +1045,7 @@ run_90s_start() {
     run_divvy_uniform_highlights "$divvy_dst" 90 10 90 ""
 
     local logo tag target
-    logo="$LOGO_90"
+    logo="$LOGO_START"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_90s_overlay_reels.mp4"
@@ -1055,6 +1086,7 @@ run_90s_start() {
     local final_target="$target"
     local title_hook_target="${target%.mp4}_titlehook.mp4"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "90s-start-title-hook" "hi90s")"
+    final_target="$(finalize_target_output_name "$final_target" "hi90s")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1066,7 +1098,7 @@ run_180s_start() {
     run_divvy_uniform_highlights "$divvy_dst" 180 20 9 ""
 
     local logo tag target
-    logo="$LOGO_180PLUS"
+    logo="$LOGO_START"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_180s_overlay_reels.mp4"
@@ -1109,6 +1141,7 @@ run_180s_start() {
     local hook_duration
     hook_duration="$(title_hook_duration_for_target_seconds 180)"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "180s-start-title-hook" "hi180s" "$hook_duration")"
+    final_target="$(finalize_target_output_name "$final_target" "hi180s")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1120,7 +1153,7 @@ run_360s_start() {
     run_divvy_uniform_highlights "$divvy_dst" 360 20 18 ""
 
     local logo tag target
-    logo="$LOGO_180PLUS"
+    logo="$LOGO_START"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_360s_overlay_reels.mp4"
@@ -1163,6 +1196,7 @@ run_360s_start() {
     local hook_duration
     hook_duration="$(title_hook_duration_for_target_seconds 360)"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "360s-start-title-hook" "hi360s" "$hook_duration")"
+    final_target="$(finalize_target_output_name "$final_target" "hi360s")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1174,7 +1208,7 @@ run_600s_start() {
     run_divvy_uniform_highlights "$divvy_dst" 600 20 30 ""
 
     local logo tag target
-    logo="$LOGO_180PLUS"
+    logo="$LOGO_START"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_600s_overlay_reels.mp4"
@@ -1217,6 +1251,7 @@ run_600s_start() {
     local hook_duration
     hook_duration="$(title_hook_duration_for_target_seconds 600)"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "600s-start-title-hook" "hi600s" "$hook_duration")"
+    final_target="$(finalize_target_output_name "$final_target" "hi600s")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1232,7 +1267,7 @@ run_full() {
     local source_for_logo="$source_for_effects"
 
     local logo tag target
-    logo="$LOGO_180PLUS"
+    logo="$LOGO_START"
     tag="$(basename "${logo%.*}")"
     target="$(with_logo_suffix "$OUTDIR/${STEM}_full_overlay_logo.mp4" "$tag")"
     local logo_stage="$target"
@@ -1268,6 +1303,7 @@ run_full() {
     local hook_duration
     hook_duration="$(title_hook_duration_for_target_seconds "$INPUT_DURATION_SECONDS")"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "full-title-hook" "full" "$hook_duration")"
+    final_target="$(finalize_target_output_name "$final_target" "full")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1279,7 +1315,7 @@ run_60s_end() {
     run_divvy_uniform_highlights "$divvy_dst" 60 10 6 "end"
 
     local logo tag target
-    logo="$LOGO_60"
+    logo="$LOGO_END"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_60t_overlay_reels.mp4"
@@ -1322,6 +1358,7 @@ run_60s_end() {
     local hook_duration
     hook_duration="$(title_hook_duration_for_target_seconds 60)"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "60s-end-title-hook" "hi60t" "$hook_duration")"
+    final_target="$(finalize_target_output_name "$final_target" "hi60t")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1333,7 +1370,7 @@ run_90s_end() {
     run_divvy_uniform_highlights "$divvy_dst" 90 10 9 "end"
 
     local logo tag target
-    logo="$LOGO_90"
+    logo="$LOGO_END"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_90t_overlay_reels.mp4"
@@ -1376,6 +1413,7 @@ run_90s_end() {
     local hook_duration
     hook_duration="$(title_hook_duration_for_target_seconds 90)"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "90s-end-title-hook" "hi90t" "$hook_duration")"
+    final_target="$(finalize_target_output_name "$final_target" "hi90t")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1387,7 +1425,7 @@ run_180s_end() {
     run_divvy_uniform_highlights "$divvy_dst" 180 20 9 "end"
 
     local logo tag target
-    logo="$LOGO_180PLUS"
+    logo="$LOGO_END"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_180t_overlay_reels.mp4"
@@ -1430,6 +1468,7 @@ run_180s_end() {
     local hook_duration
     hook_duration="$(title_hook_duration_for_target_seconds 180)"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "180s-end-title-hook" "hi180t" "$hook_duration")"
+    final_target="$(finalize_target_output_name "$final_target" "hi180t")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1441,7 +1480,7 @@ run_360s_end() {
     run_divvy_uniform_highlights "$divvy_dst" 360 20 18 "end"
 
     local logo tag target
-    logo="$LOGO_180PLUS"
+    logo="$LOGO_END"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_360t_overlay_reels.mp4"
@@ -1484,6 +1523,7 @@ run_360s_end() {
     local hook_duration
     hook_duration="$(title_hook_duration_for_target_seconds 360)"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "360s-end-title-hook" "hi360t" "$hook_duration")"
+    final_target="$(finalize_target_output_name "$final_target" "hi360t")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1495,7 +1535,7 @@ run_600s_end() {
     run_divvy_uniform_highlights "$divvy_dst" 600 20 30 "end"
 
     local logo tag target
-    logo="$LOGO_180PLUS"
+    logo="$LOGO_END"
     tag="$(basename "${logo%.*}")"
     local source_for_effects="$divvy_dst"
     local reels_dst="$OUTDIR/${STEM}_highlights_600t_overlay_reels.mp4"
@@ -1538,6 +1578,7 @@ run_600s_end() {
     local hook_duration
     hook_duration="$(title_hook_duration_for_target_seconds 600)"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "600s-end-title-hook" "hi600t" "$hook_duration")"
+    final_target="$(finalize_target_output_name "$final_target" "hi600t")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1546,9 +1587,8 @@ main() {
     FORCE="$FORCE_DEFAULT"
     INPUT_VIDEO=""; OUTDIR=""
     START_SECONDS="$START_SECONDS_DEFAULT"; YOUTUBE_FULL_SECONDS="$YOUTUBE_FULL_SECONDS_DEFAULT"; DETECT_AUDIO_START_END="$DETECT_AUDIO_START_END_DEFAULT"; CPS="$CPS_DEFAULT"; GLITCH_SECONDS="$GLITCH_SECONDS_DEFAULT"; LOOP_SEAM_SECONDS="$LOOP_SEAM_SECONDS_DEFAULT"
-    LOGO_60="$LOGO_60_DEFAULT"
-    LOGO_90="$LOGO_90_DEFAULT"
-    LOGO_180PLUS="$LOGO_180PLUS_DEFAULT"
+    LOGO_START="$LOGO_START_DEFAULT"
+    LOGO_END="$LOGO_END_DEFAULT"
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
     REELS_CACHE_MODE="$REELS_CACHE_MODE_DEFAULT"
     USE_PRE_REELS_GLITCHFIELD_CACHE="$USE_PRE_REELS_GLITCHFIELD_CACHE_DEFAULT"
@@ -1585,6 +1625,8 @@ main() {
     TITLE_HOOK_LOGO_OPACITY="$TITLE_HOOK_LOGO_OPACITY_DEFAULT"
     TITLE_HOOK_BACKGROUND_DIM="$TITLE_HOOK_BACKGROUND_DIM_DEFAULT"
     TITLE_HOOK_TITLE_LAYER_DIM="$TITLE_HOOK_TITLE_LAYER_DIM_DEFAULT"
+    TITLE_HOOK_TEXT_ALIGN="$TITLE_HOOK_TEXT_ALIGN_DEFAULT"
+    TITLE_HOOK_TITLE_JITTER_AUDIO_MULTIPLIER="$TITLE_HOOK_TITLE_JITTER_AUDIO_MULTIPLIER_DEFAULT"
     TITLE_HOOK_SPARKS="$TITLE_HOOK_SPARKS_DEFAULT"
     TITLE_HOOK_SPARKS_RATE="$TITLE_HOOK_SPARKS_RATE_DEFAULT"
     TITLE_HOOK_SPARKS_MOTION_THRESHOLD="$TITLE_HOOK_SPARKS_MOTION_THRESHOLD_DEFAULT"
@@ -1730,20 +1772,17 @@ main() {
         require_file "TITLE_HOOK_SCRIPT" "$TITLE_HOOK_SCRIPT"
     fi
 
-    LOGO_60="$(eval echo "$LOGO_60")"
-    LOGO_90="$(eval echo "$LOGO_90")"
-    LOGO_180PLUS="$(eval echo "$LOGO_180PLUS")"
+    LOGO_START="$(eval echo "$LOGO_START")"
+    LOGO_END="$(eval echo "$LOGO_END")"
     TITLE_HOOK_LOGO="$(eval echo "$TITLE_HOOK_LOGO")"
-    require_file "LOGO_60" "$LOGO_60"
-    require_file "LOGO_90" "$LOGO_90"
-    require_file "LOGO_180PLUS" "$LOGO_180PLUS"
+    require_file "LOGO_START" "$LOGO_START"
+    require_file "LOGO_END" "$LOGO_END"
     if [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]]; then
         require_file "TITLE_HOOK_LOGO" "$TITLE_HOOK_LOGO"
     fi
     echo "Using logo mapping:"
-    echo "  60s      -> $LOGO_60"
-    echo "  90s      -> $LOGO_90"
-    echo "  180s+    -> $LOGO_180PLUS"
+    echo "  *s/start -> $LOGO_START"
+    echo "  *t/end   -> $LOGO_END"
 
     BASE_REELS_OVERLAY="$OUTDIR/${STEM}_reels_base_overlay.mp4"
     REELS_INPUT_VIDEO="$INPUT_VIDEO"
