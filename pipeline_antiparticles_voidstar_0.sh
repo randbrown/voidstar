@@ -41,11 +41,11 @@ PIPELINE_MODE_DEFAULT="custom"
 # For custom mode, choose exactly which targets run.
 RUN_60S_START=1
 RUN_90S_START=1
-RUN_180S_START=0
+RUN_180S_START=1
 RUN_60S_END=1
 RUN_90S_END=1
 RUN_180S_END=1
-RUN_FULL=0
+RUN_FULL=1
 
 # Input/output defaults.
 INPUT_VIDEO_DEFAULT="~/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0.mp4"
@@ -58,8 +58,8 @@ DETECT_AUDIO_START_END_DEFAULT=0
 
 # Timing/style defaults.
 CPS_DEFAULT=0.5
-GLITCH_SECONDS_DEFAULT=0.5
-LOOP_SEAM_SECONDS_DEFAULT=".5"
+GLITCH_SECONDS_DEFAULT=2
+LOOP_SEAM_SECONDS_DEFAULT="2"
 
 # Reels overlay stage controls.
 ENABLE_REELS_OVERLAY_STEP=1      # set 0 to bypass reels overlay completely
@@ -98,7 +98,7 @@ PARTICLE_SPARKS_FLOOD_IN_OUT_DEFAULT=1
 PARTICLE_SPARKS_FLOOD_SECONDS_DEFAULT=2.0
 PARTICLE_SPARKS_FLOOD_SPAWN_MULT_DEFAULT=3.0
 PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT=128
-PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=1.35
+PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=2
 
 # Optional parallelism and force rebuild.
 JOBS_DEFAULT=1
@@ -126,7 +126,33 @@ die() { echo "Error: $*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 require_file() { local label="$1" path="$2"; [[ -f "$path" ]] || die "Missing $label file: $path"; }
 
+ensure_gdrive_mount() {
+  local mnt=/mnt/g
+  sudo mkdir -p "$mnt"
+
+  # If it's mounted but stale/bad, lazy-unmount it
+  if mountpoint -q "$mnt"; then
+    if ! ls "$mnt" >/dev/null 2>&1; then
+      sudo umount -l "$mnt" || true
+    fi
+  fi
+
+  # Mount if not mounted
+  if ! mountpoint -q "$mnt"; then
+    sudo mount -t drvfs G: "$mnt"
+  fi
+
+  # Final validation
+  ls "$mnt" >/dev/null 2>&1 || {
+    echo "[voidstar] ERROR: /mnt/g not accessible (Google Drive not mounted/ready)"
+    return 1
+  }
+}
+
 copy_to_gdrive_if_enabled() {
+
+    ensure_gdrive_mount || { echo "[gdrive] warning: could not ensure Google Drive mount; skipping copy"; return 0; }
+    
     local src="$1"
     [[ "${ENABLE_GDRIVE_COPY:-0}" -eq 1 ]] || return 0
     [[ -n "${GDRIVE_OUTDIR:-}" ]] || die "ENABLE_GDRIVE_COPY is on but GDRIVE_OUTDIR is empty"
