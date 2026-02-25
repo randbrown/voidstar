@@ -9,6 +9,7 @@ audio-reactive intensity, and mirrored end behavior for short-form vertical vide
 from __future__ import annotations
 
 import argparse
+import colorsys
 import json
 import math
 import os
@@ -17,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -82,6 +84,10 @@ def normalize_text_arg(text: str, newline_token: str) -> str:
 
 def clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
+
+
+def clamp01(value: float) -> float:
+    return float(max(0.0, min(1.0, value)))
 
 
 def choose_encoder(src_codec: str) -> str:
@@ -231,6 +237,210 @@ def hue_to_bgr_tint(hue_deg: float) -> np.ndarray:
     hsv = np.array([[[h, 220, 255]]], dtype=np.uint8)
     bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0].astype(np.float32)
     return np.clip(bgr / 255.0, 0.0, 1.0)
+
+
+def blend_bgr(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    w = clamp01(t)
+    return (
+        int(round((1.0 - w) * a[0] + w * b[0])),
+        int(round((1.0 - w) * a[1] + w * b[1])),
+        int(round((1.0 - w) * a[2] + w * b[2])),
+    )
+
+
+def audio_level_to_bgr(audio_level: float) -> tuple[int, int, int]:
+    level = clamp01(audio_level)
+    hue = (2.0 / 3.0) * (1.0 - level)
+    sat = 1.0
+    val = 1.0
+    r_f, g_f, b_f = colorsys.hsv_to_rgb(hue, sat, val)
+    return int(round(b_f * 255)), int(round(g_f * 255)), int(round(r_f * 255))
+
+
+@dataclass
+class HookSpark:
+    x: float
+    y: float
+    vx: float
+    vy: float
+    life: int
+    max_life: int
+    radius: int
+    color_bgr: tuple[int, int, int]
+    charge: float = 0.0
+
+
+def apply_hook_antiparticles(
+    frame: np.ndarray,
+    prev_gray: np.ndarray | None,
+    prev_points: np.ndarray,
+    sparks: list[HookSpark],
+    frame_idx: int,
+    audio_level: float,
+    rng: np.random.Generator,
+    max_points: int,
+    track_refresh: int,
+    motion_threshold: float,
+    spark_rate: float,
+    spark_life_frames: int,
+    spark_speed: float,
+    spark_jitter: float,
+    spark_size: float,
+    spark_opacity: float,
+) -> tuple[np.ndarray, np.ndarray, list[HookSpark], np.ndarray]:
+    frame_h, frame_w = frame.shape[:2]
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    movers: list[tuple[float, float, float]] = []
+
+    antiparticle_palette_bgr = [
+        (255, 255, 90),
+        (255, 120, 40),
+        (255, 90, 255),
+        (140, 255, 255),
+        (255, 70, 170),
+        (220, 130, 255),
+    ]
+
+    if prev_gray is not None and prev_points.size > 0:
+        p1, st, _ = cv2.calcOpticalFlowPyrLK(
+            prev_gray,
+            gray,
+            prev_points,
+            None,
+            winSize=(21, 21),
+            maxLevel=2,
+            criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03),
+        )
+        if p1 is not None and st is not None:
+            good_new = p1[st.reshape(-1) == 1].reshape(-1, 2)
+            good_old = prev_points[st.reshape(-1) == 1].reshape(-1, 2)
+            if good_new.size > 0 and good_old.size > 0:
+                motion = np.linalg.norm(good_new - good_old, axis=1)
+                for i, speed in enumerate(motion):
+                    if speed >= motion_threshold:
+                        x, y = good_new[i]
+                        if 0 <= x < frame_w and 0 <= y < frame_h:
+                            movers.append((float(x), float(y), float(speed)))
+                prev_points = good_new.reshape(-1, 1, 2).astype(np.float32)
+
+    need_reseed = (frame_idx % max(1, track_refresh) == 0) or (prev_points.shape[0] < max(12, max_points // 4))
+    if need_reseed:
+        pts = cv2.goodFeaturesToTrack(
+            gray,
+            maxCorners=max(16, max_points),
+            qualityLevel=0.01,
+            minDistance=6,
+            blockSize=7,
+        )
+        if pts is not None and pts.size > 0:
+            prev_points = pts.astype(np.float32)
+
+    reactive_mult = 1.0 + (0.8 * audio_level)
+    spawn_prob = clamp01(spark_rate * (0.35 + (0.65 * reactive_mult)))
+    spawn_prob = clamp01(spawn_prob * 1.25)
+
+    for x, y, speed in movers:
+        if float(rng.random()) > spawn_prob:
+            continue
+        n_spawn = 1
+        if audio_level > 0.8 and float(rng.random()) < 0.35:
+            n_spawn = 2
+        if float(rng.random()) < 0.45:
+            n_spawn += 1
+
+        for _ in range(n_spawn):
+            angle = float(rng.uniform(0.0, 2.0 * math.pi))
+            base_speed = spark_speed * (0.65 + 0.45 * min(3.0, speed / 4.0))
+            vel = base_speed * reactive_mult
+            vx = math.cos(angle) * vel + float(rng.uniform(-spark_jitter, spark_jitter))
+            vy = math.sin(angle) * vel + float(rng.uniform(-spark_jitter, spark_jitter))
+            life = max(2, int(round(spark_life_frames * (0.8 + 0.5 * audio_level))))
+            radius = max(1, int(round(spark_size * (0.8 + 0.6 * audio_level))))
+
+            speed_level = clamp01(speed / 6.0)
+            anti_energy = clamp01((0.72 * audio_level) + (0.28 * speed_level) + float(rng.uniform(-0.08, 0.08)))
+            palette_color = antiparticle_palette_bgr[int(rng.integers(0, len(antiparticle_palette_bgr)))]
+            audio_color = audio_level_to_bgr(anti_energy)
+            spark_color_bgr = blend_bgr(palette_color, audio_color, 0.58 + (0.30 * anti_energy))
+
+            charge = 1.0 if float(rng.random()) < 0.5 else -1.0
+            sparks.append(
+                HookSpark(
+                    x=x,
+                    y=y,
+                    vx=vx,
+                    vy=vy,
+                    life=life,
+                    max_life=life,
+                    radius=radius,
+                    color_bgr=spark_color_bgr,
+                    charge=charge,
+                )
+            )
+
+            if float(rng.random()) < 0.8:
+                anti_vx = -vx + float(rng.uniform(-0.45, 0.45))
+                anti_vy = -vy + float(rng.uniform(-0.45, 0.45))
+                anti_life = max(2, int(round(life * float(rng.uniform(0.85, 1.15)))))
+                anti_radius = max(1, int(round(radius * float(rng.uniform(0.85, 1.2)))))
+                complement_color = (
+                    max(0, min(255, 255 - spark_color_bgr[0] + int(rng.integers(-25, 26)))),
+                    max(0, min(255, 255 - spark_color_bgr[1] + int(rng.integers(-25, 26)))),
+                    max(0, min(255, 255 - spark_color_bgr[2] + int(rng.integers(-25, 26)))),
+                )
+                anti_audio_color = audio_level_to_bgr(clamp01(audio_level + float(rng.uniform(0.05, 0.2))))
+                anti_color = blend_bgr(complement_color, anti_audio_color, 0.42 + (0.30 * clamp01(audio_level)))
+                sparks.append(
+                    HookSpark(
+                        x=x + float(rng.uniform(-1.5, 1.5)),
+                        y=y + float(rng.uniform(-1.5, 1.5)),
+                        vx=anti_vx,
+                        vy=anti_vy,
+                        life=anti_life,
+                        max_life=anti_life,
+                        radius=anti_radius,
+                        color_bgr=anti_color,
+                        charge=-charge,
+                    )
+                )
+
+    overlay = np.zeros_like(frame, dtype=np.uint8)
+    alive: list[HookSpark] = []
+
+    for sp in sparks:
+        cx = frame_w * 0.5
+        cy = frame_h * 0.5
+        dx = sp.x - cx
+        dy = sp.y - cy
+        dist = math.sqrt(dx * dx + dy * dy)
+        if dist > 1e-6:
+            swirl = 0.15 * sp.charge / max(28.0, dist)
+            sp.vx += -dy * swirl
+            sp.vy += dx * swirl
+
+        sp.x += sp.vx
+        sp.y += sp.vy
+        sp.vx *= 0.972
+        sp.vy *= 0.972
+        sp.life -= 1
+
+        if sp.life <= 0:
+            continue
+        if sp.x < -8 or sp.x >= frame_w + 8 or sp.y < -8 or sp.y >= frame_h + 8:
+            continue
+
+        life_ratio = sp.life / max(1, sp.max_life)
+        radius = max(1, int(round(sp.radius * (0.65 + 0.7 * life_ratio))))
+        cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, sp.color_bgr, -1, cv2.LINE_AA)
+        if radius >= 2 and life_ratio > 0.35:
+            cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), 1, (255, 255, 255), -1, cv2.LINE_AA)
+        alive.append(sp)
+
+    alpha = clamp01(spark_opacity * (0.55 + 0.75 * min(1.2, audio_level)))
+    if alpha > 0:
+        frame = cv2.addWeighted(frame, 1.0, overlay, alpha, 0.0)
+
+    return gray, prev_points, alive, frame
 
 
 def build_title_layer(
@@ -628,11 +838,11 @@ def main() -> None:
     parser.add_argument("--title", default="VOIDSTAR", help="Primary title text")
     parser.add_argument("--secondary-text", default="AUDIO • MOTION • GLITCH", help="Secondary title text")
     parser.add_argument("--newline-token", default="|", help="Token interpreted as newline in title fields (also supports literal \\n)")
-    parser.add_argument("--background-dim", type=float, default=0.52, help="Background dim amount [0..1], lower keeps more source visible")
-    parser.add_argument("--title-layer-dim", type=float, default=0.50, help="Gray title-layer shade amount [0..1] behind glitch text")
-    parser.add_argument("--text-margin-ratio", type=float, default=0.08, help="Horizontal text margins as frame-width ratio [0.02..0.25]")
-    parser.add_argument("--title-max-height-ratio", type=float, default=0.22, help="Max title block height as frame-height ratio")
-    parser.add_argument("--secondary-max-height-ratio", type=float, default=0.24, help="Max secondary block height as frame-height ratio")
+    parser.add_argument("--background-dim", type=float, default=0.2, help="Background dim amount [0..1], lower keeps more source visible")
+    parser.add_argument("--title-layer-dim", type=float, default=0.1, help="Gray title-layer shade amount [0..1] behind glitch text")
+    parser.add_argument("--text-margin-ratio", type=float, default=0.05, help="Horizontal text margins as frame-width ratio [0.02..0.25]")
+    parser.add_argument("--title-max-height-ratio", type=float, default=0.66, help="Max title block height as frame-height ratio")
+    parser.add_argument("--secondary-max-height-ratio", type=float, default=0.66, help="Max secondary block height as frame-height ratio")
     parser.add_argument("--duration", type=float, default=3.2, help="Hook duration in seconds for start and end windows")
     parser.add_argument("--fade-out-duration", type=float, default=1.0, help="Fade-out at start and mirrored fade-in at end")
     parser.add_argument("--logo", default="", help="Optional logo file with alpha channel")
@@ -653,6 +863,16 @@ def main() -> None:
     parser.add_argument("--logo-motion-track-link-opacity", type=float, default=1.0, help="Multiplier for connection intensity [0..2]")
     parser.add_argument("--logo-motion-track-opacity", type=float, default=0.72, help="Overlay opacity for local point-track effect [0..1]")
     parser.add_argument("--logo-motion-track-decay", type=float, default=0.90, help="Trail decay for local point-track layer [0..0.999]")
+    parser.add_argument("--title-hook-sparks", action="store_true", help="Enable antiparticles sparks only during title-hook windows")
+    parser.add_argument("--title-hook-sparks-max-points", type=int, default=128, help="Max tracked points for hook sparks")
+    parser.add_argument("--title-hook-sparks-track-refresh", type=int, default=5, help="Frames between hook-sparks feature reseeding")
+    parser.add_argument("--title-hook-sparks-motion-threshold", type=float, default=0.25, help="Min motion to emit hook sparks")
+    parser.add_argument("--title-hook-sparks-rate", type=float, default=0.25, help="Hook spark spawn rate per moving point")
+    parser.add_argument("--title-hook-sparks-life-frames", type=int, default=30, help="Hook spark lifetime in frames")
+    parser.add_argument("--title-hook-sparks-speed", type=float, default=0.25, help="Hook spark speed in px/frame")
+    parser.add_argument("--title-hook-sparks-jitter", type=float, default=1.1, help="Hook spark velocity jitter")
+    parser.add_argument("--title-hook-sparks-size", type=float, default=2.2, help="Hook spark radius base")
+    parser.add_argument("--title-hook-sparks-opacity", type=float, default=0.50, help="Hook sparks overlay opacity [0..1]")
     parser.add_argument("--seed", type=int, default=1337, help="Random seed")
 
     args = parser.parse_args()
@@ -762,11 +982,25 @@ def main() -> None:
     motion_track_link_opacity = float(np.clip(args.logo_motion_track_link_opacity, 0.0, 2.0))
     motion_track_opacity = float(np.clip(args.logo_motion_track_opacity, 0.0, 1.0))
     motion_track_decay = float(np.clip(args.logo_motion_track_decay, 0.0, 0.999))
+    hook_sparks_enabled = bool(args.title_hook_sparks)
+    hook_sparks_max_points = max(16, int(args.title_hook_sparks_max_points))
+    hook_sparks_track_refresh = max(1, int(args.title_hook_sparks_track_refresh))
+    hook_sparks_motion_threshold = float(np.clip(args.title_hook_sparks_motion_threshold, 0.0, 20.0))
+    hook_sparks_rate = float(np.clip(args.title_hook_sparks_rate, 0.0, 1.0))
+    hook_sparks_life_frames = max(2, int(args.title_hook_sparks_life_frames))
+    hook_sparks_speed = float(np.clip(args.title_hook_sparks_speed, 0.01, 40.0))
+    hook_sparks_jitter = float(np.clip(args.title_hook_sparks_jitter, 0.0, 8.0))
+    hook_sparks_size = float(np.clip(args.title_hook_sparks_size, 0.5, 20.0))
+    hook_sparks_opacity = float(np.clip(args.title_hook_sparks_opacity, 0.0, 1.0))
     background_dim = float(np.clip(args.background_dim, 0.0, 1.0))
     title_layer_dim = float(np.clip(args.title_layer_dim, 0.0, 1.0))
     text_margin_ratio = float(np.clip(args.text_margin_ratio, 0.02, 0.25))
     title_max_height_ratio = float(np.clip(args.title_max_height_ratio, 0.08, 0.40))
     secondary_max_height_ratio = float(np.clip(args.secondary_max_height_ratio, 0.06, 0.45))
+
+    hook_sparks_prev_gray = None
+    hook_sparks_prev_points = np.empty((0, 1, 2), dtype=np.float32)
+    hook_sparks: list[HookSpark] = []
 
     try:
         idx = 0
@@ -865,10 +1099,33 @@ def main() -> None:
                     shift = int((rng.random() - 0.5) * width * (0.03 + 0.06 * motion_boost))
                     chunk = frame[gy : min(height, gy + gh), :, :].copy()
                     frame[gy : min(height, gy + gh), :, :] = np.roll(chunk, shift, axis=1)
+
+                if hook_sparks_enabled:
+                    hook_sparks_prev_gray, hook_sparks_prev_points, hook_sparks, frame = apply_hook_antiparticles(
+                        frame=frame,
+                        prev_gray=hook_sparks_prev_gray,
+                        prev_points=hook_sparks_prev_points,
+                        sparks=hook_sparks,
+                        frame_idx=idx,
+                        audio_level=audio_level,
+                        rng=rng,
+                        max_points=hook_sparks_max_points,
+                        track_refresh=hook_sparks_track_refresh,
+                        motion_threshold=hook_sparks_motion_threshold,
+                        spark_rate=hook_sparks_rate,
+                        spark_life_frames=hook_sparks_life_frames,
+                        spark_speed=hook_sparks_speed,
+                        spark_jitter=hook_sparks_jitter,
+                        spark_size=hook_sparks_size,
+                        spark_opacity=hook_sparks_opacity,
+                    )
             else:
                 track_prev_gray = None
                 track_points = np.empty((0, 1, 2), dtype=np.float32)
                 point_track_layer[:, :, :] = 0.0
+                hook_sparks_prev_gray = None
+                hook_sparks_prev_points = np.empty((0, 1, 2), dtype=np.float32)
+                hook_sparks = []
 
             if ffmpeg_proc.stdin is None:
                 die("Encoder pipe closed unexpectedly")

@@ -100,6 +100,29 @@ PARTICLE_SPARKS_FLOOD_SPAWN_MULT_DEFAULT=3.0
 PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT=128
 PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=2
 
+# Optional title hook stage (runs last, after logo/particle stages).
+ENABLE_TITLE_HOOK_STAGE=1
+USE_TITLE_HOOK_CACHE_DEFAULT=1
+TITLE_HOOK_DURATION_DEFAULT=4.0
+TITLE_HOOK_FADE_OUT_DURATION_DEFAULT=1.3
+TITLE_HOOK_TITLE_DEFAULT='// @title antiparticles (hi60t)\n// @by voidstar'
+TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#livecoding\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding'
+TITLE_HOOK_LOGO_DEFAULT='~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png'
+TITLE_HOOK_LOGO_INTENSITY_DEFAULT=1.9
+TITLE_HOOK_LOGO_X_RATIO_DEFAULT=0.5
+TITLE_HOOK_LOGO_Y_RATIO_DEFAULT=0.24
+TITLE_HOOK_LOGO_MOTION_TRACK_SCALE_DEFAULT=0.67
+TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS_DEFAULT=256
+TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS_DEFAULT=4
+TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE_DEFAULT=64
+TITLE_HOOK_LOGO_OPACITY_DEFAULT=0.9
+TITLE_HOOK_BACKGROUND_DIM_DEFAULT=0.123
+TITLE_HOOK_TITLE_LAYER_DIM_DEFAULT=0.02
+TITLE_HOOK_SPARKS_DEFAULT=1
+TITLE_HOOK_SPARKS_RATE_DEFAULT=1
+TITLE_HOOK_SPARKS_MOTION_THRESHOLD_DEFAULT=0.02
+TITLE_HOOK_SPARKS_OPACITY_DEFAULT=0.7
+
 # Optional parallelism and force rebuild.
 JOBS_DEFAULT=1
 FORCE_DEFAULT=0
@@ -273,6 +296,13 @@ dvdlogo_cache_signature() {
     local source_clip="$2"
     local logo_path="$3"
     echo "dvdlogo|profile=${profile}|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${DVDLOGO}|script_fp=$(file_fingerprint "$DVDLOGO")"
+}
+
+titlehook_cache_signature() {
+    local source_clip="$1"
+    local logo_path="$2"
+    local args_sig="$3"
+    echo "titlehook|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${TITLE_HOOK_SCRIPT}|script_fp=$(file_fingerprint "$TITLE_HOOK_SCRIPT")|args=${args_sig}"
 }
 
 rename_output() {
@@ -763,6 +793,71 @@ run_optional_particle_sparks_on_clip() {
     echo "$target"
 }
 
+run_optional_title_hook_on_clip() {
+    local input_clip="$1"
+    local target="$2"
+    local stage_label="${3:-clip}"
+    local title_token="${4:-hi60t}"
+
+    [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]] || { echo "$input_clip"; return 0; }
+
+    echo "--- Optional title hook stage on ${stage_label} ---" >&2
+    require_file "TITLE_HOOK_SCRIPT" "$TITLE_HOOK_SCRIPT"
+    require_file "TITLE_HOOK_LOGO" "$TITLE_HOOK_LOGO"
+
+    local sparks_flag=""
+    if [[ "$TITLE_HOOK_SPARKS" -eq 1 ]]; then
+        sparks_flag="--title-hook-sparks"
+    fi
+
+    local args_sig
+    local resolved_title
+    resolved_title="${TITLE_HOOK_TITLE//hi60t/${title_token}}"
+    args_sig="duration=${TITLE_HOOK_DURATION}|fade=${TITLE_HOOK_FADE_OUT_DURATION}|title=${resolved_title}|secondary=${TITLE_HOOK_SECONDARY_TEXT}|logo_intensity=${TITLE_HOOK_LOGO_INTENSITY}|logo_x=${TITLE_HOOK_LOGO_X_RATIO}|logo_y=${TITLE_HOOK_LOGO_Y_RATIO}|track_scale=${TITLE_HOOK_LOGO_MOTION_TRACK_SCALE}|track_radius=${TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS}|track_neighbors=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS}|track_min_distance=${TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE}|logo_opacity=${TITLE_HOOK_LOGO_OPACITY}|background_dim=${TITLE_HOOK_BACKGROUND_DIM}|title_layer_dim=${TITLE_HOOK_TITLE_LAYER_DIM}|sparks=${TITLE_HOOK_SPARKS}|sparks_rate=${TITLE_HOOK_SPARKS_RATE}|sparks_motion_threshold=${TITLE_HOOK_SPARKS_MOTION_THRESHOLD}|sparks_opacity=${TITLE_HOOK_SPARKS_OPACITY}|token=${title_token}"
+
+    local titlehook_sig
+    titlehook_sig="$(titlehook_cache_signature "$input_clip" "$TITLE_HOOK_LOGO" "$args_sig")"
+
+    if [[ "$USE_TITLE_HOOK_CACHE" -eq 1 ]]; then
+        should_rebuild "$target" --dep "$input_clip" --dep "$TITLE_HOOK_SCRIPT" --dep "$TITLE_HOOK_LOGO" --sig "$titlehook_sig" || {
+            echo "[title-hook] using cached: $target" >&2
+            echo "$target"
+            return 0
+        }
+    else
+        echo "[title-hook] cache disabled: rebuilding stage clip" >&2
+    fi
+
+    python3 "$TITLE_HOOK_SCRIPT" "$input_clip" \
+        --output "$target" \
+        --title "$resolved_title" \
+        --secondary-text "$TITLE_HOOK_SECONDARY_TEXT" \
+        --duration "$TITLE_HOOK_DURATION" \
+        --fade-out-duration "$TITLE_HOOK_FADE_OUT_DURATION" \
+        --logo "$TITLE_HOOK_LOGO" \
+        --logo-intensity "$TITLE_HOOK_LOGO_INTENSITY" \
+        --logo-x-ratio "$TITLE_HOOK_LOGO_X_RATIO" \
+        --logo-y-ratio "$TITLE_HOOK_LOGO_Y_RATIO" \
+        --logo-motion-track-scale "$TITLE_HOOK_LOGO_MOTION_TRACK_SCALE" \
+        --logo-motion-track-radius "$TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS" \
+        --logo-motion-track-link-neighbors "$TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS" \
+        --logo-motion-track-min-distance "$TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE" \
+        --logo-opacity "$TITLE_HOOK_LOGO_OPACITY" \
+        --background-dim "$TITLE_HOOK_BACKGROUND_DIM" \
+        --title-layer-dim "$TITLE_HOOK_TITLE_LAYER_DIM" \
+        --title-hook-sparks-rate "$TITLE_HOOK_SPARKS_RATE" \
+        --title-hook-sparks-motion-threshold "$TITLE_HOOK_SPARKS_MOTION_THRESHOLD" \
+        --title-hook-sparks-opacity "$TITLE_HOOK_SPARKS_OPACITY" \
+        ${sparks_flag} \
+        1>&2
+
+    [[ -f "$target" ]] || die "Title hook stage did not produce output: $target"
+
+    write_cache_signature "$target" "$titlehook_sig"
+    echo "[title-hook] staged clip: $target" >&2
+    echo "$target"
+}
+
 run_divvy_uniform_highlights() {
     local output_path="$1"
     local target_seconds="$2"
@@ -880,7 +975,11 @@ run_60s_start() {
         run_optional_particle_sparks_on_clip "$logo_stage" "$target" "60s-start-post-logo" >/dev/null
     fi
 
-    copy_to_gdrive_if_enabled "$target"
+    local final_target="$target"
+    local title_hook_target="${target%.mp4}_titlehook.mp4"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "60s-start-title-hook" "hi60s")"
+
+    copy_to_gdrive_if_enabled "$final_target"
 }
 
 run_90s_start() {
@@ -928,7 +1027,11 @@ run_90s_start() {
         run_optional_particle_sparks_on_clip "$logo_stage" "$target" "90s-start-post-logo" >/dev/null
     fi
 
-    copy_to_gdrive_if_enabled "$target"
+    local final_target="$target"
+    local title_hook_target="${target%.mp4}_titlehook.mp4"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "90s-start-title-hook" "hi90s")"
+
+    copy_to_gdrive_if_enabled "$final_target"
 }
 
 run_180s_start() {
@@ -976,7 +1079,11 @@ run_180s_start() {
         run_optional_particle_sparks_on_clip "$logo_stage" "$target" "180s-start-post-logo" >/dev/null
     fi
 
-    copy_to_gdrive_if_enabled "$target"
+    local final_target="$target"
+    local title_hook_target="${target%.mp4}_titlehook.mp4"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "180s-start-title-hook" "hi180s")"
+
+    copy_to_gdrive_if_enabled "$final_target"
 }
 
 run_full() {
@@ -1021,7 +1128,11 @@ run_full() {
         run_optional_particle_sparks_on_clip "$logo_stage" "$target" "full-post-logo" >/dev/null
     fi
 
-    copy_to_gdrive_if_enabled "$target"
+    local final_target="$target"
+    local title_hook_target="${target%.mp4}_titlehook.mp4"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "full-title-hook" "full")"
+
+    copy_to_gdrive_if_enabled "$final_target"
 }
 
 run_60s_end() {
@@ -1069,7 +1180,11 @@ run_60s_end() {
         run_optional_particle_sparks_on_clip "$logo_stage" "$target" "60s-end-post-logo" >/dev/null
     fi
 
-    copy_to_gdrive_if_enabled "$target"
+    local final_target="$target"
+    local title_hook_target="${target%.mp4}_titlehook.mp4"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "60s-end-title-hook" "hi60t")"
+
+    copy_to_gdrive_if_enabled "$final_target"
 }
 
 run_90s_end() {
@@ -1117,7 +1232,11 @@ run_90s_end() {
         run_optional_particle_sparks_on_clip "$logo_stage" "$target" "90s-end-post-logo" >/dev/null
     fi
 
-    copy_to_gdrive_if_enabled "$target"
+    local final_target="$target"
+    local title_hook_target="${target%.mp4}_titlehook.mp4"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "90s-end-title-hook" "hi90t")"
+
+    copy_to_gdrive_if_enabled "$final_target"
 }
 
 run_180s_end() {
@@ -1165,7 +1284,11 @@ run_180s_end() {
         run_optional_particle_sparks_on_clip "$logo_stage" "$target" "180s-end-post-logo" >/dev/null
     fi
 
-    copy_to_gdrive_if_enabled "$target"
+    local final_target="$target"
+    local title_hook_target="${target%.mp4}_titlehook.mp4"
+    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "180s-end-title-hook" "hi180t")"
+
+    copy_to_gdrive_if_enabled "$final_target"
 }
 
 main() {
@@ -1180,6 +1303,7 @@ main() {
     USE_PRE_REELS_GLITCHFIELD_CACHE="$USE_PRE_REELS_GLITCHFIELD_CACHE_DEFAULT"
     USE_GLITCHFIELD_CACHE="$USE_GLITCHFIELD_CACHE_DEFAULT"
     USE_PARTICLE_SPARKS_CACHE="$USE_PARTICLE_SPARKS_CACHE_DEFAULT"
+    USE_TITLE_HOOK_CACHE="$USE_TITLE_HOOK_CACHE_DEFAULT"
     PARTICLE_SPARKS_MAX_POINTS="$PARTICLE_SPARKS_MAX_POINTS_DEFAULT"
     PARTICLE_SPARKS_MOTION_THRESHOLD="$PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT"
     PARTICLE_SPARKS_RATE="$PARTICLE_SPARKS_RATE_DEFAULT"
@@ -1194,6 +1318,25 @@ main() {
     PARTICLE_SPARKS_FLOOD_SPAWN_MULT="$PARTICLE_SPARKS_FLOOD_SPAWN_MULT_DEFAULT"
     PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES="$PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT"
     PARTICLE_SPARKS_FLOOD_VELOCITY_MULT="$PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT"
+    TITLE_HOOK_DURATION="$TITLE_HOOK_DURATION_DEFAULT"
+    TITLE_HOOK_FADE_OUT_DURATION="$TITLE_HOOK_FADE_OUT_DURATION_DEFAULT"
+    TITLE_HOOK_TITLE="$TITLE_HOOK_TITLE_DEFAULT"
+    TITLE_HOOK_SECONDARY_TEXT="$TITLE_HOOK_SECONDARY_TEXT_DEFAULT"
+    TITLE_HOOK_LOGO="$TITLE_HOOK_LOGO_DEFAULT"
+    TITLE_HOOK_LOGO_INTENSITY="$TITLE_HOOK_LOGO_INTENSITY_DEFAULT"
+    TITLE_HOOK_LOGO_X_RATIO="$TITLE_HOOK_LOGO_X_RATIO_DEFAULT"
+    TITLE_HOOK_LOGO_Y_RATIO="$TITLE_HOOK_LOGO_Y_RATIO_DEFAULT"
+    TITLE_HOOK_LOGO_MOTION_TRACK_SCALE="$TITLE_HOOK_LOGO_MOTION_TRACK_SCALE_DEFAULT"
+    TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS="$TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS_DEFAULT"
+    TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS="$TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS_DEFAULT"
+    TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE="$TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE_DEFAULT"
+    TITLE_HOOK_LOGO_OPACITY="$TITLE_HOOK_LOGO_OPACITY_DEFAULT"
+    TITLE_HOOK_BACKGROUND_DIM="$TITLE_HOOK_BACKGROUND_DIM_DEFAULT"
+    TITLE_HOOK_TITLE_LAYER_DIM="$TITLE_HOOK_TITLE_LAYER_DIM_DEFAULT"
+    TITLE_HOOK_SPARKS="$TITLE_HOOK_SPARKS_DEFAULT"
+    TITLE_HOOK_SPARKS_RATE="$TITLE_HOOK_SPARKS_RATE_DEFAULT"
+    TITLE_HOOK_SPARKS_MOTION_THRESHOLD="$TITLE_HOOK_SPARKS_MOTION_THRESHOLD_DEFAULT"
+    TITLE_HOOK_SPARKS_OPACITY="$TITLE_HOOK_SPARKS_OPACITY_DEFAULT"
     JOBS="$JOBS_DEFAULT"
     PIPELINE_MODE="$PIPELINE_MODE_DEFAULT"
     ENABLE_GDRIVE_COPY="$ENABLE_GDRIVE_COPY_DEFAULT"
@@ -1222,6 +1365,9 @@ main() {
             --use-particle-sparks) ENABLE_PARTICLE_SPARKS_STAGE=1; shift ;;
             --skip-particle-sparks) ENABLE_PARTICLE_SPARKS_STAGE=0; shift ;;
             --no-particle-sparks-cache) USE_PARTICLE_SPARKS_CACHE=0; shift ;;
+            --use-title-hook) ENABLE_TITLE_HOOK_STAGE=1; shift ;;
+            --skip-title-hook) ENABLE_TITLE_HOOK_STAGE=0; shift ;;
+            --no-title-hook-cache) USE_TITLE_HOOK_CACHE=0; shift ;;
             --particle-sparks-max-points) PARTICLE_SPARKS_MAX_POINTS="$2"; shift 2 ;;
             --particle-sparks-motion-threshold) PARTICLE_SPARKS_MOTION_THRESHOLD="$2"; shift 2 ;;
             --particle-sparks-rate) PARTICLE_SPARKS_RATE="$2"; shift 2 ;;
@@ -1305,7 +1451,7 @@ main() {
     echo "Out:   $OUTDIR"
     echo "Dur:   ${INPUT_DURATION_SECONDS}s"
     echo "Args:  start=${start_dbg}s full=${full_dbg}s detect_audio=${detect_dbg} cps=${CPS} glitch=${GLITCH_SECONDS}s loop_seam=${LOOP_SEAM_SECONDS}s"
-    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} jobs=${JOBS}"
+    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} title_hook=${ENABLE_TITLE_HOOK_STAGE} title_hook_cache=${USE_TITLE_HOOK_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} jobs=${JOBS}"
     echo "Sync:  gdrive_copy=${ENABLE_GDRIVE_COPY} gdrive_outdir=${GDRIVE_OUTDIR:-unset}"
 
     PROJECT_ROOT="/home/$USER/code/voidstar"
@@ -1320,6 +1466,7 @@ main() {
     DIVVY=$(find_script "divvy.py")
     REELS_OVERLAY=$(find_script "reels_cv_overlay.py")
     DVDLOGO=$(find_script "voidstar_dvd_logo.py")
+    TITLE_HOOK_SCRIPT=$(find_script "voidstar_title_hook.py")
     GLITCHFIELD=$(find_script "glitchfield.py")
     PARTICLE_SPARKS=$(find_script "voidstar_particle_sparks.py")
     require_file "DIVVY" "$DIVVY"
@@ -1327,13 +1474,20 @@ main() {
     require_file "DVDLOGO" "$DVDLOGO"
     require_file "GLITCHFIELD" "$GLITCHFIELD"
     require_file "PARTICLE_SPARKS" "$PARTICLE_SPARKS"
+    if [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]]; then
+        require_file "TITLE_HOOK_SCRIPT" "$TITLE_HOOK_SCRIPT"
+    fi
 
     LOGO_60="$(eval echo "$LOGO_60")"
     LOGO_90="$(eval echo "$LOGO_90")"
     LOGO_180PLUS="$(eval echo "$LOGO_180PLUS")"
+    TITLE_HOOK_LOGO="$(eval echo "$TITLE_HOOK_LOGO")"
     require_file "LOGO_60" "$LOGO_60"
     require_file "LOGO_90" "$LOGO_90"
     require_file "LOGO_180PLUS" "$LOGO_180PLUS"
+    if [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]]; then
+        require_file "TITLE_HOOK_LOGO" "$TITLE_HOOK_LOGO"
+    fi
     echo "Using logo mapping:"
     echo "  60s      -> $LOGO_60"
     echo "  90s      -> $LOGO_90"
