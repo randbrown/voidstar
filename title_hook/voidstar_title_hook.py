@@ -997,6 +997,7 @@ def main() -> None:
     parser.add_argument("--logo-opacity", type=float, default=0.82, help="Base logo opacity")
     parser.add_argument("--logo-alpha-threshold", type=float, default=0.18, help="Alpha cutoff [0..1] for logo content bounds (higher trims faint edges)")
     parser.add_argument("--logo-intensity", type=float, default=1.35, help="Logo effect intensity")
+    parser.add_argument("--logo-idle-wiggle", type=float, default=0.012, help="Constant non-audio logo pulse amount (set 0 to disable)")
     parser.add_argument("--logo-motion-track-scale", type=float, default=2.0, help="Scale factor for local motion-track bbox around logo")
     parser.add_argument("--logo-motion-track-pad-px", type=float, default=0.0, help="Signed pixel padding for local motion-track bbox")
     parser.add_argument("--logo-motion-track-max-points", type=int, default=90, help="Max number of tracked feature points")
@@ -1201,7 +1202,7 @@ def main() -> None:
                 logo_dim_rect = None
                 if logo_rgba is not None:
                     logo_pulse = 1.0 + (0.025 + 0.03 * args.logo_intensity) * min(2.0, audio_level)
-                    logo_pulse += 0.012 * math.sin(idx * 0.23)
+                    logo_pulse += float(args.logo_idle_wiggle) * math.sin(idx * 0.23)
                     logo_w = max(1, int(width * args.logo_width_ratio * logo_pulse))
                     logo_scaled = resize_logo_rgba(logo_rgba, logo_w)
                     logo_h, logo_w = logo_scaled.shape[:2]

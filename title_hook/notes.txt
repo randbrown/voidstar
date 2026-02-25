@@ -15,11 +15,11 @@ python3 ~/code/voidstar/title_hook/voidstar_title_hook.py \
   --logo ~/code/voidstar/art/logos_alpha/voidstar_logo_0.png \
   --logo-alpha-threshold 0.99 \
   --logo-intensity 1.9 \
-  --logo-x-ratio 0.5 --logo-y-ratio 0.24 \
+  --logo-x-ratio 0.5 --logo-y-ratio 0.21 \
   --logo-motion-track-scale .67 --logo-motion-track-radius 512 --logo-motion-track-link-neighbors 4 \
   --logo-motion-track-min-distance 64 --logo-motion-track-pad-px 128 \
   --logo-opacity .7 --logo-motion-track-link-opacity .7 --logo-motion-track-refresh 3 \
-  --logo-motion-track-decay .5 \
+  --logo-motion-track-decay .5 --logo-idle-wiggle .003 \
   --title-jitter-audio-multiplier 0.000001 \
   --background-dim .33 \
   --title-layer-dim .0 \
