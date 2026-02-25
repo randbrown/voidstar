@@ -126,9 +126,37 @@ die() { echo "Error: $*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 require_file() { local label="$1" path="$2"; [[ -f "$path" ]] || die "Missing $label file: $path"; }
 
+GDRIVE_READY=0
+
 ensure_gdrive_mount() {
   local mnt=/mnt/g
-  sudo mkdir -p "$mnt"
+
+    # Validation only (no sudo): startup init handles privileged mount work.
+    if ! mountpoint -q "$mnt"; then
+        echo "[voidstar] ERROR: /mnt/g is not mounted"
+        return 1
+    fi
+
+    ls "$mnt" >/dev/null 2>&1 || {
+        echo "[voidstar] ERROR: /mnt/g not accessible (Google Drive not mounted/ready)"
+        return 1
+    }
+}
+
+initialize_gdrive_mount_once() {
+    [[ "${ENABLE_GDRIVE_COPY:-0}" -eq 1 ]] || return 0
+    [[ -n "${GDRIVE_OUTDIR:-}" ]] || die "ENABLE_GDRIVE_COPY is on but GDRIVE_OUTDIR is empty"
+
+    local mnt=/mnt/g
+    echo "[gdrive] startup init: validating sudo credentials and ensuring mount"
+
+    if ! sudo -v; then
+        echo "[gdrive] warning: sudo authentication failed; disabling Google Drive copy"
+        ENABLE_GDRIVE_COPY=0
+        return 0
+    fi
+
+    sudo mkdir -p "$mnt"
 
   # If it's mounted but stale/bad, lazy-unmount it
   if mountpoint -q "$mnt"; then
@@ -142,20 +170,21 @@ ensure_gdrive_mount() {
     sudo mount -t drvfs G: "$mnt"
   fi
 
-  # Final validation
-  ls "$mnt" >/dev/null 2>&1 || {
-    echo "[voidstar] ERROR: /mnt/g not accessible (Google Drive not mounted/ready)"
-    return 1
-  }
+    ensure_gdrive_mount || {
+        echo "[gdrive] warning: mount validation failed; disabling Google Drive copy"
+        ENABLE_GDRIVE_COPY=0
+        return 0
+    }
+
+    GDRIVE_READY=1
 }
 
 copy_to_gdrive_if_enabled() {
 
-    ensure_gdrive_mount || { echo "[gdrive] warning: could not ensure Google Drive mount; skipping copy"; return 0; }
-    
     local src="$1"
     [[ "${ENABLE_GDRIVE_COPY:-0}" -eq 1 ]] || return 0
     [[ -n "${GDRIVE_OUTDIR:-}" ]] || die "ENABLE_GDRIVE_COPY is on but GDRIVE_OUTDIR is empty"
+        [[ "${GDRIVE_READY:-0}" -eq 1 ]] || { echo "[gdrive] warning: Google Drive init not ready; skipping copy"; return 0; }
     [[ -f "$src" ]] || { echo "[gdrive] warning: source file not found: $src"; return 0; }
 
     mkdir -p "$GDRIVE_OUTDIR"
@@ -1243,6 +1272,8 @@ main() {
     if [[ "$ENABLE_GDRIVE_COPY" -eq 1 && -n "${GDRIVE_OUTDIR:-}" ]]; then
         GDRIVE_OUTDIR=$(eval echo "$GDRIVE_OUTDIR")
     fi
+
+    initialize_gdrive_mount_once
 
     case "$REELS_CACHE_MODE" in
         base|per-target) ;;
