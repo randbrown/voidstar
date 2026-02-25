@@ -233,6 +233,31 @@ def overlay_rgba(frame: np.ndarray, rgba: np.ndarray, x: int, y: int, opacity: f
     frame[y0:y1, x0:x1] = np.clip(out, 0, 255).astype(np.uint8)
 
 
+def alpha_content_bbox(alpha: np.ndarray, threshold: float) -> tuple[int, int, int, int]:
+    if alpha.size == 0:
+        return 0, 0, 1, 1
+    m = alpha > threshold
+    if not np.any(m):
+        h, w = alpha.shape[:2]
+        return 0, 0, max(1, w), max(1, h)
+    ys, xs = np.where(m)
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
+def logo_content_rect_in_frame(
+    logo_rgba: np.ndarray,
+    logo_x: int,
+    logo_y: int,
+    alpha_threshold: float = 0.18,
+) -> tuple[int, int, int, int]:
+    if logo_rgba.ndim != 3 or logo_rgba.shape[2] < 4:
+        h, w = logo_rgba.shape[:2]
+        return logo_x, logo_y, w, h
+    alpha = logo_rgba[:, :, 3].astype(np.float32) / 255.0
+    ax0, ay0, ax1, ay1 = alpha_content_bbox(alpha, float(np.clip(alpha_threshold, 0.0, 1.0)))
+    return logo_x + ax0, logo_y + ay0, max(1, ax1 - ax0), max(1, ay1 - ay0)
+
+
 def build_localized_dim_mask(
     width: int,
     height: int,
@@ -970,6 +995,7 @@ def main() -> None:
     parser.add_argument("--logo-x-ratio", type=float, default=None, help="Logo center X position [0..1] (default keeps current center behavior)")
     parser.add_argument("--logo-y-ratio", type=float, default=None, help="Logo center Y position [0..1] (default keeps current title-hook placement)")
     parser.add_argument("--logo-opacity", type=float, default=0.82, help="Base logo opacity")
+    parser.add_argument("--logo-alpha-threshold", type=float, default=0.18, help="Alpha cutoff [0..1] for logo content bounds (higher trims faint edges)")
     parser.add_argument("--logo-intensity", type=float, default=1.35, help="Logo effect intensity")
     parser.add_argument("--logo-motion-track-scale", type=float, default=2.0, help="Scale factor for local motion-track bbox around logo")
     parser.add_argument("--logo-motion-track-pad-px", type=float, default=0.0, help="Signed pixel padding for local motion-track bbox")
@@ -1124,6 +1150,7 @@ def main() -> None:
     title_jitter_audio_multiplier = max(0.0, float(args.title_jitter_audio_multiplier))
     title_max_height_ratio = float(np.clip(args.title_max_height_ratio, 0.08, 0.40))
     secondary_max_height_ratio = float(np.clip(args.secondary_max_height_ratio, 0.06, 0.45))
+    logo_alpha_threshold = float(np.clip(args.logo_alpha_threshold, 0.0, 1.0))
 
     hook_sparks_prev_gray = None
     hook_sparks_prev_points = np.empty((0, 1, 2), dtype=np.float32)
@@ -1171,6 +1198,7 @@ def main() -> None:
                 logo_y = 0
                 logo_w = 0
                 logo_h = 0
+                logo_dim_rect = None
                 if logo_rgba is not None:
                     logo_pulse = 1.0 + (0.025 + 0.03 * args.logo_intensity) * min(2.0, audio_level)
                     logo_pulse += 0.012 * math.sin(idx * 0.23)
@@ -1185,14 +1213,19 @@ def main() -> None:
                         logo_y = int(height * 0.50 - logo_h * 0.56)
                     else:
                         logo_y = int(round((height * cy_ratio) - (logo_h * 0.5)))
+                    logo_dim_rect = logo_content_rect_in_frame(
+                        logo_scaled,
+                        logo_x,
+                        logo_y,
+                        alpha_threshold=logo_alpha_threshold,
+                    )
 
                 if background_dim > 1e-6:
-                    logo_rect = (logo_x, logo_y, logo_w, logo_h) if logo_scaled is not None else None
                     local_dim_mask = build_localized_dim_mask(
                         width=width,
                         height=height,
                         text_line_rects=text_line_rects,
-                        logo_rect=logo_rect,
+                        logo_rect=logo_dim_rect,
                     )
                     dim_alpha = np.clip(local_dim_mask * (1.30 * background_dim * hook_alpha), 0.0, 1.0)
                     if np.any(dim_alpha > 1e-6):

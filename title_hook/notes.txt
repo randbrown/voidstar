@@ -13,20 +13,21 @@ python3 ~/code/voidstar/title_hook/voidstar_title_hook.py \
   --duration 4.0 \
   --fade-out-duration 1.3 \
   --logo ~/code/voidstar/art/logos_alpha/voidstar_logo_0.png \
+  --logo-alpha-threshold 0.99 \
   --logo-intensity 1.9 \
   --logo-x-ratio 0.5 --logo-y-ratio 0.24 \
   --logo-motion-track-scale .67 --logo-motion-track-radius 512 --logo-motion-track-link-neighbors 4 \
-  --logo-motion-track-min-distance 128 \
-  --logo-opacity .7 \
-  --title-jitter-audio-multiplier 0.00001 \
-  --background-dim .5 \
+  --logo-motion-track-min-distance 64 --logo-motion-track-pad-px 128 \
+  --logo-opacity .7 --logo-motion-track-link-opacity .7 --logo-motion-track-refresh 3 \
+  --logo-motion-track-decay .5 \
+  --title-jitter-audio-multiplier 0.000001 \
+  --background-dim .33 \
   --title-layer-dim .0 \
   --title-hook-sparks \
   --title-hook-sparks-rate 1 \
   --title-hook-sparks-motion-threshold 0.5 \
   --title-hook-sparks-opacity 0.7 \
-  --text-align left \
-  #--font-family monospace \
+  --text-align left 
 
 
 
