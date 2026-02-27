@@ -1,0 +1,8 @@
+
+
+
+
+Detect + auto-build IG hook: 
+python3 divvy.py groove ~/WinVideos/abstract_forms_voidstar_0/abstract_forms_voidstar_0_reels_base_overlay.mp4 \
+--bpm 30 --invoke-video-hook --video-hook-mode overwrite --video-hook-transition pixelize
+

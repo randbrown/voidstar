@@ -4,6 +4,14 @@
 abstract_forms_voidstar_0_90s_test
 
 
+
+Detect + auto-build IG hook: 
+python3 divvy.py groove ~/WinVideos/abstract_forms_voidstar_0/abstract_forms_voidstar_0_h180t_test.mp4 \
+--bpm 30 --invoke-video-hook --video-hook-mode overwrite --hook-seconds 5 --top-k 5 \
+--video-hook-transition pixelize
+
+
+
 Video hook examples:
 
 Output behavior:

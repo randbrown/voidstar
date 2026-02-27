@@ -1,3 +1,31 @@
+
+motion mesh:
+python voidstar_motion_mesh.py ~/WinVideos/abstract_forms_voidstar_0/abstract_forms_voidstar_0.mp4 \
+--start 600 --duration 20 --fps 30 --trail true --trail-alpha 0.92 --glow 7 \
+--motion-thresh 1 --min-distance 64
+
+
+
+------------------------
+particles
+
+
+
+-- abstract forms:
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/abstract_forms_voidstar_0/abstract_forms_voidstar_0.mp4 \
+--video-encoder auto --max-points 128  \
+--spark-life-frames 15 --spark-speed 0.15 --spark-opacity 0.5 \
+--audio-reactive true --audio-reactive-gain 1 --audio-reactive-smooth 0.85 \
+--color-mode abstract-forms --spark-rate 0.15 --spark-size 64.0  --motion-threshold 0.7 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 3.0 --flood-extra-sources 128 --flood-velocity-mult 1.0 \
+--log-interval 1.0 --start 600 --duration 30 
+
+
+
+-- antiparticles
+
 cd /home/brown/code/voidstar && \
 conda run -n mp311 python motion/voidstar_particle_sparks.py \
 /home/brown/WinVideos/antiparticles_voidstar_0/antiparticles_voidstar_0.mp4 \

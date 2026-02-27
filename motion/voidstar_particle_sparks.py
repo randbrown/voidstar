@@ -215,6 +215,68 @@ class Spark:
     radius: int
     color_bgr: Tuple[int, int, int]
     charge: float = 0.0
+    shape_kind: str = "dot"
+    angle: float = 0.0
+    ang_vel: float = 0.0
+    sides: int = 4
+    stroke: int = 1
+
+
+def draw_abstract_form(
+    canvas: np.ndarray,
+    x: float,
+    y: float,
+    radius: int,
+    color_bgr: Tuple[int, int, int],
+    shape_kind: str,
+    angle: float,
+    sides: int,
+    stroke: int,
+) -> None:
+    cx = int(round(x))
+    cy = int(round(y))
+    r = max(1, int(radius))
+    thick = max(1, int(stroke))
+
+    if shape_kind == "ring":
+        cv2.circle(canvas, (cx, cy), r, color_bgr, thick, cv2.LINE_AA)
+        if r >= 4:
+            cv2.circle(canvas, (cx, cy), max(1, r // 2), color_bgr, 1, cv2.LINE_AA)
+        return
+
+    if shape_kind == "diamond":
+        pts = np.array(
+            [
+                [cx, cy - r],
+                [cx + r, cy],
+                [cx, cy + r],
+                [cx - r, cy],
+            ],
+            dtype=np.int32,
+        )
+        cv2.polylines(canvas, [pts], True, color_bgr, thick, cv2.LINE_AA)
+        return
+
+    n = max(3, int(sides))
+    pts_list: list[list[int]] = []
+    for i in range(n):
+        t = angle + ((2.0 * math.pi * i) / n)
+        px = int(round(cx + (math.cos(t) * r)))
+        py = int(round(cy + (math.sin(t) * r)))
+        pts_list.append([px, py])
+    pts = np.array(pts_list, dtype=np.int32)
+    cv2.polylines(canvas, [pts], True, color_bgr, thick, cv2.LINE_AA)
+
+    if r >= 6 and n >= 4:
+        inner_scale = 0.55
+        inner_list: list[list[int]] = []
+        for i in range(n):
+            t = -angle + ((2.0 * math.pi * i) / n)
+            px = int(round(cx + (math.cos(t) * (r * inner_scale))))
+            py = int(round(cy + (math.sin(t) * (r * inner_scale))))
+            inner_list.append([px, py])
+        inner = np.array(inner_list, dtype=np.int32)
+        cv2.polylines(canvas, [inner], True, color_bgr, 1, cv2.LINE_AA)
 
 
 def main() -> None:
@@ -250,7 +312,7 @@ def main() -> None:
     ap.add_argument("--audio-reactive-gain", type=float, default=1.35, help="Audio intensity gain")
     ap.add_argument("--audio-reactive-smooth", type=float, default=0.70, help="Audio envelope smoothing")
 
-    ap.add_argument("--color-mode", default="white", help="white|rgb|random|audio-intensity|antiparticles")
+    ap.add_argument("--color-mode", default="white", help="white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes")
     ap.add_argument("--color-rgb", default="255,255,255", help="Spark color as R,G,B (used when --color-mode rgb)")
     ap.add_argument("--log-interval", type=float, default=1.0, help="Progress print interval")
 
@@ -291,9 +353,11 @@ def main() -> None:
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     encoder = pick_video_encoder(args.video_encoder)
-    color_mode = str(args.color_mode).strip().lower()
-    if color_mode not in {"white", "rgb", "random", "audio-intensity", "antiparticles"}:
-        raise ValueError("--color-mode must be white|rgb|random|audio-intensity|antiparticles")
+    color_mode = str(args.color_mode).strip().lower().replace("_", "-")
+    if color_mode == "abstract-shapes":
+        color_mode = "abstract-forms"
+    if color_mode not in {"white", "rgb", "random", "audio-intensity", "antiparticles", "abstract-forms"}:
+        raise ValueError("--color-mode must be white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes")
 
     rgb_color = parse_rgb(args.color_rgb)
     white_bgr = (255, 255, 255)
@@ -314,6 +378,15 @@ def main() -> None:
         (140, 255, 255),
         (255, 70, 170),
         (220, 130, 255),
+    ]
+    abstract_palette_bgr = [
+        (255, 230, 120),
+        (255, 170, 95),
+        (240, 120, 255),
+        (140, 255, 230),
+        (120, 190, 255),
+        (255, 120, 190),
+        (220, 255, 140),
     ]
 
     log(f"input={input_path}")
@@ -443,6 +516,8 @@ def main() -> None:
             spawn_prob = clamp01(spawn_prob * (1.0 + (flood_spawn_mult - 1.0) * flood_strength))
         if color_mode == "antiparticles":
             spawn_prob = clamp01(spawn_prob * 1.25)
+        elif color_mode == "abstract-forms":
+            spawn_prob = clamp01(spawn_prob * 0.95)
 
         if flood_strength > 0.0 and flood_extra_sources > 0:
             extra_count = int(round(flood_extra_sources * flood_strength))
@@ -464,6 +539,8 @@ def main() -> None:
                 n_spawn = 2
             if color_mode == "antiparticles" and random.random() < 0.45:
                 n_spawn += 1
+            elif color_mode == "abstract-forms" and audio_level > 0.65 and random.random() < 0.40:
+                n_spawn += 1
             for _ in range(n_spawn):
                 angle = random.uniform(0.0, 2.0 * math.pi)
                 base_speed = float(args.spark_speed) * (0.65 + 0.45 * min(3.0, speed / 4.0))
@@ -483,6 +560,12 @@ def main() -> None:
                 elif color_mode == "audio-intensity":
                     spark_audio_level = clamp01(audio_level + random.uniform(-0.12, 0.12))
                     spark_color_bgr = audio_level_to_bgr(spark_audio_level)
+                elif color_mode == "abstract-forms":
+                    speed_level = clamp01(speed / 6.5)
+                    form_energy = clamp01((0.58 * audio_level) + (0.42 * speed_level) + random.uniform(-0.10, 0.10))
+                    palette_color = random.choice(abstract_palette_bgr)
+                    audio_color = audio_level_to_bgr(form_energy)
+                    spark_color_bgr = blend_bgr(palette_color, audio_color, 0.50 + (0.38 * form_energy))
                 else:
                     speed_level = clamp01(speed / 6.0)
                     anti_energy = clamp01((0.72 * audio_level) + (0.28 * speed_level) + random.uniform(-0.08, 0.08))
@@ -493,6 +576,18 @@ def main() -> None:
                 charge = 0.0
                 if color_mode == "antiparticles":
                     charge = 1.0 if random.random() < 0.5 else -1.0
+
+                shape_kind = "dot"
+                shape_sides = 4
+                shape_stroke = 1
+                shape_ang_vel = 0.0
+                if color_mode == "abstract-forms":
+                    shape_kind = random.choice(["poly", "poly", "diamond", "ring"])
+                    shape_sides = random.randint(3, 7)
+                    shape_stroke = 1 if random.random() < 0.65 else 2
+                    shape_ang_vel = random.uniform(-0.15, 0.15) * (0.65 + audio_level)
+                    life = max(3, int(round(life * random.uniform(1.05, 1.45))))
+                    radius = max(2, int(round(radius * random.uniform(1.25, 2.0))))
 
                 sparks.append(
                     Spark(
@@ -505,6 +600,11 @@ def main() -> None:
                         radius=radius,
                         color_bgr=spark_color_bgr,
                         charge=charge,
+                        shape_kind=shape_kind,
+                        angle=random.uniform(0.0, 2.0 * math.pi),
+                        ang_vel=shape_ang_vel,
+                        sides=shape_sides,
+                        stroke=shape_stroke,
                     )
                 )
 
@@ -548,12 +648,28 @@ def main() -> None:
                     swirl = 0.15 * sp.charge / max(28.0, dist)
                     sp.vx += -dy * swirl
                     sp.vy += dx * swirl
+            elif color_mode == "abstract-forms":
+                cx = frame_w * 0.5
+                cy = frame_h * 0.5
+                dx = sp.x - cx
+                dy = sp.y - cy
+                dist = math.sqrt(dx * dx + dy * dy)
+                if dist > 1e-6:
+                    swirl = 0.03 / max(45.0, dist)
+                    sp.vx += -dy * swirl
+                    sp.vy += dx * swirl
 
             sp.x += sp.vx
             sp.y += sp.vy
+            if color_mode == "abstract-forms":
+                sp.angle += sp.ang_vel
             if color_mode == "antiparticles":
                 sp.vx *= 0.972
                 sp.vy *= 0.972
+            elif color_mode == "abstract-forms":
+                sp.vx *= 0.968
+                sp.vy *= 0.968
+                sp.ang_vel *= 0.985
             else:
                 sp.vx *= 0.96
                 sp.vy *= 0.96
@@ -566,9 +682,25 @@ def main() -> None:
 
             life_ratio = sp.life / max(1, sp.max_life)
             radius = max(1, int(round(sp.radius * (0.65 + 0.7 * life_ratio))))
-            cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, sp.color_bgr, -1, cv2.LINE_AA)
+            if color_mode == "abstract-forms":
+                stroke = max(1, int(round(sp.stroke * (0.85 + 0.45 * life_ratio))))
+                draw_abstract_form(
+                    overlay,
+                    x=sp.x,
+                    y=sp.y,
+                    radius=radius,
+                    color_bgr=sp.color_bgr,
+                    shape_kind=sp.shape_kind,
+                    angle=sp.angle,
+                    sides=sp.sides,
+                    stroke=stroke,
+                )
+            else:
+                cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, sp.color_bgr, -1, cv2.LINE_AA)
             if color_mode == "antiparticles" and radius >= 2 and life_ratio > 0.35:
                 cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), 1, (255, 255, 255), -1, cv2.LINE_AA)
+            if color_mode == "abstract-forms" and radius >= 4 and life_ratio > 0.30:
+                cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), 1, (245, 245, 245), -1, cv2.LINE_AA)
             alive.append(sp)
 
         sparks = alive

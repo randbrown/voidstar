@@ -10,6 +10,7 @@ Default mode uses stream copy (`-c copy`) to preserve encoded streams/quality.
 """
 
 import argparse
+import array
 import json
 import math
 import re
@@ -281,6 +282,573 @@ def probe_duration_and_audio(path: Path) -> tuple[float, bool]:
 	streams = info.get("streams", [])
 	has_audio = any(s.get("codec_type") == "audio" for s in streams)
 	return dur, has_audio
+
+
+def probe_video_dimensions(path: Path) -> tuple[int, int] | None:
+	info = ffprobe_info(path)
+	for s in info.get("streams", []):
+		if s.get("codec_type") != "video":
+			continue
+		try:
+			w = int(s.get("width") or 0)
+			h = int(s.get("height") or 0)
+		except Exception:
+			return None
+		if w > 0 and h > 0:
+			return w, h
+	return None
+
+
+def percentile(values: list[float], q: float) -> float:
+	if not values:
+		return 0.0
+	q = min(1.0, max(0.0, q))
+	v = sorted(values)
+	if len(v) == 1:
+		return v[0]
+	pos = (len(v) - 1) * q
+	lo = int(math.floor(pos))
+	hi = int(math.ceil(pos))
+	if lo == hi:
+		return v[lo]
+	t = pos - lo
+	return (v[lo] * (1.0 - t)) + (v[hi] * t)
+
+
+def normalize_series(values: list[float], q: float = 0.95) -> list[float]:
+	if not values:
+		return []
+	scale = max(1e-9, percentile(values, q))
+	return [min(1.0, max(0.0, v / scale)) for v in values]
+
+
+def extract_audio_feature_bins(
+	input_path: Path,
+	total_duration: float,
+	bin_seconds: float,
+	sample_rate: int,
+) -> tuple[list[float], list[float]]:
+	bins = max(1, int(math.ceil(total_duration / max(1e-6, bin_seconds))))
+	energy = [0.0 for _ in range(bins)]
+	flux = [0.0 for _ in range(bins)]
+	count = [0 for _ in range(bins)]
+
+	cmd = [
+		"ffmpeg",
+		"-hide_banner",
+		"-loglevel",
+		"error",
+		"-nostats",
+		"-i",
+		str(input_path),
+		"-vn",
+		"-ac",
+		"1",
+		"-ar",
+		str(sample_rate),
+		"-f",
+		"s16le",
+		"pipe:1",
+	]
+	proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	if proc.stdout is None:
+		raise RuntimeError("audio analysis stream unavailable")
+
+	read_size = 65536
+	prev_sample: float | None = None
+	sample_index = 0
+	bin_samples = max(1, int(round(sample_rate * bin_seconds)))
+
+	while True:
+		chunk = proc.stdout.read(read_size)
+		if not chunk:
+			break
+		if len(chunk) % 2:
+			chunk = chunk[:-1]
+		if not chunk:
+			continue
+
+		arr = array.array("h")
+		arr.frombytes(chunk)
+		if sys.byteorder != "little":
+			arr.byteswap()
+
+		for sample in arr:
+			bin_i = sample_index // bin_samples
+			if bin_i >= bins:
+				break
+			x = float(sample) / 32768.0
+			energy[bin_i] += x * x
+			count[bin_i] += 1
+			if prev_sample is not None:
+				flux[bin_i] += abs(x - prev_sample)
+			prev_sample = x
+			sample_index += 1
+
+	stderr = (proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr is not None else "")
+	rc = proc.wait()
+	if rc != 0:
+		raise RuntimeError(f"ffmpeg audio analysis failed: {stderr.strip()}")
+
+	rms = [math.sqrt(max(0.0, energy[i] / max(1, count[i]))) for i in range(bins)]
+	flux_avg = [flux[i] / max(1, count[i]) for i in range(bins)]
+	return rms, flux_avg
+
+
+def scaled_height_for_width(src_w: int, src_h: int, dst_w: int) -> int:
+	if src_w <= 0 or src_h <= 0 or dst_w <= 0:
+		return max(2, dst_w)
+	h = int(round((src_h * dst_w) / max(1, src_w)))
+	if h % 2:
+		h += 1
+	return max(2, h)
+
+
+def extract_video_motion_bins(
+	input_path: Path,
+	total_duration: float,
+	bin_seconds: float,
+	fps: float,
+	width: int,
+) -> list[float]:
+	dims = probe_video_dimensions(input_path)
+	if dims is None:
+		return [0.0 for _ in range(max(1, int(math.ceil(total_duration / max(1e-6, bin_seconds)))))]
+	src_w, src_h = dims
+	h = scaled_height_for_width(src_w, src_h, width)
+	frame_bytes = width * h
+	bins = max(1, int(math.ceil(total_duration / max(1e-6, bin_seconds))))
+	motion_sum = [0.0 for _ in range(bins)]
+	motion_count = [0 for _ in range(bins)]
+
+	cmd = [
+		"ffmpeg",
+		"-hide_banner",
+		"-loglevel",
+		"error",
+		"-nostats",
+		"-i",
+		str(input_path),
+		"-an",
+		"-vf",
+		f"fps={fps:.6f},scale={width}:{h}:flags=fast_bilinear,format=gray",
+		"-f",
+		"rawvideo",
+		"pipe:1",
+	]
+	proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	if proc.stdout is None:
+		raise RuntimeError("video analysis stream unavailable")
+
+	prev: bytes | None = None
+	frame_i = 0
+	while True:
+		buf = proc.stdout.read(frame_bytes)
+		if not buf or len(buf) < frame_bytes:
+			break
+		if prev is not None:
+			diff = 0
+			for a, b in zip(buf, prev):
+				diff += abs(a - b)
+			motion = diff / max(1, frame_bytes * 255)
+			t = frame_i / max(1e-9, fps)
+			bin_i = min(bins - 1, int(t / max(1e-6, bin_seconds)))
+			motion_sum[bin_i] += motion
+			motion_count[bin_i] += 1
+		prev = buf
+		frame_i += 1
+
+	stderr = (proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr is not None else "")
+	rc = proc.wait()
+	if rc != 0:
+		raise RuntimeError(f"ffmpeg video analysis failed: {stderr.strip()}")
+
+	return [motion_sum[i] / max(1, motion_count[i]) for i in range(bins)]
+
+
+def average_in_window(series: list[float], start_t: float, end_t: float, bin_seconds: float) -> float:
+	if end_t <= start_t or not series:
+		return 0.0
+	i0 = max(0, int(math.floor(start_t / max(1e-6, bin_seconds))))
+	i1 = min(len(series), int(math.ceil(end_t / max(1e-6, bin_seconds))))
+	if i1 <= i0:
+		return 0.0
+	window = series[i0:i1]
+	return sum(window) / max(1, len(window))
+
+
+def peak_in_window(series: list[float], start_t: float, end_t: float, bin_seconds: float) -> float:
+	if end_t <= start_t or not series:
+		return 0.0
+	i0 = max(0, int(math.floor(start_t / max(1e-6, bin_seconds))))
+	i1 = min(len(series), int(math.ceil(end_t / max(1e-6, bin_seconds))))
+	if i1 <= i0:
+		return 0.0
+	return max(series[i0:i1]) if i1 > i0 else 0.0
+
+
+def sample_series(series: list[float], t: float, bin_seconds: float) -> float:
+	if not series:
+		return 0.0
+	idx = min(len(series) - 1, max(0, int(math.floor(t / max(1e-6, bin_seconds)))))
+	return series[idx]
+
+
+def overlaps(a_start: float, a_end: float, b_start: float, b_end: float) -> bool:
+	return (a_start < b_end) and (b_start < a_end)
+
+
+def build_candidate_starts(start_t: float, end_t: float, step: float) -> list[float]:
+	if end_t <= start_t or step <= 0:
+		return [start_t]
+	vals: list[float] = []
+	x = start_t
+	while x <= end_t + 1e-9:
+		vals.append(x)
+		x += step
+	if vals and vals[-1] < end_t - 1e-6:
+		vals.append(end_t)
+	if not vals:
+		vals.append(start_t)
+	return vals
+
+
+def resolve_video_hook_script() -> Path | None:
+	candidate = Path(__file__).resolve().parents[1] / "title_hook" / "voidstar_video_hook.py"
+	if candidate.exists():
+		return candidate
+	return None
+
+
+def run_groove(args: argparse.Namespace) -> None:
+	input_path = Path(args.input).expanduser().resolve()
+	if not input_path.exists():
+		raise FileNotFoundError(f"Input not found: {input_path}")
+
+	hook_seconds = max(0.25, float(args.hook_seconds))
+	bin_seconds = max(0.05, float(args.analysis_bin_seconds))
+	analysis_fps = max(0.5, float(args.analysis_video_fps))
+	audio_rate = max(2000, int(args.analysis_audio_rate))
+
+	total_duration, has_audio = probe_duration_and_audio(input_path)
+	if total_duration <= 0:
+		raise RuntimeError("Could not determine input duration")
+
+	analysis_start = max(0.0, float(args.analysis_start_seconds))
+	analysis_end = total_duration if args.analysis_end_seconds <= 0 else min(total_duration, float(args.analysis_end_seconds))
+	if analysis_end <= analysis_start:
+		raise ValueError("Analysis window is empty; check --analysis-start-seconds / --analysis-end-seconds")
+	if (analysis_end - analysis_start) < hook_seconds:
+		raise ValueError("Analysis window is shorter than --hook-seconds")
+
+	print(f"[voidstar] groove_input={input_path}")
+	print(f"[voidstar] duration={total_duration:.3f}s window={analysis_start:.3f}-{analysis_end:.3f}s")
+	print(f"[voidstar] hook_seconds={hook_seconds:.3f} bin_seconds={bin_seconds:.3f}")
+
+	if has_audio:
+		audio_rms, audio_flux = extract_audio_feature_bins(
+			input_path=input_path,
+			total_duration=total_duration,
+			bin_seconds=bin_seconds,
+			sample_rate=audio_rate,
+		)
+	else:
+		audio_rms = [0.0 for _ in range(max(1, int(math.ceil(total_duration / bin_seconds))))]
+		audio_flux = [0.0 for _ in range(len(audio_rms))]
+
+	video_motion = extract_video_motion_bins(
+		input_path=input_path,
+		total_duration=total_duration,
+		bin_seconds=bin_seconds,
+		fps=analysis_fps,
+		width=max(32, int(args.analysis_video_width)),
+	)
+
+	series_len = min(len(audio_rms), len(audio_flux), len(video_motion))
+	if series_len <= 1:
+		raise RuntimeError("Analysis produced insufficient feature bins")
+	audio_rms = audio_rms[:series_len]
+	audio_flux = audio_flux[:series_len]
+	video_motion = video_motion[:series_len]
+
+	rms_n = normalize_series(audio_rms)
+	flux_n = normalize_series(audio_flux)
+	motion_n = normalize_series(video_motion)
+
+	combined: list[float] = []
+	for i in range(series_len):
+		score = (
+			(float(args.weight_audio_rms) * rms_n[i])
+			+ (float(args.weight_audio_flux) * flux_n[i])
+			+ (float(args.weight_video_motion) * motion_n[i])
+		)
+		combined.append(score)
+
+	if args.bpm > 0:
+		beat_sec = 60.0 / float(args.bpm)
+		step = beat_sec * max(0.25, float(args.grid_beats_step))
+		anchor = analysis_start
+		start_idx = int(math.ceil((analysis_start - anchor) / max(1e-9, step) - 1e-9))
+		first = anchor + (start_idx * step)
+		last = analysis_end - hook_seconds
+		candidate_starts = build_candidate_starts(first, last, step)
+		print(f"[voidstar] bpm_grid=on bpm={args.bpm:g} beat={beat_sec:.4f}s step={step:.4f}s")
+	else:
+		step = max(0.05, float(args.scan_step_seconds))
+		candidate_starts = build_candidate_starts(analysis_start, analysis_end - hook_seconds, step)
+		print(f"[voidstar] bpm_grid=off scan_step={step:.4f}s")
+
+	if not candidate_starts:
+		raise RuntimeError("No candidate hook starts generated")
+
+	items: list[dict] = []
+	for start in candidate_starts:
+		end = min(analysis_end, start + hook_seconds)
+		mean_score = average_in_window(combined, start, end, bin_seconds)
+		peak_score = peak_in_window(combined, start, end, bin_seconds)
+		at_start = sample_series(combined, start, bin_seconds)
+		before_start = sample_series(combined, max(analysis_start, start - bin_seconds), bin_seconds)
+		onset = max(0.0, at_start - before_start)
+		total_score = (
+			mean_score
+			+ (float(args.weight_peak) * peak_score)
+			+ (float(args.weight_onset) * onset)
+		)
+		items.append(
+			{
+				"start": start,
+				"end": end,
+				"duration": max(0.0, end - start),
+				"score": total_score,
+				"mean": mean_score,
+				"peak": peak_score,
+				"onset": onset,
+			}
+		)
+
+	items.sort(key=lambda x: x["score"], reverse=True)
+	non_overlap_gap = max(0.0, float(args.non_overlap_gap_seconds))
+	selected: list[dict] = []
+	for cand in items:
+		if len(selected) >= max(1, int(args.top_k)):
+			break
+		ok = True
+		for other in selected:
+			if overlaps(
+				cand["start"] - non_overlap_gap,
+				cand["end"] + non_overlap_gap,
+				other["start"] - non_overlap_gap,
+				other["end"] + non_overlap_gap,
+			):
+				ok = False
+				break
+		if ok:
+			selected.append(cand)
+
+	if not selected:
+		raise RuntimeError("Failed to select any groove hook candidates")
+
+	best = selected[0]
+	print("[voidstar] ===== groove hooks =====")
+	for i, s in enumerate(selected, start=1):
+		print(
+			f"[voidstar] hook={i} start={s['start']:.3f}s end={s['end']:.3f}s "
+			f"dur={s['duration']:.3f}s score={s['score']:.6f} "
+			f"mean={s['mean']:.6f} peak={s['peak']:.6f} onset={s['onset']:.6f}"
+		)
+
+	if args.output_json:
+		output_json = Path(args.output_json).expanduser().resolve()
+		output_json.parent.mkdir(parents=True, exist_ok=True)
+		payload = {
+			"input": str(input_path),
+			"duration_seconds": total_duration,
+			"analysis_window": {"start": analysis_start, "end": analysis_end},
+			"hook_seconds": hook_seconds,
+			"bpm": float(args.bpm),
+			"grid_beats_step": float(args.grid_beats_step),
+			"top": selected,
+		}
+		output_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+		print(f"[voidstar] groove_json={output_json}")
+
+	if args.invoke_video_hook:
+		script_path = resolve_video_hook_script()
+		if script_path is None:
+			raise RuntimeError("Could not locate title_hook/voidstar_video_hook.py for --invoke-video-hook")
+
+		cmd = [
+			sys.executable,
+			str(script_path),
+			str(input_path),
+			"--mode",
+			str(args.video_hook_mode),
+			"--hook-start",
+			f"{best['start']:.6f}",
+			"--hook-duration",
+			f"{best['duration']:.6f}",
+			"--transition-type",
+			str(args.video_hook_transition),
+			"--transition-duration",
+			f"{max(0.0, float(args.video_hook_transition_seconds)):.6f}",
+		]
+		if args.video_hook_output:
+			cmd += ["--output", str(Path(args.video_hook_output).expanduser().resolve())]
+		if args.video_hook_out_dir:
+			cmd += ["--out-dir", str(Path(args.video_hook_out_dir).expanduser().resolve())]
+		if args.video_hook_no_start_transition:
+			cmd += ["--no-start-transition"]
+
+		print(f"[voidstar] invoke_video_hook=on mode={args.video_hook_mode}")
+		subprocess.run(cmd, check=True)
+
+
+def add_groove_args(ap: argparse.ArgumentParser) -> None:
+	ap.add_argument("input", help="Input video path for groove hook analysis")
+	ap.add_argument(
+		"--hook-seconds",
+		type=float,
+		default=5.0,
+		help="Hook duration to evaluate and return",
+	)
+	ap.add_argument(
+		"--top-k",
+		type=int,
+		default=5,
+		help="Number of non-overlapping top hook candidates to return",
+	)
+	ap.add_argument(
+		"--bpm",
+		type=float,
+		default=0.0,
+		help="If > 0, candidate starts are quantized to BPM grid",
+	)
+	ap.add_argument(
+		"--grid-beats-step",
+		type=float,
+		default=1.0,
+		help="Candidate start step in beats when BPM grid is enabled",
+	)
+	ap.add_argument(
+		"--scan-step-seconds",
+		type=float,
+		default=0.25,
+		help="Candidate start step in seconds when BPM is not used",
+	)
+	ap.add_argument(
+		"--analysis-start-seconds",
+		type=float,
+		default=0.0,
+		help="Start of analysis window",
+	)
+	ap.add_argument(
+		"--analysis-end-seconds",
+		type=float,
+		default=0.0,
+		help="End of analysis window (0 = end of source)",
+	)
+	ap.add_argument(
+		"--analysis-bin-seconds",
+		type=float,
+		default=0.25,
+		help="Temporal bin size for feature extraction",
+	)
+	ap.add_argument(
+		"--analysis-audio-rate",
+		type=int,
+		default=8000,
+		help="Audio analysis sample rate",
+	)
+	ap.add_argument(
+		"--analysis-video-fps",
+		type=float,
+		default=6.0,
+		help="Video analysis fps",
+	)
+	ap.add_argument(
+		"--analysis-video-width",
+		type=int,
+		default=160,
+		help="Video analysis width (grayscale downscale)",
+	)
+	ap.add_argument(
+		"--weight-audio-rms",
+		type=float,
+		default=0.55,
+		help="Weight for sustained audio energy",
+	)
+	ap.add_argument(
+		"--weight-audio-flux",
+		type=float,
+		default=0.80,
+		help="Weight for audio transients/change",
+	)
+	ap.add_argument(
+		"--weight-video-motion",
+		type=float,
+		default=0.85,
+		help="Weight for video motion/change",
+	)
+	ap.add_argument(
+		"--weight-peak",
+		type=float,
+		default=0.60,
+		help="Extra weight for peak excitement inside a hook window",
+	)
+	ap.add_argument(
+		"--weight-onset",
+		type=float,
+		default=0.45,
+		help="Extra weight for immediate onset at hook start",
+	)
+	ap.add_argument(
+		"--non-overlap-gap-seconds",
+		type=float,
+		default=1.0,
+		help="Minimum gap between selected top hooks",
+	)
+	ap.add_argument(
+		"--output-json",
+		default="",
+		help="Optional JSON output path for selected hooks",
+	)
+	ap.add_argument(
+		"--invoke-video-hook",
+		action="store_true",
+		help="Invoke title_hook/voidstar_video_hook.py using the best detected hook",
+	)
+	ap.add_argument(
+		"--video-hook-mode",
+		choices=["prepend", "overwrite", "wrap"],
+		default="overwrite",
+		help="Mode passed to voidstar_video_hook.py",
+	)
+	ap.add_argument(
+		"--video-hook-transition",
+		default="pixelize",
+		help="Transition type passed to voidstar_video_hook.py",
+	)
+	ap.add_argument(
+		"--video-hook-transition-seconds",
+		type=float,
+		default=0.20,
+		help="Transition duration passed to voidstar_video_hook.py",
+	)
+	ap.add_argument(
+		"--video-hook-output",
+		default="",
+		help="Explicit output path for invoked video_hook script",
+	)
+	ap.add_argument(
+		"--video-hook-out-dir",
+		default="",
+		help="Output directory for invoked video_hook script when --video-hook-output is omitted",
+	)
+	ap.add_argument(
+		"--video-hook-no-start-transition",
+		action="store_true",
+		help="Pass --no-start-transition to invoked video_hook script",
+	)
 
 
 def detect_audio_active_window(path: Path, total_duration: float) -> tuple[float, float] | None:
@@ -754,9 +1322,15 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 	)
 	ap.add_argument(
 		"--sampling-mode",
-		choices=["minute-averages", "n-averages", "recursive-halves", "uniform-spread"],
+		choices=["minute-averages", "n-averages", "recursive-halves", "uniform-spread", "groove"],
 		default="minute-averages",
 		help="Sampling strategy for selecting source snippets",
+	)
+	ap.add_argument(
+		"--bpm",
+		type=float,
+		default=0.0,
+		help="Optional BPM for groove/grid alignment. If > 0 and --cps is 0, cps is derived as bpm/60",
 	)
 	ap.add_argument(
 		"--sample-anchor",
@@ -1358,6 +1932,8 @@ def run_highlights(args: argparse.Namespace) -> None:
 		raise ValueError("--target-length-seconds must be > 0")
 	if args.recursive_min_segment_seconds <= 0:
 		raise ValueError("--recursive-min-segment-seconds must be > 0")
+	if args.bpm < 0:
+		raise ValueError("--bpm must be >= 0")
 	if args.cps < 0:
 		raise ValueError("--cps must be >= 0")
 	if args.transient_skew_seconds < 0:
@@ -1418,6 +1994,10 @@ def run_highlights(args: argparse.Namespace) -> None:
 		if re_ > rs:
 			deemph_ranges_abs.append((rs, re_))
 
+	effective_cps = float(args.cps)
+	if args.bpm > 0 and effective_cps <= 0:
+		effective_cps = float(args.bpm) / 60.0
+
 	if args.sampling_mode == "minute-averages":
 		segment_len = 60.0
 		segment_count = max(1, int(math.ceil(window_len / segment_len)))
@@ -1437,6 +2017,10 @@ def run_highlights(args: argparse.Namespace) -> None:
 			if e - s > 0.001:
 				segment_ranges.append((s, e))
 	elif args.sampling_mode == "uniform-spread":
+		segment_count = max(1, int(args.n_segments))
+		segment_len = window_len / max(1, segment_count)
+		segment_ranges = []
+	elif args.sampling_mode == "groove":
 		segment_count = max(1, int(args.n_segments))
 		segment_len = window_len / max(1, segment_count)
 		segment_ranges = []
@@ -1464,53 +2048,10 @@ def run_highlights(args: argparse.Namespace) -> None:
 			if e - s > 0.001:
 				segment_ranges.append((s, e))
 
-	grid_step = (1.0 / args.cps) if args.cps > 0 else 0.0
+	grid_step = (1.0 / effective_cps) if effective_cps > 0 else 0.0
 	grid_ref = window_start
 	transient_skew = max(0.0, float(args.transient_skew_seconds))
 	glitch_dur = max(0.0, float(args.glitch_seconds))
-
-	segments: list[tuple[float, float]] = []
-	for seg_start, seg_end in segment_ranges:
-		seg_dur = max(0.0, seg_end - seg_start)
-		dur = min(sample_len, seg_dur)
-
-		ignore_frac = overlap_fraction(seg_start, seg_dur, ignore_ranges_abs)
-		if ignore_frac >= 0.999:
-			continue
-
-		deemph_frac = overlap_fraction(seg_start, seg_dur, deemph_ranges_abs)
-		weight = (1.0 - ignore_frac) * (1.0 - (deemph_frac * (1.0 - args.deemphasize_factor)))
-		dur = min(dur, seg_dur * max(0.0, weight))
-
-		if grid_step > 0:
-			aligned = align_clip_to_grid(
-				seg_start=seg_start,
-				seg_end=seg_end,
-				desired_duration=dur,
-				anchor_mode=args.sample_anchor,
-				ref_time=grid_ref,
-				grid_step=grid_step,
-			)
-			if aligned is None:
-				continue
-			clip_start, clip_dur = aligned
-		else:
-			clip_dur = dur
-			if args.sample_anchor == "end":
-				clip_start = max(seg_start, seg_end - clip_dur)
-			else:
-				clip_start = seg_start
-
-		if clip_dur > 0.001:
-			if transient_skew > 0:
-				aligned_end = clip_start + clip_dur
-				skewed_start = max(seg_start, clip_start - transient_skew)
-				clip_start = skewed_start
-				clip_dur = max(0.001, aligned_end - clip_start)
-			segments.append((clip_start, clip_dur))
-
-	if not segments:
-		raise RuntimeError("No highlight segments were generated from provided settings")
 
 	requested_target = max(0.0, args.target_length_seconds)
 	total_target = requested_target
@@ -1519,27 +2060,179 @@ def run_highlights(args: argparse.Namespace) -> None:
 		if total_target <= 0:
 			raise ValueError("--target-length-seconds is too small for the requested --cps tempo grid")
 
-	loop_seam_dur = max(0.0, min(float(args.loop_seam_seconds), 0.50))
-
+	segments: list[tuple[float, float]] = []
 	selected: list[tuple[float, float]] = []
 	total_selected_effective = 0.0
 	omitted_partial_clip = False
 	omitted_partial_seconds = 0.0
-	for start, dur in segments:
-		if total_selected_effective >= total_target:
-			break
 
-		remaining_effective = total_target - total_selected_effective
-		use_dur = min(dur, remaining_effective)
-		if use_dur <= 0.001:
-			continue
-		if args.truncate_to_full_clips and (use_dur + 1e-9) < dur:
-			omitted_partial_clip = True
-			omitted_partial_seconds = use_dur
-			break
+	if args.sampling_mode == "groove":
+		analysis_bin = max(0.05, min(0.50, sample_len * 0.5))
+		if has_audio:
+			audio_rms, audio_flux = extract_audio_feature_bins(
+				input_path=input_path,
+				total_duration=video_duration,
+				bin_seconds=analysis_bin,
+				sample_rate=8000,
+			)
+		else:
+			bins = max(1, int(math.ceil(video_duration / analysis_bin)))
+			audio_rms = [0.0 for _ in range(bins)]
+			audio_flux = [0.0 for _ in range(bins)]
 
-		selected.append((start, use_dur))
-		total_selected_effective += use_dur
+		video_motion = extract_video_motion_bins(
+			input_path=input_path,
+			total_duration=video_duration,
+			bin_seconds=analysis_bin,
+			fps=6.0,
+			width=160,
+		)
+
+		n = min(len(audio_rms), len(audio_flux), len(video_motion))
+		if n <= 1:
+			raise RuntimeError("Groove analysis produced insufficient feature bins")
+		audio_rms = audio_rms[:n]
+		audio_flux = audio_flux[:n]
+		video_motion = video_motion[:n]
+
+		rms_n = normalize_series(audio_rms)
+		flux_n = normalize_series(audio_flux)
+		motion_n = normalize_series(video_motion)
+		combined = [
+			(0.55 * rms_n[i]) + (0.80 * flux_n[i]) + (0.85 * motion_n[i])
+			for i in range(n)
+		]
+
+		if grid_step > 0:
+			cand_step = grid_step
+		else:
+			cand_step = max(0.20, min(2.0, sample_len * 0.5))
+		candidate_starts = build_candidate_starts(window_start, max(window_start, window_end - sample_len), cand_step)
+
+		scored: list[tuple[float, float, float]] = []
+		for start in candidate_starts:
+			avail = max(0.0, window_end - start)
+			if avail <= 0.001:
+				continue
+			dur = min(sample_len, avail)
+
+			if grid_step > 0:
+				dur = max(grid_step, math.floor((dur / grid_step) + 1e-9) * grid_step)
+				dur = min(dur, avail)
+				if dur <= 0.001:
+					continue
+
+			ignore_frac = overlap_fraction(start, dur, ignore_ranges_abs)
+			if ignore_frac >= 0.999:
+				continue
+			deemph_frac = overlap_fraction(start, dur, deemph_ranges_abs)
+			weight = (1.0 - ignore_frac) * (1.0 - (deemph_frac * (1.0 - args.deemphasize_factor)))
+			if weight <= 0.001:
+				continue
+
+			mean_score = average_in_window(combined, start, start + dur, analysis_bin)
+			peak_score = peak_in_window(combined, start, start + dur, analysis_bin)
+			onset_score = max(0.0, sample_series(combined, start, analysis_bin) - sample_series(combined, max(window_start, start - analysis_bin), analysis_bin))
+			score = (mean_score + (0.60 * peak_score) + (0.45 * onset_score)) * weight
+			scored.append((score, start, dur))
+
+		scored.sort(key=lambda x: x[0], reverse=True)
+		non_overlap = max(0.0, min(sample_len * 0.5, max(0.25, glitch_dur)))
+		for _, start, dur in scored:
+			if total_selected_effective >= total_target:
+				break
+
+			end = start + dur
+			conflict = False
+			for s2, d2 in selected:
+				e2 = s2 + d2
+				if overlaps(start - non_overlap, end + non_overlap, s2 - non_overlap, e2 + non_overlap):
+					conflict = True
+					break
+			if conflict:
+				continue
+
+			remaining = total_target - total_selected_effective
+			use_dur = min(dur, remaining)
+			if use_dur <= 0.001:
+				continue
+			if args.truncate_to_full_clips and (use_dur + 1e-9) < dur:
+				omitted_partial_clip = True
+				omitted_partial_seconds = use_dur
+				break
+
+			selected.append((start, use_dur))
+			total_selected_effective += use_dur
+
+		selected.sort(key=lambda x: x[0])
+		if not selected:
+			raise RuntimeError("No groove-selected clips found; try reducing --sample-seconds or expanding analysis window")
+		segments = list(selected)
+	else:
+		for seg_start, seg_end in segment_ranges:
+			seg_dur = max(0.0, seg_end - seg_start)
+			dur = min(sample_len, seg_dur)
+
+			ignore_frac = overlap_fraction(seg_start, seg_dur, ignore_ranges_abs)
+			if ignore_frac >= 0.999:
+				continue
+
+			deemph_frac = overlap_fraction(seg_start, seg_dur, deemph_ranges_abs)
+			weight = (1.0 - ignore_frac) * (1.0 - (deemph_frac * (1.0 - args.deemphasize_factor)))
+			dur = min(dur, seg_dur * max(0.0, weight))
+
+			if grid_step > 0:
+				aligned = align_clip_to_grid(
+					seg_start=seg_start,
+					seg_end=seg_end,
+					desired_duration=dur,
+					anchor_mode=args.sample_anchor,
+					ref_time=grid_ref,
+					grid_step=grid_step,
+				)
+				if aligned is None:
+					continue
+				clip_start, clip_dur = aligned
+			else:
+				clip_dur = dur
+				if args.sample_anchor == "end":
+					clip_start = max(seg_start, seg_end - clip_dur)
+				else:
+					clip_start = seg_start
+
+			if clip_dur > 0.001:
+				if transient_skew > 0:
+					aligned_end = clip_start + clip_dur
+					skewed_start = max(seg_start, clip_start - transient_skew)
+					clip_start = skewed_start
+					clip_dur = max(0.001, aligned_end - clip_start)
+				segments.append((clip_start, clip_dur))
+
+		if not segments:
+			raise RuntimeError("No highlight segments were generated from provided settings")
+
+	loop_seam_dur = max(0.0, min(float(args.loop_seam_seconds), 0.50))
+
+	if args.sampling_mode != "groove":
+		selected = []
+		total_selected_effective = 0.0
+		omitted_partial_clip = False
+		omitted_partial_seconds = 0.0
+		for start, dur in segments:
+			if total_selected_effective >= total_target:
+				break
+
+			remaining_effective = total_target - total_selected_effective
+			use_dur = min(dur, remaining_effective)
+			if use_dur <= 0.001:
+				continue
+			if args.truncate_to_full_clips and (use_dur + 1e-9) < dur:
+				omitted_partial_clip = True
+				omitted_partial_seconds = use_dur
+				break
+
+			selected.append((start, use_dur))
+			total_selected_effective += use_dur
 
 	if not selected:
 		raise RuntimeError("No highlight clips selected; try increasing --target-length-seconds")
@@ -1597,7 +2290,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 	if args.sampling_mode == "uniform-spread":
 		print(f"[voidstar] uniform_segment_count={segment_count} uniform_segment_seconds={segment_len:.3f}")
 	if grid_step > 0:
-		print(f"[voidstar] tempo_grid=on cps={args.cps:.6f} step={grid_step:.6f}s target_aligned={total_target:.3f}s requested_target={requested_target:.3f}s")
+		print(f"[voidstar] tempo_grid=on cps={effective_cps:.6f} step={grid_step:.6f}s target_aligned={total_target:.3f}s requested_target={requested_target:.3f}s")
 	else:
 		print("[voidstar] tempo_grid=off")
 	if glitch_dur > 0 and len(selected) >= 2:
@@ -1850,8 +2543,11 @@ def main() -> None:
 	ap_highlights = sub.add_parser("highlights", help="Auto-sample and assemble highlight reels")
 	add_highlights_args(ap_highlights)
 
+	ap_groove = sub.add_parser("groove", help="Auto-detect engagement hook(s) using audio+video scoring")
+	add_groove_args(ap_groove)
+
 	argv = sys.argv[1:]
-	if argv and argv[0] not in {"split", "recombine", "highlights", "-h", "--help"}:
+	if argv and argv[0] not in {"split", "recombine", "highlights", "groove", "-h", "--help"}:
 		# Back-compat: legacy invocation defaults to split command.
 		argv = ["split", *argv]
 
@@ -1861,6 +2557,8 @@ def main() -> None:
 		run_recombine(args)
 	elif args.command == "highlights":
 		run_highlights(args)
+	elif args.command == "groove":
+		run_groove(args)
 	else:
 		run_split(args)
 
