@@ -279,6 +279,56 @@ def draw_abstract_form(
         cv2.polylines(canvas, [inner], True, color_bgr, 1, cv2.LINE_AA)
 
 
+def abstract_form_spawn_policy(
+    x: float,
+    y: float,
+    radius: int,
+    sparks: List[Spark],
+    contain_epsilon: float,
+    overlap_epsilon: float,
+    replacement_scale: float,
+) -> tuple[bool, list[int]]:
+    """
+    Lightweight spatial policy for abstract forms.
+    - Reject new form if it is contained by or heavily overlaps an existing form.
+    - If new form fully contains smaller existing forms, mark those for removal.
+    """
+    r_new = max(1.0, float(radius))
+    reject = False
+    remove_idx: list[int] = []
+
+    contain_eps = max(0.10, min(1.20, float(contain_epsilon)))
+    overlap_eps = max(0.10, min(1.20, float(overlap_epsilon)))
+    replace_scale = max(1.00, float(replacement_scale))
+
+    for i, sp in enumerate(sparks):
+        if sp.life <= 0:
+            continue
+        if sp.shape_kind == "dot":
+            continue
+
+        dx = float(x - sp.x)
+        dy = float(y - sp.y)
+        d = math.sqrt((dx * dx) + (dy * dy))
+        r_old = max(1.0, float(sp.radius))
+
+        old_contains_new = (d + r_new) <= (r_old * contain_eps)
+        if old_contains_new:
+            reject = True
+            break
+
+        too_much_overlap = d < ((r_new + r_old) * overlap_eps)
+        if too_much_overlap:
+            reject = True
+            break
+
+        new_contains_old = (d + r_old) <= (r_new * contain_eps)
+        if new_contains_old and r_new > (r_old * replace_scale):
+            remove_idx.append(i)
+
+    return (not reject), remove_idx
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Voidstar particle sparks overlay (motion + audio reactive).")
     ap.add_argument("input", help="Input video path")
@@ -314,6 +364,24 @@ def main() -> None:
 
     ap.add_argument("--color-mode", default="white", help="white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes")
     ap.add_argument("--color-rgb", default="255,255,255", help="Spark color as R,G,B (used when --color-mode rgb)")
+    ap.add_argument(
+        "--abstract-contain-epsilon",
+        type=float,
+        default=0.85,
+        help="Abstract forms: containment strictness (lower=stricter anti-nesting, default 0.85)",
+    )
+    ap.add_argument(
+        "--abstract-overlap-epsilon",
+        type=float,
+        default=0.78,
+        help="Abstract forms: overlap threshold (lower=more spacing, default 0.78)",
+    )
+    ap.add_argument(
+        "--abstract-replacement-scale",
+        type=float,
+        default=1.10,
+        help="Abstract forms: new shape must be this much larger to evict contained smaller forms",
+    )
     ap.add_argument("--log-interval", type=float, default=1.0, help="Progress print interval")
 
     args = ap.parse_args()
@@ -588,6 +656,21 @@ def main() -> None:
                     shape_ang_vel = random.uniform(-0.15, 0.15) * (0.65 + audio_level)
                     life = max(3, int(round(life * random.uniform(1.05, 1.45))))
                     radius = max(2, int(round(radius * random.uniform(1.25, 2.0))))
+
+                    allow_spawn, remove_idx = abstract_form_spawn_policy(
+                        x=x,
+                        y=y,
+                        radius=radius,
+                        sparks=sparks,
+                        contain_epsilon=float(args.abstract_contain_epsilon),
+                        overlap_epsilon=float(args.abstract_overlap_epsilon),
+                        replacement_scale=float(args.abstract_replacement_scale),
+                    )
+                    if not allow_spawn:
+                        continue
+                    for idx_rm in remove_idx:
+                        if 0 <= idx_rm < len(sparks):
+                            sparks[idx_rm].life = 0
 
                 sparks.append(
                     Spark(
