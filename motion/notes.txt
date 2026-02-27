@@ -19,7 +19,7 @@ conda run -n mp311 python motion/voidstar_particle_sparks.py \
 --spark-life-frames 15 --spark-speed 0.15 --spark-opacity 0.5 \
 --audio-reactive true --audio-reactive-gain 1 --audio-reactive-smooth 0.85 \
 --color-mode abstract-forms --spark-rate 0.2 --spark-size 64.0  --motion-threshold 0.5 \
---flood-in-out true --flood-seconds 2 --flood-spawn-mult 3.0 --flood-extra-sources 128 --flood-velocity-mult 1.0 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 2.0 --flood-extra-sources 128 --flood-velocity-mult 1.0 \
 --log-interval 1.0 --start 100 --duration 30 
 
 
