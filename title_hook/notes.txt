@@ -1,3 +1,28 @@
+
+Video hook examples:
+
+
+Prepend: 
+python3 voidstar_video_hook.py ~/WinVideos/abstract_forms_voidstar_0.mp4 \
+--mode prepend --hook-start $((17*60+56)) --hook-duration 5
+
+Overwrite video+audio: 
+python3 voidstar_video_hook.py ~/WinVideos/abstract_forms_voidstar_0.mp4 \
+ --mode overwrite --hook-start $((17*60+56)) --hook-duration 5 --overwrite-audio true
+
+Overwrite video only (keep original opening audio): 
+python3 voidstar_video_hook.py ~/WinVideos/abstract_forms_voidstar_0.mp4 \
+ --mode overwrite --hook-start $((17*60+56)) --hook-duration 5 --overwrite-audio false
+
+Wrap (loop offset): 
+python3 voidstar_video_hook.py ~/WinVideos/abstract_forms_voidstar_0.mp4 \
+--mode wrap --hook-start $((17*60+56))
+
+
+python3 [voidstar_video_hook.py](http://_vscodecontentref_/11) INPUT.mp4 --mode prepend --hook-start 42 --hook-duration 7
+
+
+
 VoidStar Title Hook examples
 
 Input video:
