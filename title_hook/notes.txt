@@ -1,9 +1,35 @@
 
+
+
+abstract_forms_voidstar_0_90s_test
+
+
 Video hook examples:
+
+Output behavior:
+- Overwrite is now default (no --force needed)
+- Use --no-overwrite to fail if output already exists
+
+Transition options (new):
+--transition-type none|fade|dissolve|smoothleft|smoothright|wipeleft|wiperight|circleopen|circleclose|pixelize
+--transition-duration 1
+
+Examples with transitions:
+python3 voidstar_video_hook.py ~/WinVideos/abstract_forms_voidstar_0_90s_test.mp4 \
+--mode prepend --hook-start $((50)) --hook-duration 5 \
+--transition-type fade --transition-duration 1
+
+python3 voidstar_video_hook.py ~/WinVideos/abstract_forms_voidstar_0_90s_test.mp4 \
+--mode overwrite --hook-start $((50)) --hook-duration 5 --overwrite-audio true \
+--transition-type circleopen  --transition-duration 1
+
+python3 voidstar_video_hook.py ~/WinVideos/abstract_forms_voidstar_0_90s_test.mp4 \
+--mode wrap --hook-start $((50)) \
+--transition-type dissolve --transition-duration 1
 
 
 Prepend: 
-python3 voidstar_video_hook.py ~/WinVideos/abstract_forms_voidstar_0.mp4 \
+python3 voidstar_video_hook.py ~/WinVideos/abstract_forms_voidstar_0_90s_test.mp4 \
 --mode prepend --hook-start $((17*60+56)) --hook-duration 5
 
 Overwrite video+audio: 
