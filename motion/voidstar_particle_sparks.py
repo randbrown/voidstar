@@ -557,11 +557,6 @@ def draw_shobud_suit(
     cos_t = math.cos(angle)
     sin_t = math.sin(angle)
 
-    def rot(px: float, py: float) -> tuple[int, int]:
-        rx = cx + (px * cos_t) - (py * sin_t)
-        ry = cy + (px * sin_t) + (py * cos_t)
-        return int(round(rx)), int(round(ry))
-
     stroke = max(1, int(round(max(0.0, float(stroke_scale)))))
     shimmer_base = clamp01(float(edge_shimmer))
     shimmer_wave = 0.5 + (0.5 * math.sin(float(shimmer_phase)))
@@ -570,7 +565,28 @@ def draw_shobud_suit(
     shimmer_edge_enabled = float(edge_width) > 0.0
     shimmer_thickness = max(1, int(round(max(0.0, float(edge_width)) + (1.5 * shimmer_amt))))
 
-    mask = np.zeros((h, w), dtype=np.uint8)
+    pad = int(round((1.35 * r) + max(stroke, shimmer_thickness) + 4))
+    cx_i = int(round(cx))
+    cy_i = int(round(cy))
+    x0 = max(0, cx_i - pad)
+    y0 = max(0, cy_i - pad)
+    x1 = min(w, cx_i + pad + 1)
+    y1 = min(h, cy_i + pad + 1)
+    if x0 >= x1 or y0 >= y1:
+        return
+
+    roi_w = x1 - x0
+    roi_h = y1 - y0
+    roi = canvas[y0:y1, x0:x1]
+    mask = np.zeros((roi_h, roi_w), dtype=np.uint8)
+
+    local_cx = cx - x0
+    local_cy = cy - y0
+
+    def rot(px: float, py: float) -> tuple[int, int]:
+        rx = local_cx + (px * cos_t) - (py * sin_t)
+        ry = local_cy + (px * sin_t) + (py * cos_t)
+        return int(round(rx)), int(round(ry))
 
     if suit == "diamond":
         pts = np.array(
@@ -632,21 +648,26 @@ def draw_shobud_suit(
         cv2.fillPoly(mask, [tri], 255, cv2.LINE_AA)
         cv2.fillPoly(mask, [stem_tri], 255, cv2.LINE_AA)
 
+    needs_edge = outline_only or (shimmer_amt > 0.0 and shimmer_edge_enabled)
+
+    if not outline_only:
+        color_layer = np.zeros_like(roi, dtype=np.uint8)
+        color_layer[:, :] = color_bgr
+        cv2.copyTo(color_layer, mask, roi)
+
+    if not needs_edge:
+        return
+
     contours_info = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = contours_info[0] if len(contours_info) == 2 else contours_info[1]
     if not contours:
         return
 
-    if not outline_only:
-        color_layer = np.zeros_like(canvas, dtype=np.uint8)
-        color_layer[:, :] = color_bgr
-        cv2.copyTo(color_layer, mask, canvas)
-
     if outline_only:
-        cv2.drawContours(canvas, contours, -1, color_bgr, stroke, cv2.LINE_AA)
+        cv2.drawContours(roi, contours, -1, color_bgr, stroke, cv2.LINE_AA)
 
     if shimmer_amt > 0.0 and shimmer_edge_enabled:
-        cv2.drawContours(canvas, contours, -1, shimmer_color, shimmer_thickness, cv2.LINE_AA)
+        cv2.drawContours(roi, contours, -1, shimmer_color, shimmer_thickness, cv2.LINE_AA)
 
 
 def find_nearest_neuron_target(
@@ -1195,8 +1216,10 @@ def main() -> None:
             float(args.audio_reactive_gain),
             float(args.audio_reactive_smooth),
         )
+        log(f"audio envelope ready frames={len(env)}")
     else:
         env = np.zeros(max(1, total_frames if total_frames > 0 else 1), dtype=np.float32)
+        log("audio reactive disabled; using flat envelope")
 
     tmp_video = output_path.with_name(output_path.stem + "__video.mp4")
 
@@ -1215,7 +1238,9 @@ def main() -> None:
         ffmpeg_cmd += ["-preset", args.preset]
     ffmpeg_cmd += ["-pix_fmt", "yuv420p", str(tmp_video)]
 
+    log("starting video encoder subprocess...")
     proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
+    log("video encoder started")
 
     prev_gray = None
     prev_points = np.empty((0, 1, 2), dtype=np.float32)
@@ -1224,6 +1249,8 @@ def main() -> None:
     processed = 0
     t0 = time.time()
     last_log = t0
+    slow_frame_threshold_sec = 2.0
+    render_heartbeat_interval = max(0.5, float(args.log_interval))
 
     while True:
         if total_frames > 0 and processed >= total_frames:
@@ -1232,6 +1259,9 @@ def main() -> None:
         ok, frame = cap.read()
         if not ok:
             break
+
+        frame_start = time.time()
+        last_render_heartbeat = frame_start
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         movers: List[Tuple[float, float, float]] = []
@@ -1560,7 +1590,18 @@ def main() -> None:
         overlay = np.zeros_like(frame, dtype=np.uint8)
         alive: List[Spark] = []
 
-        for sp in sparks:
+        total_sparks_this_frame = len(sparks)
+        for sp_idx, sp in enumerate(sparks, start=1):
+            if (sp_idx % 32) == 0:
+                now_render = time.time()
+                elapsed_render = now_render - frame_start
+                if elapsed_render >= slow_frame_threshold_sec and (now_render - last_render_heartbeat) >= render_heartbeat_interval:
+                    frame_label = f"{processed + 1}/{total_frames}" if total_frames > 0 else f"{processed + 1}"
+                    log(
+                        f"render heartbeat frame={frame_label} "
+                        f"spark={sp_idx}/{total_sparks_this_frame} elapsed={elapsed_render:.1f}s"
+                    )
+                    last_render_heartbeat = now_render
             if color_mode == "antiparticles":
                 cx = frame_w * 0.5
                 cy = frame_h * 0.5
