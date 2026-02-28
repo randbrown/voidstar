@@ -358,6 +358,60 @@ def draw_electrostatic_arc(
         cv2.line(canvas, (bx, by), (ex, ey), color_bgr, 1, cv2.LINE_AA)
 
 
+def draw_neuron_curve(
+    canvas: np.ndarray,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    base_color_bgr: Tuple[int, int, int],
+    pulse_color_bgr: Tuple[int, int, int],
+    travel_t: float,
+    phase: float,
+    life_ratio: float,
+    audio_level: float,
+) -> tuple[int, int]:
+    dx = float(x2 - x1)
+    dy = float(y2 - y1)
+    dist = math.sqrt((dx * dx) + (dy * dy))
+    if dist < 2.0:
+        cv2.line(canvas, (x1, y1), (x2, y2), base_color_bgr, 1, cv2.LINE_AA)
+        return x2, y2
+
+    nx = -dy / dist
+    ny = dx / dist
+    mid_x = 0.5 * (x1 + x2)
+    mid_y = 0.5 * (y1 + y2)
+    amp = min(28.0, max(3.0, dist * (0.07 + (0.09 * clamp01(audio_level)))))
+    amp *= 0.55 + (0.55 * clamp01(life_ratio))
+    bend = math.sin(phase * 0.8) * amp
+    ctrl_x = mid_x + (nx * bend)
+    ctrl_y = mid_y + (ny * bend)
+
+    samples = max(10, min(28, int(round(dist / 7.0))))
+    pts: list[tuple[int, int]] = []
+    for i in range(samples + 1):
+        t = i / max(1, samples)
+        omt = 1.0 - t
+        px = (omt * omt * x1) + (2.0 * omt * t * ctrl_x) + (t * t * x2)
+        py = (omt * omt * y1) + (2.0 * omt * t * ctrl_y) + (t * t * y2)
+        pts.append((int(round(px)), int(round(py))))
+
+    curve = np.array(pts, dtype=np.int32)
+    glow_color = blend_bgr(base_color_bgr, (245, 245, 245), 0.18 + (0.35 * clamp01(audio_level)))
+    cv2.polylines(canvas, [curve], False, glow_color, 2, cv2.LINE_AA)
+    cv2.polylines(canvas, [curve], False, base_color_bgr, 1, cv2.LINE_AA)
+
+    t = clamp01(travel_t)
+    omt = 1.0 - t
+    pulse_x = (omt * omt * x1) + (2.0 * omt * t * ctrl_x) + (t * t * x2)
+    pulse_y = (omt * omt * y1) + (2.0 * omt * t * ctrl_y) + (t * t * y2)
+    px_i = int(round(pulse_x))
+    py_i = int(round(pulse_y))
+    cv2.circle(canvas, (px_i, py_i), 2, pulse_color_bgr, -1, cv2.LINE_AA)
+    return px_i, py_i
+
+
 def abstract_form_spawn_policy(
     x: float,
     y: float,
@@ -422,6 +476,7 @@ def main() -> None:
     ap.add_argument("--crf", type=int, default=19, help="CRF for CPU encoder mode")
 
     ap.add_argument("--max-points", type=int, default=220, help="Maximum tracked points")
+    ap.add_argument("--point-min-distance", type=float, default=6.0, help="Minimum spacing between tracked points (pixels)")
     ap.add_argument("--track-refresh", type=int, default=5, help="Frames between reseeding features")
     ap.add_argument("--motion-threshold", type=float, default=1.2, help="Minimum pixel motion to emit sparks")
     ap.add_argument("--spark-rate", type=float, default=0.65, help="Spark spawn rate per moving point")
@@ -441,6 +496,11 @@ def main() -> None:
         type=float,
         default=1.0,
         help="Electric mode streak/ray intensity multiplier (0.0+; default 1.0)",
+    )
+    ap.add_argument(
+        "--neurons-style",
+        default="voidstar",
+        help="Neurons style: voidstar|white|cyan|audio|biolum|sunset",
     )
 
     ap.add_argument("--flood-in-out", type=str, default="false", help="true|false, add mirrored particle bursts at clip start/end")
@@ -541,6 +601,10 @@ def main() -> None:
         )
 
     rgb_color = parse_rgb(args.color_rgb)
+    neurons_style = str(args.neurons_style).strip().lower().replace("_", "-")
+    if neurons_style not in {"voidstar", "white", "cyan", "audio", "biolum", "sunset"}:
+        raise ValueError("--neurons-style must be voidstar|white|cyan|audio|biolum|sunset")
+
     white_bgr = (255, 255, 255)
     rgb_mode_bgr = rgb_to_bgr(rgb_color)
     random_palette_bgr = [
@@ -589,6 +653,30 @@ def main() -> None:
         (220, 160, 255),
         (200, 240, 255),
     ]
+    neuron_white_palette_bgr = [
+        (245, 245, 245),
+        (255, 255, 255),
+        (235, 235, 235),
+    ]
+    neuron_cyan_palette_bgr = [
+        (255, 245, 170),
+        (255, 225, 135),
+        (245, 205, 120),
+        (230, 200, 90),
+    ]
+    neuron_biolum_palette_bgr = [
+        (255, 220, 115),
+        (240, 190, 130),
+        (220, 170, 175),
+        (200, 160, 255),
+        (170, 210, 255),
+    ]
+    neuron_sunset_palette_bgr = [
+        (255, 140, 130),
+        (240, 110, 165),
+        (215, 170, 255),
+        (170, 220, 255),
+    ]
     string_palette_bgr = [
         (255, 130, 230),
         (255, 220, 120),
@@ -604,6 +692,8 @@ def main() -> None:
         log(f"color_mode={color_mode} color_rgb={rgb_color[0]},{rgb_color[1]},{rgb_color[2]}")
     else:
         log(f"color_mode={color_mode}")
+    if color_mode == "neurons":
+        log(f"neurons_style={neurons_style}")
 
     audio_reactive = parse_bool(args.audio_reactive)
     spark_color_temperature = max(-1.0, min(1.0, float(args.spark_color_temperature)))
@@ -706,7 +796,7 @@ def main() -> None:
                 gray,
                 maxCorners=max(16, int(args.max_points)),
                 qualityLevel=0.01,
-                minDistance=6,
+                minDistance=max(1.0, float(args.point_min_distance)),
                 blockSize=7,
             )
             if pts is not None and pts.size > 0:
@@ -810,9 +900,30 @@ def main() -> None:
                     spark_color_bgr = blend_bgr(palette_color, audio_color, 0.38 + (0.35 * static_energy))
                 elif color_mode == "neurons":
                     neuron_energy = clamp01((0.64 * audio_level) + (0.36 * clamp01(speed / 6.8)) + random.uniform(-0.10, 0.08))
-                    palette_color = random.choice(neuron_palette_bgr)
-                    audio_color = audio_level_to_bgr(clamp01(neuron_energy + 0.12))
-                    spark_color_bgr = blend_bgr(palette_color, audio_color, 0.30 + (0.42 * neuron_energy))
+                    if neurons_style == "white":
+                        palette_color = random.choice(neuron_white_palette_bgr)
+                        audio_color = (245, 245, 245)
+                        spark_color_bgr = blend_bgr(palette_color, audio_color, 0.35 + (0.35 * neuron_energy))
+                    elif neurons_style == "cyan":
+                        palette_color = random.choice(neuron_cyan_palette_bgr)
+                        audio_color = apply_color_temperature_bgr(audio_level_to_bgr(clamp01(neuron_energy + 0.20)), -0.65)
+                        spark_color_bgr = blend_bgr(palette_color, audio_color, 0.38 + (0.42 * neuron_energy))
+                    elif neurons_style == "audio":
+                        palette_color = apply_color_temperature_bgr(audio_level_to_bgr(neuron_energy), -0.22)
+                        audio_color = apply_color_temperature_bgr(audio_level_to_bgr(clamp01(neuron_energy + 0.28)), -0.30)
+                        spark_color_bgr = blend_bgr(palette_color, audio_color, 0.52 + (0.34 * neuron_energy))
+                    elif neurons_style == "biolum":
+                        palette_color = random.choice(neuron_biolum_palette_bgr)
+                        audio_color = apply_color_temperature_bgr(audio_level_to_bgr(clamp01(neuron_energy + 0.15)), -0.15)
+                        spark_color_bgr = blend_bgr(palette_color, audio_color, 0.35 + (0.40 * neuron_energy))
+                    elif neurons_style == "sunset":
+                        palette_color = random.choice(neuron_sunset_palette_bgr)
+                        audio_color = apply_color_temperature_bgr(audio_level_to_bgr(clamp01(neuron_energy + 0.10)), 0.38)
+                        spark_color_bgr = blend_bgr(palette_color, audio_color, 0.35 + (0.38 * neuron_energy))
+                    else:
+                        palette_color = random.choice(neuron_palette_bgr)
+                        audio_color = audio_level_to_bgr(clamp01(neuron_energy + 0.12))
+                        spark_color_bgr = blend_bgr(palette_color, audio_color, 0.30 + (0.42 * neuron_energy))
                 elif color_mode == "strings":
                     string_energy = clamp01((0.46 * audio_level) + (0.54 * clamp01(speed / 7.2)) + random.uniform(-0.08, 0.08))
                     palette_color = random.choice(string_palette_bgr)
@@ -1107,11 +1218,47 @@ def main() -> None:
                 y1 = int(round(sp.y))
                 tx = int(round(sp.target_x))
                 ty = int(round(sp.target_y))
-                pulse = clamp01(0.35 + (0.65 * abs(math.sin(sp.phase + (processed * 0.035)))))
-                link_color = blend_bgr(sp.color_bgr, (245, 245, 245), 0.25 + (0.45 * pulse))
-                cv2.line(overlay, (x1, y1), (tx, ty), link_color, 1, cv2.LINE_AA)
-                node_r = max(1, int(round(radius * (0.85 + (0.6 * pulse)))))
+                pulse_strength = clamp01(0.35 + (0.65 * abs(math.sin(sp.phase + (processed * 0.035)))))
+                travel_t = (0.18 * processed + (sp.phase * 0.12)) % 1.0
+                if neurons_style == "white":
+                    link_color = blend_bgr(sp.color_bgr, (245, 245, 245), 0.40 + (0.42 * pulse_strength))
+                    pulse_color = (255, 255, 255)
+                elif neurons_style == "cyan":
+                    link_color = blend_bgr(sp.color_bgr, (255, 240, 180), 0.32 + (0.45 * pulse_strength))
+                    pulse_color = (255, 250, 220)
+                elif neurons_style == "audio":
+                    audio_pulse = apply_color_temperature_bgr(audio_level_to_bgr(clamp01(0.15 + pulse_strength)), -0.28)
+                    link_color = blend_bgr(sp.color_bgr, audio_pulse, 0.45 + (0.34 * pulse_strength))
+                    pulse_color = blend_bgr(audio_pulse, (245, 245, 245), 0.35)
+                elif neurons_style == "biolum":
+                    link_color = blend_bgr(sp.color_bgr, (235, 230, 175), 0.30 + (0.42 * pulse_strength))
+                    pulse_color = (255, 235, 205)
+                elif neurons_style == "sunset":
+                    link_color = blend_bgr(sp.color_bgr, (220, 170, 255), 0.26 + (0.40 * pulse_strength))
+                    pulse_color = (235, 210, 255)
+                else:
+                    link_color = blend_bgr(sp.color_bgr, (245, 245, 245), 0.25 + (0.45 * pulse_strength))
+                    pulse_color = blend_bgr(sp.color_bgr, (255, 245, 225), 0.28)
+
+                link_color = apply_color_temperature_bgr(link_color, spark_color_temperature)
+                pulse_color = apply_color_temperature_bgr(pulse_color, spark_color_temperature)
+                pulse_x, pulse_y = draw_neuron_curve(
+                    overlay,
+                    x1=x1,
+                    y1=y1,
+                    x2=tx,
+                    y2=ty,
+                    base_color_bgr=link_color,
+                    pulse_color_bgr=pulse_color,
+                    travel_t=travel_t,
+                    phase=sp.phase + (processed * 0.045),
+                    life_ratio=life_ratio,
+                    audio_level=audio_level,
+                )
+                node_r = max(1, int(round(radius * (0.85 + (0.6 * pulse_strength)))))
                 cv2.circle(overlay, (x1, y1), node_r, sp.color_bgr, -1, cv2.LINE_AA)
+                if random.random() < (0.18 + (0.26 * pulse_strength)):
+                    cv2.circle(overlay, (pulse_x, pulse_y), 1, pulse_color, -1, cv2.LINE_AA)
             elif color_mode == "strings":
                 x1 = sp.x
                 y1 = sp.y
