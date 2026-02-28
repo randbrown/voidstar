@@ -35,8 +35,9 @@ set -euo pipefail
 #    GLITCHFIELD_PRESET="clean"        # clean | gritty | chaos | custom
 #    PIPELINE_MODE_DEFAULT="preview"
 
-# Pipeline mode: all | end-only | preview | custom
-PIPELINE_MODE_DEFAULT="custom"
+# Pipeline mode: all | end-only | preview | custom | preview,custom
+PIPELINE_MODE_DEFAULT="preview,custom"
+PIPELINE_LOG_TAG_DEFAULT="sensoria"
 
 # For custom mode, choose exactly which targets run.
 RUN_60S_START=0
@@ -1748,6 +1749,12 @@ main() {
         INPUT_VIDEO=$(eval echo "$INPUT_VIDEO")
     fi
     STEM="$(basename "${INPUT_VIDEO%.*}")"
+    PIPELINE_LOG_TAG="${PIPELINE_LOG_TAG:-$PIPELINE_LOG_TAG_DEFAULT}"
+    export VOIDSTAR_LOG_PREFIX="$PIPELINE_LOG_TAG"
+
+    local pipeline_start_epoch pipeline_end_epoch
+    pipeline_start_epoch="$(date +%s)"
+    echo "Start: $(date '+%Y-%m-%d %H:%M:%S')"
 
     if [[ -z "${OUTDIR}" ]]; then
         if [[ -n "$OUTDIR_DEFAULT" ]]; then
@@ -1860,48 +1867,78 @@ main() {
         BASE_REELS_OVERLAY="$REELS_INPUT_VIDEO"
     fi
 
+    local mode_csv mode_part
+    local -a mode_parts
+    local mode_preview=0 mode_custom=0 mode_end_only=0 mode_all=0
+    mode_csv="${PIPELINE_MODE// /}"
+    IFS=',' read -r -a mode_parts <<< "$mode_csv"
+    for mode_part in "${mode_parts[@]}"; do
+        case "$mode_part" in
+            preview) mode_preview=1 ;;
+            custom) mode_custom=1 ;;
+            end-only) mode_end_only=1 ;;
+            all) mode_all=1 ;;
+            "") ;;
+            *) die "Unknown --mode token: $mode_part (use preview|custom|end-only|all, comma-separated)" ;;
+        esac
+    done
+
+    if (( mode_preview == 1 )); then
+        echo "--- Preview phase (quick 60s start/end, reels off) ---"
+        local reels_overlay_saved="$ENABLE_REELS_OVERLAY_STEP"
+        ENABLE_REELS_OVERLAY_STEP=0
+        run_60s_start
+        run_60s_end
+        ENABLE_REELS_OVERLAY_STEP="$reels_overlay_saved"
+    fi
+
     declare -a TARGETS=()
-    if [[ "$PIPELINE_MODE" == "preview" ]]; then
-        TARGETS=(run_60s_start)
-    elif [[ "$PIPELINE_MODE" == "end-only" ]]; then
-        TARGETS=(run_60s_end)
-    elif [[ "$PIPELINE_MODE" == "custom" ]]; then
+    if (( mode_custom == 1 )); then
         (( RUN_60S_START == 1 )) && TARGETS+=(run_60s_start)
         (( RUN_60S_END == 1 )) && TARGETS+=(run_60s_end)
         (( RUN_180S_START == 1 )) && TARGETS+=(run_180s_start)
         (( RUN_180S_END == 1 )) && TARGETS+=(run_180s_end)
         (( RUN_FULL == 1 )) && TARGETS+=(run_full)
-        (( ${#TARGETS[@]} > 0 )) || die "PIPELINE_MODE=custom but no RUN_* targets enabled"
-    else
+        (( ${#TARGETS[@]} > 0 )) || die "PIPELINE_MODE includes custom but no RUN_* targets enabled"
+    elif (( mode_end_only == 1 )); then
+        TARGETS=(run_60s_end)
+    elif (( mode_all == 1 )); then
         TARGETS=(run_60s_start run_60s_end run_180s_start run_180s_end run_full)
     fi
 
-    echo "Targets: ${TARGETS[*]}"
+    if (( ${#TARGETS[@]} > 0 )); then
+        echo "Targets: ${TARGETS[*]}"
 
-    if (( JOBS <= 1 )); then
-        for fn in "${TARGETS[@]}"; do "$fn"; done
-        exit 0
+        if (( JOBS <= 1 )); then
+            for fn in "${TARGETS[@]}"; do "$fn"; done
+        else
+            echo "--- Running targets in parallel (jobs=$JOBS) ---"
+            _sem_init "$JOBS"
+
+            pids=()
+            for fn in "${TARGETS[@]}"; do
+                _sem_acquire
+                (
+                    set -euo pipefail
+                    "$fn"
+                ) &
+                pids+=( "$!" )
+                _sem_release
+            done
+
+            failed=0
+            for pid in "${pids[@]}"; do
+                if ! wait "$pid"; then failed=1; fi
+            done
+            (( failed == 0 )) || die "One or more parallel jobs failed."
+        fi
+    elif (( mode_preview == 0 )); then
+        die "No targets selected for PIPELINE_MODE=$PIPELINE_MODE"
     fi
 
-    echo "--- Running targets in parallel (jobs=$JOBS) ---"
-    _sem_init "$JOBS"
-
-    pids=()
-    for fn in "${TARGETS[@]}"; do
-        _sem_acquire
-        (
-            set -euo pipefail
-            "$fn"
-        ) &
-        pids+=( "$!" )
-        _sem_release
-    done
-
-    failed=0
-    for pid in "${pids[@]}"; do
-        if ! wait "$pid"; then failed=1; fi
-    done
-    (( failed == 0 )) || die "One or more parallel jobs failed."
+    pipeline_end_epoch="$(date +%s)"
+    echo "End:   $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Elapsed: $((pipeline_end_epoch - pipeline_start_epoch))s"
 }
 
 main "$@"

@@ -25,6 +25,14 @@ import cv2
 import numpy as np
 
 
+def log_prefix() -> str:
+    return os.environ.get("VOIDSTAR_LOG_PREFIX", "voidstar")
+
+
+def vlog(message: str) -> None:
+    print(f"[{log_prefix()}] {message}")
+
+
 def bool_flag(v: str) -> bool:
     v = v.strip().lower()
     if v in ("1", "true", "t", "yes", "y", "on"):
@@ -408,7 +416,7 @@ def alpha_content_bbox(alpha: np.ndarray, threshold: float) -> tuple[int, int, i
 
 
 def run_checked(cmd: list[str]) -> None:
-    print("[voidstar] ▶", " ".join(str(x) for x in cmd))
+    vlog("▶ " + " ".join(str(x) for x in cmd))
     subprocess.run(cmd, check=True)
 
 
@@ -599,10 +607,10 @@ def main() -> None:
 
         script_path = str(Path(__file__).resolve())
         passthrough_args = sys.argv[3:]
-        print(f"[voidstar] matched {len(input_paths)} input files")
+        vlog(f"matched {len(input_paths)} input files")
 
         for i, input_path in enumerate(input_paths, start=1):
-            print(f"[voidstar] batch {i}/{len(input_paths)} input={input_path}")
+            vlog(f"batch {i}/{len(input_paths)} input={input_path}")
             cmd = [sys.executable, script_path, str(input_path), str(logo_path), *passthrough_args]
             subprocess.run(cmd, check=True)
         return
@@ -731,7 +739,7 @@ def main() -> None:
     audio_env = None
     bass_env = None
     if reactive_glow_strength > 0.0 or reactive_scale_strength > 0.0:
-        print("[voidstar] analyzing audio for reactive effects...")
+        vlog("analyzing audio for reactive effects...")
         audio_env, bass_env = build_audio_envelopes_for_fps(
             input_path=input_path,
             start=float(args.start),
@@ -742,7 +750,7 @@ def main() -> None:
             bass_hz=float(args.audio_reactive_bass_hz),
             target_frames=(total_frames if total_frames > 0 else None),
         )
-        print(f"[voidstar] reactive envelopes frames={len(audio_env)}")
+        vlog(f"reactive envelopes frames={len(audio_env)}")
 
     tmp_video = output_path.with_name(output_path.stem + "__video.mp4")
 
@@ -1186,12 +1194,12 @@ def main() -> None:
                 remain = max(0, total_frames - processed)
                 eta = remain / max(proc_fps, 1e-9)
                 pct = 100.0 * processed / max(1, total_frames)
-                print(
-                    f"[voidstar] frame={processed}/{total_frames} ({pct:.1f}%) "
+                vlog(
+                    f"frame={processed}/{total_frames} ({pct:.1f}%) "
                     f"fps={proc_fps:.2f} eta={format_eta(eta)}"
                 )
             else:
-                print(f"[voidstar] frame={processed} fps={proc_fps:.2f} eta=--:--:--")
+                vlog(f"frame={processed} fps={proc_fps:.2f} eta=--:--:--")
             last_log = now
 
     cap.release()
@@ -1240,8 +1248,8 @@ def main() -> None:
         local_out = output_path.with_name(output_path.stem + "__reels_local_out.mp4")
         final_out = output_path.with_name(output_path.stem + "__reels_local_final.mp4")
 
-        print(
-            f"[voidstar] local reels region x={roi_min_x} y={roi_min_y} "
+        vlog(
+            f"local reels region x={roi_min_x} y={roi_min_y} "
             f"w={crop_w} h={crop_h}"
         )
 
@@ -1308,8 +1316,8 @@ def main() -> None:
         local_out.unlink(missing_ok=True)
 
     elapsed = time.time() - t0
-    print(f"[voidstar] done={output_path}")
-    print(f"[voidstar] frames={processed} elapsed={elapsed:.2f}s")
+    vlog(f"done={output_path}")
+    vlog(f"frames={processed} elapsed={elapsed:.2f}s")
 
 
 if __name__ == "__main__":

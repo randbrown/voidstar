@@ -74,6 +74,14 @@ def slug(text: str, max_len: int = 10) -> str:
     return cleaned[:max_len]
 
 
+def log_prefix() -> str:
+    return os.environ.get("VOIDSTAR_LOG_PREFIX", "voidstar-title-hook")
+
+
+def vlog(message: str) -> None:
+    print(f"[{log_prefix()}] {message}")
+
+
 def normalize_text_arg(text: str, newline_token: str) -> str:
     value = str(text)
     if newline_token:
@@ -1101,20 +1109,20 @@ def main() -> None:
             alpha = np.full((bgr.shape[0], bgr.shape[1], 1), 255, dtype=np.uint8)
             logo_rgba = np.concatenate([bgr, alpha], axis=2)
 
-    print(f"[voidstar-title-hook] input:  {input_path}")
-    print(f"[voidstar-title-hook] output: {output_path}")
-    print(f"[voidstar-title-hook] size:   {width}x{height} @ {fps:.3f} fps")
-    print(f"[voidstar-title-hook] dur:    {duration:.2f}s  hook={args.duration:.2f}s fade={args.fade_out_duration:.2f}s")
-    print(f"[voidstar-title-hook] encoder:{encoder} bitrate={bitrate if bitrate > 0 else 'auto-crf'}")
+    vlog(f"input:  {input_path}")
+    vlog(f"output: {output_path}")
+    vlog(f"size:   {width}x{height} @ {fps:.3f} fps")
+    vlog(f"dur:    {duration:.2f}s  hook={args.duration:.2f}s fade={args.fade_out_duration:.2f}s")
+    vlog(f"encoder:{encoder} bitrate={bitrate if bitrate > 0 else 'auto-crf'}")
 
-    print("[voidstar-title-hook] phase: audio envelope extraction...")
+    vlog("phase: audio envelope extraction...")
     audio_env_t0 = time.monotonic()
     audio_env = build_audio_envelope(input_path, fps=fps, target_frames=frame_count)
-    print(f"[voidstar-title-hook] phase: audio envelope ready in {time.monotonic() - audio_env_t0:.2f}s")
+    vlog(f"phase: audio envelope ready in {time.monotonic() - audio_env_t0:.2f}s")
 
     enc_cmd = build_video_encoder_cmd(width, height, fps, encoder, bitrate, temp_video)
     ffmpeg_proc = subprocess.Popen(enc_cmd, stdin=subprocess.PIPE)
-    print("[voidstar-title-hook] phase: frame processing + encode...")
+    vlog("phase: frame processing + encode...")
 
     rng = np.random.default_rng(args.seed)
     track_prev_gray = None
@@ -1328,14 +1336,12 @@ def main() -> None:
                 eta = remain / max(1e-6, proc_fps)
                 pct = (100.0 * idx / max(1, frame_count))
                 if hook_sparks_enabled:
-                    print(
-                        f"[voidstar-title-hook] frame={idx}/{frame_count} ({pct:.1f}%) fps={proc_fps:.2f} eta={eta:.1f}s sparks={len(hook_sparks)}",
-                        flush=True,
+                    vlog(
+                        f"frame={idx}/{frame_count} ({pct:.1f}%) fps={proc_fps:.2f} eta={eta:.1f}s sparks={len(hook_sparks)}"
                     )
                 else:
-                    print(
-                        f"[voidstar-title-hook] frame={idx}/{frame_count} ({pct:.1f}%) fps={proc_fps:.2f} eta={eta:.1f}s",
-                        flush=True,
+                    vlog(
+                        f"frame={idx}/{frame_count} ({pct:.1f}%) fps={proc_fps:.2f} eta={eta:.1f}s"
                     )
 
         if ffmpeg_proc.stdin is not None:
@@ -1344,11 +1350,11 @@ def main() -> None:
         if rc != 0:
             die("FFmpeg video encoding failed")
 
-        print("[voidstar-title-hook] phase: mux original audio...")
+        vlog("phase: mux original audio...")
         mux_t0 = time.monotonic()
         mux_original_audio(temp_video, input_path, output_path)
-        print(f"[voidstar-title-hook] phase: mux finished in {time.monotonic() - mux_t0:.2f}s")
-        print(f"[voidstar-title-hook] done: {output_path}")
+        vlog(f"phase: mux finished in {time.monotonic() - mux_t0:.2f}s")
+        vlog(f"done: {output_path}")
 
     finally:
         cap.release()

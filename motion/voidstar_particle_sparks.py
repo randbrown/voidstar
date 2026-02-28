@@ -22,7 +22,8 @@ import numpy as np
 
 
 def log(msg: str) -> None:
-    print(f"[voidstar] {msg}", flush=True)
+    prefix = os.environ.get("VOIDSTAR_LOG_PREFIX", "voidstar")
+    print(f"[{prefix}] {msg}", flush=True)
 
 
 def run_cmd(cmd: List[str], heartbeat_label: str | None = None, heartbeat_interval_sec: float = 1.0) -> None:
