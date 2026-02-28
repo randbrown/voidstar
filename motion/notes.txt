@@ -41,7 +41,7 @@ conda run -n mp311 python motion/voidstar_particle_sparks.py \
 --log-interval 1.0 --start 1000 --duration 15
 
 
---particle sparks neurons
+--particle sparks neurons biolum
 cd /home/brown/code/voidstar && \
 conda run -n mp311 python motion/voidstar_particle_sparks.py \
 /home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
@@ -51,6 +51,30 @@ conda run -n mp311 python motion/voidstar_particle_sparks.py \
 --audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
 --flood-in-out true --flood-seconds 2 --flood-spawn-mult 2.0 --flood-extra-sources 4 --flood-velocity-mult 1.35 \
 --log-interval 1.0 --start 1000 --duration 15
+
+--particle sparks neurons sunset
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
+--color-mode neurons --neurons-style sunset --point-min-distance 512 --spark-size 16 --max-points 8 \
+--neurons-curvature 1.0 --neurons-node-irregularity .5 --neurons-pulse-speed 0.25 --neurons-connections 4 \
+--spark-life-frames 60 --track-refresh 60 --motion-threshold 0.5 --neurons-pulse-boost 2 \
+--audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 2.0 --flood-extra-sources 4 --flood-velocity-mult 1.35 \
+--log-interval 1.0 --start 1000 --duration 15
+
+
+--particle sparks emmons
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
+--color-mode neurons --neurons-style sunset   \
+--color-mode emmons --spark-size 10 --spark-life-frames 48 --max-points 16 --point-min-distance 140 \
+--motion-threshold 0.5 --neurons-pulse-boost 2 \
+--audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 2.0 --flood-extra-sources 4 --flood-velocity-mult 1.35 \
+--log-interval 1.0 --start 1000 --duration 15
+
 
 
 --particle sparks strings

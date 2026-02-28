@@ -371,6 +371,7 @@ def draw_neuron_curve(
     life_ratio: float,
     audio_level: float,
     curvature: float,
+    pulse_boost: float,
 ) -> tuple[int, int]:
     dx = float(x2 - x1)
     dy = float(y2 - y1)
@@ -383,14 +384,17 @@ def draw_neuron_curve(
     ny = dx / dist
     mid_x = 0.5 * (x1 + x2)
     mid_y = 0.5 * (y1 + y2)
-    amp = min(28.0, max(3.0, dist * (0.07 + (0.09 * clamp01(audio_level)))))
+    curvature_strength = max(0.0, float(curvature))
+    base_amp = max(3.0, dist * (0.06 + (0.11 * clamp01(audio_level))))
+    amp = base_amp * (0.65 + (0.85 * curvature_strength))
     amp *= 0.55 + (0.55 * clamp01(life_ratio))
-    amp *= max(0.0, float(curvature))
+    amp_cap = 28.0 + (42.0 * max(0.0, curvature_strength - 1.0))
+    amp = min(amp_cap, amp)
     bend = math.sin(phase * 0.8) * amp
     ctrl_x = mid_x + (nx * bend)
     ctrl_y = mid_y + (ny * bend)
 
-    samples = max(10, min(28, int(round(dist / 7.0))))
+    samples = max(10, min(36, int(round((dist / 7.0) * (0.9 + (0.25 * curvature_strength))))))
     pts: list[tuple[int, int]] = []
     for i in range(samples + 1):
         t = i / max(1, samples)
@@ -410,8 +414,125 @@ def draw_neuron_curve(
     pulse_y = (omt * omt * y1) + (2.0 * omt * t * ctrl_y) + (t * t * y2)
     px_i = int(round(pulse_x))
     py_i = int(round(pulse_y))
-    cv2.circle(canvas, (px_i, py_i), 2, pulse_color_bgr, -1, cv2.LINE_AA)
+
+    pulse_strength = clamp01(0.35 + (0.65 * clamp01(audio_level)))
+    pb = max(0.0, float(pulse_boost))
+    head_r = max(2, int(round(1.0 + (1.2 * pb) + (1.2 * pulse_strength))))
+    glow_mix = clamp01(0.35 + (0.45 * pulse_strength))
+    glow_color = blend_bgr(pulse_color_bgr, (245, 245, 245), glow_mix)
+    cv2.circle(canvas, (px_i, py_i), head_r + 1, glow_color, -1, cv2.LINE_AA)
+    cv2.circle(canvas, (px_i, py_i), head_r, pulse_color_bgr, -1, cv2.LINE_AA)
+
+    tail_steps = 3
+    for i in range(1, tail_steps + 1):
+        dt = (0.06 * i) * (0.85 + (0.45 * clamp01(pb)))
+        tt = max(0.0, t - dt)
+        omt_t = 1.0 - tt
+        tx = (omt_t * omt_t * x1) + (2.0 * omt_t * tt * ctrl_x) + (tt * tt * x2)
+        ty = (omt_t * omt_t * y1) + (2.0 * omt_t * tt * ctrl_y) + (tt * tt * y2)
+        tr = max(1, head_r - i)
+        tail_color = blend_bgr(base_color_bgr, pulse_color_bgr, max(0.15, 0.55 - (0.12 * i)))
+        cv2.circle(canvas, (int(round(tx)), int(round(ty))), tr, tail_color, -1, cv2.LINE_AA)
     return px_i, py_i
+
+
+def draw_neuron_node(
+    canvas: np.ndarray,
+    x: float,
+    y: float,
+    radius: int,
+    color_bgr: Tuple[int, int, int],
+    phase: float,
+    angle: float,
+    pulse_strength: float,
+    audio_level: float,
+    irregularity_scale: float,
+) -> None:
+    cx = int(round(x))
+    cy = int(round(y))
+    r = max(1, int(radius))
+    if r <= 2:
+        cv2.circle(canvas, (cx, cy), r, color_bgr, -1, cv2.LINE_AA)
+        return
+
+    n_pts = max(7, min(13, 7 + r))
+    irregularity = 0.08 + (0.12 * clamp01(audio_level)) + (0.08 * clamp01(pulse_strength))
+    irregularity *= max(0.0, float(irregularity_scale))
+    pts: list[list[int]] = []
+    for i in range(n_pts):
+        t = (2.0 * math.pi * i) / n_pts
+        wobble = (
+            0.55 * math.sin((phase * 1.9) + (i * 1.37))
+            + 0.45 * math.cos((phase * 1.15) - (i * 0.91))
+        )
+        rr = max(1.0, r * (1.0 + (wobble * irregularity)))
+        px = int(round(cx + (math.cos(t + angle) * rr)))
+        py = int(round(cy + (math.sin(t + angle) * rr)))
+        pts.append([px, py])
+
+    poly = np.array(pts, dtype=np.int32)
+    cv2.fillPoly(canvas, [poly], color_bgr, cv2.LINE_AA)
+    rim = blend_bgr(color_bgr, (245, 245, 245), 0.18 + (0.22 * clamp01(pulse_strength)))
+    cv2.polylines(canvas, [poly], True, rim, 1, cv2.LINE_AA)
+
+
+def draw_emmons_atom(
+    canvas: np.ndarray,
+    x: float,
+    y: float,
+    radius: int,
+    color_bgr: Tuple[int, int, int],
+    angle: float,
+    phase: float,
+) -> None:
+    cx = int(round(x))
+    cy = int(round(y))
+    r = max(3, int(radius))
+
+    orbit_a = max(4, int(round(r * 1.20)))
+    orbit_b = max(2, int(round(r * 0.48)))
+    orbit_thick = max(1, int(round(r * 0.04)))
+    electron_r = max(1, int(round(r * 0.17)))
+    nucleus_r = max(1, int(round(r * 0.24)))
+
+    glow_color = blend_bgr(color_bgr, (240, 240, 240), 0.20)
+    base_deg = math.degrees(angle)
+    for orbit_idx, orbit_offset_deg in enumerate((0.0, 60.0, 120.0)):
+        orbit_deg = base_deg + orbit_offset_deg
+        cv2.ellipse(
+            canvas,
+            (cx, cy),
+            (orbit_a, orbit_b),
+            orbit_deg,
+            0,
+            360,
+            glow_color,
+            orbit_thick,
+            cv2.LINE_AA,
+        )
+        cv2.ellipse(
+            canvas,
+            (cx, cy),
+            (orbit_a, orbit_b),
+            orbit_deg,
+            0,
+            360,
+            color_bgr,
+            orbit_thick,
+            cv2.LINE_AA,
+        )
+
+        t = phase + (orbit_idx * 2.15)
+        ex0 = orbit_a * math.cos(t)
+        ey0 = orbit_b * math.sin(t)
+        th = math.radians(orbit_deg)
+        ex = int(round(cx + (ex0 * math.cos(th)) - (ey0 * math.sin(th))))
+        ey = int(round(cy + (ex0 * math.sin(th)) + (ey0 * math.cos(th))))
+        cv2.circle(canvas, (ex, ey), electron_r + 1, glow_color, -1, cv2.LINE_AA)
+        cv2.circle(canvas, (ex, ey), electron_r, color_bgr, -1, cv2.LINE_AA)
+
+    cv2.circle(canvas, (cx, cy), nucleus_r + 1, glow_color, -1, cv2.LINE_AA)
+    cv2.circle(canvas, (cx, cy), nucleus_r, color_bgr, -1, cv2.LINE_AA)
 
 
 def find_nearest_neuron_target(
@@ -599,10 +720,22 @@ def main() -> None:
         help="Neurons: pulse travel speed multiplier along links",
     )
     ap.add_argument(
+        "--neurons-pulse-boost",
+        type=float,
+        default=1.0,
+        help="Neurons: pulse visibility/intensity multiplier",
+    )
+    ap.add_argument(
         "--neurons-connections",
         type=int,
         default=1,
         help="Neurons: nearest-neighbor connections per neuron",
+    )
+    ap.add_argument(
+        "--neurons-node-irregularity",
+        type=float,
+        default=1.0,
+        help="Neurons: node shape irregularity multiplier (0=smooth circle, 1=default)",
     )
 
     ap.add_argument("--flood-in-out", type=str, default="false", help="true|false, add mirrored particle bursts at clip start/end")
@@ -620,7 +753,7 @@ def main() -> None:
         default="white",
         help=(
             "white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes|"
-            "electric|electrostatic|neurons|strings"
+            "electric|electrostatic|neurons|strings|emmons"
         ),
     )
     ap.add_argument("--color-rgb", default="255,255,255", help="Spark color as R,G,B (used when --color-mode rgb)")
@@ -695,11 +828,12 @@ def main() -> None:
         "electrostatic",
         "neurons",
         "strings",
+        "emmons",
     }:
         raise ValueError(
             "--color-mode must be "
             "white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes|"
-            "electric|electrostatic|neurons|strings"
+            "electric|electrostatic|neurons|strings|emmons"
         )
 
     rgb_color = parse_rgb(args.color_rgb)
@@ -709,7 +843,9 @@ def main() -> None:
     neurons_link_max_distance = max(0.0, float(args.neurons_link_max_distance))
     neurons_curvature = max(0.0, float(args.neurons_curvature))
     neurons_pulse_speed = max(0.0, float(args.neurons_pulse_speed))
+    neurons_pulse_boost = max(0.0, float(args.neurons_pulse_boost))
     neurons_connections = max(1, min(8, int(args.neurons_connections)))
+    neurons_node_irregularity = max(0.0, float(args.neurons_node_irregularity))
 
     white_bgr = (255, 255, 255)
     rgb_mode_bgr = rgb_to_bgr(rgb_color)
@@ -790,6 +926,12 @@ def main() -> None:
         (160, 255, 170),
         (255, 150, 120),
     ]
+    emmons_palette_bgr = [
+        (55, 165, 248),
+        (60, 70, 245),
+        (185, 140, 95),
+        (85, 210, 248),
+    ]
 
     log(f"input={input_path}")
     log(f"output={output_path}")
@@ -807,7 +949,9 @@ def main() -> None:
         log(
             f"neurons_curvature={neurons_curvature:.2f} "
             f"neurons_pulse_speed={neurons_pulse_speed:.2f} "
-            f"neurons_connections={neurons_connections}"
+            f"neurons_pulse_boost={neurons_pulse_boost:.2f} "
+            f"neurons_connections={neurons_connections} "
+            f"neurons_node_irregularity={neurons_node_irregularity:.2f}"
         )
 
     audio_reactive = parse_bool(args.audio_reactive)
@@ -946,6 +1090,8 @@ def main() -> None:
             spawn_prob = clamp01(spawn_prob * 0.74)
         elif color_mode == "strings":
             spawn_prob = clamp01(spawn_prob * 0.92)
+        elif color_mode == "emmons":
+            spawn_prob = clamp01(spawn_prob * 0.82)
 
         if flood_strength > 0.0 and flood_extra_sources > 0:
             extra_count = int(round(flood_extra_sources * flood_strength))
@@ -976,6 +1122,8 @@ def main() -> None:
             elif color_mode == "neurons" and random.random() < (0.18 + (0.24 * audio_level)):
                 n_spawn += 1
             elif color_mode == "strings" and random.random() < (0.34 + (0.18 * audio_level)):
+                n_spawn += 1
+            elif color_mode == "emmons" and random.random() < (0.22 + (0.18 * audio_level)):
                 n_spawn += 1
             for _ in range(n_spawn):
                 angle = random.uniform(0.0, 2.0 * math.pi)
@@ -1044,6 +1192,8 @@ def main() -> None:
                     palette_color = random.choice(string_palette_bgr)
                     audio_color = audio_level_to_bgr(string_energy)
                     spark_color_bgr = blend_bgr(palette_color, audio_color, 0.44 + (0.30 * string_energy))
+                elif color_mode == "emmons":
+                    spark_color_bgr = random.choice(emmons_palette_bgr)
                 else:
                     speed_level = clamp01(speed / 6.0)
                     anti_energy = clamp01((0.72 * audio_level) + (0.28 * speed_level) + random.uniform(-0.08, 0.08))
@@ -1125,6 +1275,14 @@ def main() -> None:
                     vel *= random.uniform(0.70, 0.95)
                     vx = math.cos(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.35, float(args.spark_jitter) * 0.35)
                     vy = math.sin(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.35, float(args.spark_jitter) * 0.35)
+                elif color_mode == "emmons":
+                    life = max(8, int(round(life * random.uniform(1.15, 1.95))))
+                    radius = max(3, int(round(radius * random.uniform(1.20, 1.95))))
+                    shape_kind = "emmons"
+                    shape_ang_vel = random.uniform(-0.08, 0.08)
+                    vel *= random.uniform(0.35, 0.65)
+                    vx = math.cos(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.20, float(args.spark_jitter) * 0.20)
+                    vy = math.sin(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.20, float(args.spark_jitter) * 0.20)
 
                 sparks.append(
                     Spark(
@@ -1262,6 +1420,11 @@ def main() -> None:
                     sp.vy += ty * pull
                 sp.vx += random.uniform(-0.08, 0.08)
                 sp.vy += random.uniform(-0.08, 0.08)
+            elif color_mode == "emmons":
+                sp.vx += random.uniform(-0.05, 0.05) * (0.5 + (0.5 * audio_level))
+                sp.vy += random.uniform(-0.05, 0.05) * (0.5 + (0.5 * audio_level))
+                sp.phase += 0.12 + (0.26 * audio_level)
+                sp.angle += sp.ang_vel
             elif color_mode == "strings":
                 speed_norm = math.sqrt((sp.vx * sp.vx) + (sp.vy * sp.vy))
                 if speed_norm > 1e-6:
@@ -1275,7 +1438,7 @@ def main() -> None:
 
             sp.x += sp.vx
             sp.y += sp.vy
-            if color_mode in {"abstract-forms", "neurons"}:
+            if color_mode in {"abstract-forms", "neurons", "emmons"}:
                 sp.angle += sp.ang_vel
             if color_mode == "antiparticles":
                 sp.vx *= 0.972
@@ -1294,6 +1457,10 @@ def main() -> None:
                 sp.vx *= 0.955
                 sp.vy *= 0.955
                 sp.ang_vel *= 0.992
+            elif color_mode == "emmons":
+                sp.vx *= 0.964
+                sp.vy *= 0.964
+                sp.ang_vel *= 0.996
             elif color_mode == "strings":
                 sp.vx *= 0.965
                 sp.vy *= 0.965
@@ -1413,8 +1580,9 @@ def main() -> None:
                 for idx_conn, (target_x_conn, target_y_conn) in enumerate(nearest_targets):
                     tx = int(round(target_x_conn))
                     ty = int(round(target_y_conn))
+                    pulse_speed = neurons_pulse_speed * (1.0 + (0.95 * audio_level if audio_reactive else 0.0))
                     travel_t = (
-                        (0.18 * processed * neurons_pulse_speed)
+                        (0.18 * processed * pulse_speed)
                         + (sp.phase * 0.12)
                         + (idx_conn * 0.19)
                     ) % 1.0
@@ -1431,9 +1599,21 @@ def main() -> None:
                         life_ratio=life_ratio,
                         audio_level=audio_level,
                         curvature=neurons_curvature,
+                        pulse_boost=neurons_pulse_boost * (1.0 + (0.9 * audio_level if audio_reactive else 0.0)),
                     )
                 node_r = max(1, int(round(radius * (0.85 + (0.6 * pulse_strength)))))
-                cv2.circle(overlay, (x1, y1), node_r, sp.color_bgr, -1, cv2.LINE_AA)
+                draw_neuron_node(
+                    overlay,
+                    x=sp.x,
+                    y=sp.y,
+                    radius=node_r,
+                    color_bgr=sp.color_bgr,
+                    phase=sp.phase,
+                    angle=sp.angle,
+                    pulse_strength=pulse_strength,
+                    audio_level=audio_level,
+                    irregularity_scale=neurons_node_irregularity,
+                )
                 if random.random() < (0.18 + (0.26 * pulse_strength)):
                     cv2.circle(overlay, (pulse_x, pulse_y), 1, pulse_color, -1, cv2.LINE_AA)
             elif color_mode == "strings":
@@ -1452,6 +1632,17 @@ def main() -> None:
                     py = y1 - (sp.vy * back) + (ny * wave)
                     pts.append((int(round(px)), int(round(py))))
                 cv2.polylines(overlay, [np.array(pts, dtype=np.int32)], False, sp.color_bgr, max(1, radius), cv2.LINE_AA)
+            elif color_mode == "emmons":
+                atom_radius = max(3, int(round(radius * (1.0 + (0.9 * life_ratio)))))
+                draw_emmons_atom(
+                    overlay,
+                    x=sp.x,
+                    y=sp.y,
+                    radius=atom_radius,
+                    color_bgr=sp.color_bgr,
+                    angle=sp.angle,
+                    phase=sp.phase + (processed * 0.06),
+                )
             else:
                 cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, sp.color_bgr, -1, cv2.LINE_AA)
             if color_mode == "antiparticles" and radius >= 2 and life_ratio > 0.35:
@@ -1462,7 +1653,18 @@ def main() -> None:
                 accent_color = apply_color_temperature_bgr((32, 178, 255), spark_color_temperature)
                 cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), 1, accent_color, -1, cv2.LINE_AA)
             if color_mode == "neurons" and life_ratio > 0.22 and random.random() < 0.24:
-                cv2.circle(overlay, (int(round(sp.target_x)), int(round(sp.target_y))), 1, (255, 245, 235), -1, cv2.LINE_AA)
+                draw_neuron_node(
+                    overlay,
+                    x=sp.target_x,
+                    y=sp.target_y,
+                    radius=1,
+                    color_bgr=(255, 245, 235),
+                    phase=sp.phase + 0.65,
+                    angle=-sp.angle,
+                    pulse_strength=life_ratio,
+                    audio_level=audio_level,
+                    irregularity_scale=neurons_node_irregularity,
+                )
             alive.append(sp)
 
         sparks = alive
@@ -1476,6 +1678,8 @@ def main() -> None:
             alpha = clamp01(alpha * 0.95)
         elif color_mode == "strings":
             alpha = clamp01(alpha * 0.98)
+        elif color_mode == "emmons":
+            alpha = clamp01(alpha * 0.96)
         if alpha > 0:
             frame = cv2.addWeighted(frame, 1.0, overlay, alpha, 0.0)
 
