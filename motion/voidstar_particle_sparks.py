@@ -826,6 +826,18 @@ def main() -> None:
     ap.add_argument("--spark-size", type=float, default=2.2, help="Base spark radius in pixels")
     ap.add_argument("--spark-opacity", type=float, default=0.70, help="Overlay opacity multiplier")
     ap.add_argument(
+        "--spark-repel-strength",
+        type=float,
+        default=0.0,
+        help="Global particle repulsion strength (0=off)",
+    )
+    ap.add_argument(
+        "--spark-repel-radius",
+        type=float,
+        default=0.0,
+        help="Global particle repulsion radius in pixels (0=off)",
+    )
+    ap.add_argument(
         "--spark-color-temperature",
         type=float,
         default=0.0,
@@ -1200,6 +1212,8 @@ def main() -> None:
 
     audio_reactive = parse_bool(args.audio_reactive)
     spark_color_temperature = max(-1.0, min(1.0, float(args.spark_color_temperature)))
+    spark_repel_strength = max(0.0, float(args.spark_repel_strength))
+    spark_repel_radius = max(0.0, float(args.spark_repel_radius))
     electric_ray_boost = max(0.0, float(args.electric_ray_boost))
     flood_in_out = parse_bool(args.flood_in_out)
     flood_seconds = max(0.0, float(args.flood_seconds))
@@ -1209,6 +1223,11 @@ def main() -> None:
 
     if abs(spark_color_temperature) > 1e-6:
         log(f"spark_color_temperature={spark_color_temperature:+.2f}")
+    if spark_repel_strength > 0.0 and spark_repel_radius > 0.0:
+        log(
+            f"spark_repel_strength={spark_repel_strength:.3f} "
+            f"spark_repel_radius={spark_repel_radius:.1f}"
+        )
     if color_mode == "electric" and abs(electric_ray_boost - 1.0) > 1e-6:
         log(f"electric_ray_boost={electric_ray_boost:.2f}")
 
@@ -1609,6 +1628,31 @@ def main() -> None:
 
         overlay = np.zeros_like(frame, dtype=np.uint8)
         alive: List[Spark] = []
+
+        if spark_repel_strength > 0.0 and spark_repel_radius > 0.0 and len(sparks) > 1:
+            repel_r2 = spark_repel_radius * spark_repel_radius
+            for i in range(len(sparks) - 1):
+                a = sparks[i]
+                if a.life <= 0:
+                    continue
+                for j in range(i + 1, len(sparks)):
+                    b = sparks[j]
+                    if b.life <= 0:
+                        continue
+                    dx = float(b.x - a.x)
+                    dy = float(b.y - a.y)
+                    d2 = (dx * dx) + (dy * dy)
+                    if d2 <= 1e-9 or d2 >= repel_r2:
+                        continue
+                    d = math.sqrt(d2)
+                    nx = dx / d
+                    ny = dy / d
+                    overlap = max(0.0, 1.0 - (d / max(1e-6, spark_repel_radius)))
+                    force = spark_repel_strength * overlap * overlap
+                    a.vx -= nx * force
+                    a.vy -= ny * force
+                    b.vx += nx * force
+                    b.vy += ny * force
 
         total_sparks_this_frame = len(sparks)
         for sp_idx, sp in enumerate(sparks, start=1):
