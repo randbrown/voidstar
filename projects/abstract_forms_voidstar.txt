@@ -1,47 +1,19 @@
+// original unprocessed recording
+// "abstract_forms" @by voidstar(randbrown)
+abstract_forms_voidstar_0.mp4
+#livecoding #pedalsteel #improvisedmusic #opencv #vibecoding
 
-  mp311 3.11.14   voidstar   main 
-❯  ./pipeline_gluons.sh  --input /home/brown/WinVideos/abstract_forms_voidstar_0.mp4
+// hi60t
+// "abstract_forms (hi60t)" @by voidstar(randbrown)
+abstract_forms_voidstar_0_hi60t.mp4
+#livecoding #pedalsteel #improvisedmusic #opencv #vibecoding
 
-./pipeline_gluons_refactored_v3.sh myvideo.mp4 --jobs 4
+// hi180t
+// "abstract_forms (hi180t)" @by voidstar(randbrown)
+abstract_forms_voidstar_0_hi180t.mp4
+#livecoding #pedalsteel #improvisedmusic #opencv #vibecoding
 
-
-
----
-
-python reels_cv_overlay.py "/mnt/c/users/brown/Videos/abstract_forms_voidstar_0.mp4"  --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true --smear true --smear-frames 17 --smear-decay 0.99 --trail true  --trail-alpha .999 --beat-sync true --velocity-color true --velocity-color-mult 10
-
-ffmpeg -i "$HOME/WinVideos/abstract_forms_voidstar_0_fps30_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" -ss 00:00:06.13 -t 1080 -async 1 "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4"
-
-python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
-
-python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 2 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 2  --sampling-mode polyrhythm --sample-seconds 16 --truncate-to-full-clips
-
-python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 1 --glitch-style vuwind --cps 0.5 --loop-seam-seconds 1  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
-
-python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 1 --glitch-style circleclose --cps 0.5 --loop-seam-seconds 1  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
-
-python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds 1 --glitch-style circleopen --cps 0.5 --loop-seam-seconds 1  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
-
-python3 divvy.py highlights "$HOME/WinVideos/abstract_forms_voidstar_0_overlay_trim1080.mp4" --start-seconds 0 --youtube-full-seconds $((60*10)) --target-length-seconds 90 --video-encoder libx264 --preset medium --out-dir /mnt/c/users/brown/Videos --glitch-seconds .5 --glitch-style pixelize --cps 0.5 --loop-seam-seconds .5  --sampling-mode uniform-spread --sample-seconds 16 --truncate-to-full-clips
-
-
-
-
- python voidstar_dvd_logo.py "abstract_forms_voidstar_0_overlay_trim1080__highlights__mode-n-averages__start-0s__full-1080s__target-90s.mp4" ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1
- 
- 
- 
- 
- 
- 
- 
- 
- debug-bounds true --local-point-track true --local-point-track-scale 2.8 --local-point-track-pad-px 40 --content-bbox-for-local false
- 
- 
- 
- ffmpeg -hide_banner -y -ss START -i in.mp4 -t DURATION -map 0 -c:v libx264 -preset medium -crf 18 -c:a copy out_precise.mp4
- 
-
- python voidstar_dvd_logo.py "abstract_forms_voidstar_0_fps30_s1000p00_d10p00_mc2_det0p05_trk0p05_trail1_ta1p00_tlotrue_scan1_velcolor_ids_beatsync_smear.mp4" ./voidstar_emblem_cosmos_0.png --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 --edge-margin-px 0 --reels-local-overlay false --voidstar-preset wild --local-point-track true --local-point-track-scale 1.0 --local-point-track-pad-px 32 --local-point-track-max-points 128 --local-point-track-radius 128 --local-point-track-min-distance 32 --local-point-track-refresh 8 --local-point-track-opacity 0.7 --local-point-track-decay 0.7 --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 --local-point-track-link-opacity .7 --voidstar-colorize true --start-x .8 --start-y .83 --voidstar-debug-bounds true
- 
+// full
+// "abstract_forms (full)" @by voidstar(randbrown)
+abstract_forms_voidstar_0_full.mp4
+#livecoding #pedalsteel #improvisedmusic #opencv #vibecoding

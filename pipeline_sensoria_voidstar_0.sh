@@ -58,9 +58,9 @@ INPUT_VIDEO_DEFAULT="/mnt/c/Users/brown/Videos/sensoria_voidstar_0/sensoria_void
 OUTDIR_DEFAULT="/mnt/c/Users/brown/Videos/sensoria_voidstar_0"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
-START_SECONDS_DEFAULT="4.37"
-YOUTUBE_FULL_SECONDS_DEFAULT="1294"
-DETECT_AUDIO_START_END_DEFAULT=0
+START_SECONDS_DEFAULT=""
+YOUTUBE_FULL_SECONDS_DEFAULT=""
+DETECT_AUDIO_START_END_DEFAULT=1
 
 # Timing/style defaults.
 CPS_DEFAULT=0.5
@@ -466,7 +466,7 @@ compute_60_window() {
 
 build_highlights_time_args() {
     HIGHLIGHTS_TIME_ARGS=()
-    if [[ "${DETECT_AUDIO_START_END:-1}" -eq 1 ]]; then
+    if [[ "${DETECT_AUDIO_START_END:-1}" -eq 1 && ( -z "${START_SECONDS:-}" || -z "${YOUTUBE_FULL_SECONDS:-}" ) ]]; then
         HIGHLIGHTS_TIME_ARGS+=(--detect-audio-start-end)
     fi
     if [[ -n "${START_SECONDS:-}" ]]; then
@@ -1868,18 +1868,12 @@ main() {
     elif [[ "$PIPELINE_MODE" == "custom" ]]; then
         (( RUN_60S_START == 1 )) && TARGETS+=(run_60s_start)
         (( RUN_60S_END == 1 )) && TARGETS+=(run_60s_end)
-        (( RUN_90S_START == 1 )) && TARGETS+=(run_90s_start)
-        (( RUN_90S_END == 1 )) && TARGETS+=(run_90s_end)
         (( RUN_180S_START == 1 )) && TARGETS+=(run_180s_start)
         (( RUN_180S_END == 1 )) && TARGETS+=(run_180s_end)
-        (( RUN_360S_START == 1 )) && TARGETS+=(run_360s_start)
-        (( RUN_360S_END == 1 )) && TARGETS+=(run_360s_end)
-        (( RUN_600S_START == 1 )) && TARGETS+=(run_600s_start)
-        (( RUN_600S_END == 1 )) && TARGETS+=(run_600s_end)
         (( RUN_FULL == 1 )) && TARGETS+=(run_full)
         (( ${#TARGETS[@]} > 0 )) || die "PIPELINE_MODE=custom but no RUN_* targets enabled"
     else
-        TARGETS=(run_60s_start run_60s_end run_90s_start run_90s_end run_180s_start run_180s_end run_360s_start run_360s_end run_600s_start run_600s_end run_full)
+        TARGETS=(run_60s_start run_60s_end run_180s_start run_180s_end run_full)
     fi
 
     echo "Targets: ${TARGETS[*]}"

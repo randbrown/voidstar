@@ -58,9 +58,9 @@ INPUT_VIDEO_DEFAULT="/mnt/c/Users/brown/Videos/sensorium_voidstar_0/sensorium_vo
 OUTDIR_DEFAULT="/mnt/c/Users/brown/Videos/sensorium_voidstar_0"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
-START_SECONDS_DEFAULT="4.37"
-YOUTUBE_FULL_SECONDS_DEFAULT="1294"
-DETECT_AUDIO_START_END_DEFAULT=0
+START_SECONDS_DEFAULT=""
+YOUTUBE_FULL_SECONDS_DEFAULT=""
+DETECT_AUDIO_START_END_DEFAULT=1
 
 # Timing/style defaults.
 CPS_DEFAULT=0.5
@@ -69,8 +69,7 @@ DIVVY_GROOVE_BPM_DEFAULT="30"
 GLITCH_SECONDS_DEFAULT=1.7
 LOOP_SEAM_SECONDS_DEFAULT="2"
 
-##TODO: make the reels overlay WHITE only (no velocity colors)
-##TODO: and make the reels overlay NOT draw id/boxes for this pipeline only
+##NOTE: sensorium reels overlay is white only with ids/boxes disabled
 # Reels overlay stage controls.
 ENABLE_REELS_OVERLAY_STEP=1      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
@@ -468,7 +467,7 @@ compute_60_window() {
 
 build_highlights_time_args() {
     HIGHLIGHTS_TIME_ARGS=()
-    if [[ "${DETECT_AUDIO_START_END:-1}" -eq 1 ]]; then
+    if [[ "${DETECT_AUDIO_START_END:-1}" -eq 1 && ( -z "${START_SECONDS:-}" || -z "${YOUTUBE_FULL_SECONDS:-}" ) ]]; then
         HIGHLIGHTS_TIME_ARGS+=(--detect-audio-start-end)
     fi
     if [[ -n "${START_SECONDS:-}" ]]; then
@@ -502,7 +501,7 @@ build_base_reels_overlay() {
     local target="$BASE_REELS_OVERLAY"
     local reels_cache_sig
     local source_video="${REELS_INPUT_VIDEO:-$INPUT_VIDEO}"
-    reels_cache_sig="reels|input=${source_video}|input_fp=$(file_fingerprint "$source_video")|script=${REELS_OVERLAY}|script_fp=$(file_fingerprint "$REELS_OVERLAY")|min_det=0.05|min_trk=0.05|draw_ids=true|smear=true|smear_frames=17|smear_decay=0.99|trail=true|trail_alpha=.999|beat_sync=true|velocity_color=true|velocity_color_mult=10"
+    reels_cache_sig="reels|input=${source_video}|input_fp=$(file_fingerprint "$source_video")|script=${REELS_OVERLAY}|script_fp=$(file_fingerprint "$REELS_OVERLAY")|min_det=0.05|min_trk=0.05|draw_ids=false|smear=true|smear_frames=17|smear_decay=0.99|trail=true|trail_alpha=.999|beat_sync=true|velocity_color=false|overlay_color=255,255,255"
 
     if [[ "$USE_REELS_CACHE" -eq 1 && "${REELS_BOOTSTRAP_EXISTING_CACHE:-0}" -eq 1 && -f "$target" && ! -f "${target}.cachekey" ]]; then
         if [[ "$source_video" -nt "$target" || "$REELS_OVERLAY" -nt "$target" ]]; then
@@ -520,10 +519,10 @@ build_base_reels_overlay() {
     fi
 
     python3 "$REELS_OVERLAY" "$source_video" \
-        --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
+        --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids false \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
-        --velocity-color true --velocity-color-mult 10 \
+        --velocity-color false --overlay-color 255,255,255 \
         --output "$target"
 
     write_cache_signature "$target" "$reels_cache_sig"
@@ -543,7 +542,7 @@ run_optional_reels_overlay_on_clip() {
     echo "--- Optional per-target reels overlay cache on ${stage_label} ---" >&2
 
     local reels_cache_sig
-    reels_cache_sig="reels_per_target|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${REELS_OVERLAY}|script_fp=$(file_fingerprint "$REELS_OVERLAY")|min_det=0.05|min_trk=0.05|draw_ids=true|smear=true|smear_frames=17|smear_decay=0.99|trail=true|trail_alpha=.999|beat_sync=true|velocity_color=true|velocity_color_mult=10"
+    reels_cache_sig="reels_per_target|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${REELS_OVERLAY}|script_fp=$(file_fingerprint "$REELS_OVERLAY")|min_det=0.05|min_trk=0.05|draw_ids=false|smear=true|smear_frames=17|smear_decay=0.99|trail=true|trail_alpha=.999|beat_sync=true|velocity_color=false|overlay_color=255,255,255"
 
     if [[ "$USE_REELS_CACHE" -eq 1 ]]; then
         should_rebuild "$target" --dep "$input_clip" --dep "$REELS_OVERLAY" --sig "$reels_cache_sig" || {
@@ -556,10 +555,10 @@ run_optional_reels_overlay_on_clip() {
     fi
 
     python3 "$REELS_OVERLAY" "$input_clip" \
-        --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
+        --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids false \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
-        --velocity-color true --velocity-color-mult 10 \
+        --velocity-color false --overlay-color 255,255,255 \
         --output "$target" \
         1>&2
 
@@ -1870,18 +1869,12 @@ main() {
     elif [[ "$PIPELINE_MODE" == "custom" ]]; then
         (( RUN_60S_START == 1 )) && TARGETS+=(run_60s_start)
         (( RUN_60S_END == 1 )) && TARGETS+=(run_60s_end)
-        (( RUN_90S_START == 1 )) && TARGETS+=(run_90s_start)
-        (( RUN_90S_END == 1 )) && TARGETS+=(run_90s_end)
         (( RUN_180S_START == 1 )) && TARGETS+=(run_180s_start)
         (( RUN_180S_END == 1 )) && TARGETS+=(run_180s_end)
-        (( RUN_360S_START == 1 )) && TARGETS+=(run_360s_start)
-        (( RUN_360S_END == 1 )) && TARGETS+=(run_360s_end)
-        (( RUN_600S_START == 1 )) && TARGETS+=(run_600s_start)
-        (( RUN_600S_END == 1 )) && TARGETS+=(run_600s_end)
         (( RUN_FULL == 1 )) && TARGETS+=(run_full)
         (( ${#TARGETS[@]} > 0 )) || die "PIPELINE_MODE=custom but no RUN_* targets enabled"
     else
-        TARGETS=(run_60s_start run_60s_end run_90s_start run_90s_end run_180s_start run_180s_end run_360s_start run_360s_end run_600s_start run_600s_end run_full)
+        TARGETS=(run_60s_start run_60s_end run_180s_start run_180s_end run_full)
     fi
 
     echo "Targets: ${TARGETS[*]}"
