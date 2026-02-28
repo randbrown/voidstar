@@ -39,13 +39,13 @@ set -euo pipefail
 PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
-RUN_60S_START=1
-RUN_90S_START=1
-RUN_180S_START=1
+RUN_60S_START=0
+RUN_90S_START=0
+RUN_180S_START=0
 RUN_360S_START=0
 RUN_600S_START=0
 RUN_60S_END=1
-RUN_90S_END=1
+RUN_90S_END=0
 RUN_180S_END=1
 RUN_360S_END=0
 RUN_600S_END=0
@@ -56,7 +56,7 @@ INPUT_VIDEO_DEFAULT="~/WinVideos/abstract_forms_voidstar_0/abstract_forms_voidst
 OUTDIR_DEFAULT="~/WinVideos/abstract_forms_voidstar_0"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
-START_SECONDS_DEFAULT="4.37"
+START_SECONDS_DEFAULT="5.8"
 YOUTUBE_FULL_SECONDS_DEFAULT="1294"
 DETECT_AUDIO_START_END_DEFAULT=0
 

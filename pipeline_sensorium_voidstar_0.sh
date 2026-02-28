@@ -40,16 +40,18 @@ PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
 RUN_60S_START=1
-RUN_90S_START=1
+RUN_90S_START=0
 RUN_180S_START=1
-RUN_360S_START=1
-RUN_600S_START=1
-RUN_60S_END=1
-RUN_90S_END=1
-RUN_180S_END=1
-RUN_360S_END=1
-RUN_600S_END=1
+RUN_360S_START=0
+RUN_600S_START=0
+RUN_60S_END=0
+RUN_90S_END=0
+RUN_180S_END=0
+RUN_360S_END=0
+RUN_600S_END=0
 RUN_FULL=1
+
+##NOTE: sensorium uses tiny electrical sparks (including flood in/out)
 
 # Input/output defaults.
 INPUT_VIDEO_DEFAULT="/mnt/c/Users/brown/Videos/sensorium_voidstar_0/sensorium_voidstar_0.mp4"
@@ -67,8 +69,10 @@ DIVVY_GROOVE_BPM_DEFAULT="30"
 GLITCH_SECONDS_DEFAULT=1.7
 LOOP_SEAM_SECONDS_DEFAULT="2"
 
+##TODO: make the reels overlay WHITE only (no velocity colors)
+##TODO: and make the reels overlay NOT draw id/boxes for this pipeline only
 # Reels overlay stage controls.
-ENABLE_REELS_OVERLAY_STEP=0      # set 0 to bypass reels overlay completely
+ENABLE_REELS_OVERLAY_STEP=1      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
 REELS_CACHE_MODE_DEFAULT="base"  # base | per-target
 BASE_REELS_OVERLAY_PREBUILT_DEFAULT="/mnt/c/Users/brown/Videos/sensorium_voidstar_0/sensorium_voidstar_0_reels_base_overlay.mp4"
@@ -95,19 +99,19 @@ ENABLE_PARTICLE_SPARKS_STAGE=1
 USE_PARTICLE_SPARKS_CACHE_DEFAULT=1
 PARTICLE_SPARKS_MAX_POINTS_DEFAULT=128
 PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT=0.5
-PARTICLE_SPARKS_RATE_DEFAULT=0.17
-PARTICLE_SPARKS_SIZE_DEFAULT=64
-PARTICLE_SPARKS_LIFE_FRAMES_DEFAULT=15
-PARTICLE_SPARKS_SPEED_DEFAULT=0.125
+PARTICLE_SPARKS_RATE_DEFAULT=0.22
+PARTICLE_SPARKS_SIZE_DEFAULT=2
+PARTICLE_SPARKS_LIFE_FRAMES_DEFAULT=8
+PARTICLE_SPARKS_SPEED_DEFAULT=0.45
 PARTICLE_SPARKS_OPACITY_DEFAULT=0.42
 PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT=0.95
 PARTICLE_SPARKS_COLOR_MODE_DEFAULT="white"   # white | rgb | random | audio-intensity | antiparticles | abstract-forms
 PARTICLE_SPARKS_COLOR_RGB_DEFAULT="255,255,255"
 PARTICLE_SPARKS_FLOOD_IN_OUT_DEFAULT=1
 PARTICLE_SPARKS_FLOOD_SECONDS_DEFAULT=2.0
-PARTICLE_SPARKS_FLOOD_SPAWN_MULT_DEFAULT=2.0
-PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT=128
-PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=1
+PARTICLE_SPARKS_FLOOD_SPAWN_MULT_DEFAULT=2.4
+PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT=72
+PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=1.3
 
 # Optional title hook stage (runs last, after logo/particle stages).
 ENABLE_TITLE_HOOK_STAGE=1
@@ -1127,7 +1131,7 @@ run_180s_start() {
     echo "--- 180s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 16 9 ""
+    run_divvy_uniform_highlights "$divvy_dst" 180 32 9 ""
 
     local logo tag target
     logo="$LOGO_START"

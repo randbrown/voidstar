@@ -39,17 +39,19 @@ set -euo pipefail
 PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
-RUN_60S_START=1
-RUN_90S_START=1
-RUN_180S_START=1
-RUN_360S_START=1
-RUN_600S_START=1
+RUN_60S_START=0
+RUN_90S_START=0
+RUN_180S_START=0
+RUN_360S_START=0
+RUN_600S_START=0
 RUN_60S_END=1
-RUN_90S_END=1
+RUN_90S_END=0
 RUN_180S_END=1
-RUN_360S_END=1
-RUN_600S_END=1
+RUN_360S_END=0
+RUN_600S_END=0
 RUN_FULL=1
+
+##TODO: make the spark overlay circles a bit smaller.
 
 # Input/output defaults.
 INPUT_VIDEO_DEFAULT="/mnt/c/Users/brown/Videos/sensoria_voidstar_0/sensoria_voidstar_0.mp4"
@@ -68,7 +70,7 @@ GLITCH_SECONDS_DEFAULT=1.8
 LOOP_SEAM_SECONDS_DEFAULT="2"
 
 # Reels overlay stage controls.
-ENABLE_REELS_OVERLAY_STEP=0      # set 0 to bypass reels overlay completely
+ENABLE_REELS_OVERLAY_STEP=1      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
 REELS_CACHE_MODE_DEFAULT="base"  # base | per-target
 BASE_REELS_OVERLAY_PREBUILT_DEFAULT="/mnt/c/Users/brown/Videos/sensoria_voidstar_0/sensoria_voidstar_0_reels_base_overlay.mp4"
@@ -96,7 +98,7 @@ USE_PARTICLE_SPARKS_CACHE_DEFAULT=1
 PARTICLE_SPARKS_MAX_POINTS_DEFAULT=128
 PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT=0.5
 PARTICLE_SPARKS_RATE_DEFAULT=0.18
-PARTICLE_SPARKS_SIZE_DEFAULT=64
+PARTICLE_SPARKS_SIZE_DEFAULT=8
 PARTICLE_SPARKS_LIFE_FRAMES_DEFAULT=15
 PARTICLE_SPARKS_SPEED_DEFAULT=0.135
 PARTICLE_SPARKS_OPACITY_DEFAULT=0.45
@@ -1454,7 +1456,7 @@ run_180s_end() {
     echo "--- 180s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 16 9 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 180 32 9 "end"
 
     local logo tag target
     logo="$LOGO_END"
