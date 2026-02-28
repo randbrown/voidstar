@@ -370,6 +370,7 @@ def draw_neuron_curve(
     phase: float,
     life_ratio: float,
     audio_level: float,
+    curvature: float,
 ) -> tuple[int, int]:
     dx = float(x2 - x1)
     dy = float(y2 - y1)
@@ -384,6 +385,7 @@ def draw_neuron_curve(
     mid_y = 0.5 * (y1 + y2)
     amp = min(28.0, max(3.0, dist * (0.07 + (0.09 * clamp01(audio_level)))))
     amp *= 0.55 + (0.55 * clamp01(life_ratio))
+    amp *= max(0.0, float(curvature))
     bend = math.sin(phase * 0.8) * amp
     ctrl_x = mid_x + (nx * bend)
     ctrl_y = mid_y + (ny * bend)
@@ -410,6 +412,82 @@ def draw_neuron_curve(
     py_i = int(round(pulse_y))
     cv2.circle(canvas, (px_i, py_i), 2, pulse_color_bgr, -1, cv2.LINE_AA)
     return px_i, py_i
+
+
+def find_nearest_neuron_target(
+    x: float,
+    y: float,
+    sparks: List[Spark],
+    max_distance: float,
+    min_distance: float = 8.0,
+) -> tuple[float, float] | None:
+    max_d = max(0.0, float(max_distance))
+    min_d = max(0.0, float(min_distance))
+    best_dist: float | None = None
+    best_xy: tuple[float, float] | None = None
+
+    for sp in sparks:
+        if sp.life <= 0 or sp.shape_kind != "neuron":
+            continue
+        dx = float(sp.x - x)
+        dy = float(sp.y - y)
+        d = math.sqrt((dx * dx) + (dy * dy))
+        if d <= min_d:
+            continue
+        if max_d > 0.0 and d > max_d:
+            continue
+        if best_dist is None or d < best_dist:
+            best_dist = d
+            best_xy = (float(sp.x), float(sp.y))
+
+    return best_xy
+
+
+def find_nearest_neuron_targets(
+    x: float,
+    y: float,
+    sparks: List[Spark],
+    max_distance: float,
+    count: int,
+    min_distance: float = 8.0,
+) -> list[tuple[float, float]]:
+    max_d = max(0.0, float(max_distance))
+    min_d = max(0.0, float(min_distance))
+    k = max(1, int(count))
+
+    candidates: list[tuple[float, float, float]] = []
+    for sp in sparks:
+        if sp.life <= 0 or sp.shape_kind != "neuron":
+            continue
+        dx = float(sp.x - x)
+        dy = float(sp.y - y)
+        d = math.sqrt((dx * dx) + (dy * dy))
+        if d <= min_d:
+            continue
+        if max_d > 0.0 and d > max_d:
+            continue
+        candidates.append((d, float(sp.x), float(sp.y)))
+
+    candidates.sort(key=lambda item: item[0])
+    return [(cx, cy) for _, cx, cy in candidates[:k]]
+
+
+def has_live_neuron_near(
+    x: float,
+    y: float,
+    sparks: List[Spark],
+    tolerance: float,
+) -> bool:
+    tol = max(1.0, float(tolerance))
+    tol2 = tol * tol
+    for sp in sparks:
+        if sp.life <= 0 or sp.shape_kind != "neuron":
+            continue
+        dx = float(sp.x - x)
+        dy = float(sp.y - y)
+        if (dx * dx) + (dy * dy) <= tol2:
+            return True
+    return False
 
 
 def abstract_form_spawn_policy(
@@ -501,6 +579,30 @@ def main() -> None:
         "--neurons-style",
         default="voidstar",
         help="Neurons style: voidstar|white|cyan|audio|biolum|sunset",
+    )
+    ap.add_argument(
+        "--neurons-link-max-distance",
+        type=float,
+        default=0.0,
+        help="Neurons: max distance to link to another node (0=unlimited)",
+    )
+    ap.add_argument(
+        "--neurons-curvature",
+        type=float,
+        default=1.0,
+        help="Neurons: curved link bend amount (0=straight, 1=default)",
+    )
+    ap.add_argument(
+        "--neurons-pulse-speed",
+        type=float,
+        default=1.0,
+        help="Neurons: pulse travel speed multiplier along links",
+    )
+    ap.add_argument(
+        "--neurons-connections",
+        type=int,
+        default=1,
+        help="Neurons: nearest-neighbor connections per neuron",
     )
 
     ap.add_argument("--flood-in-out", type=str, default="false", help="true|false, add mirrored particle bursts at clip start/end")
@@ -604,6 +706,10 @@ def main() -> None:
     neurons_style = str(args.neurons_style).strip().lower().replace("_", "-")
     if neurons_style not in {"voidstar", "white", "cyan", "audio", "biolum", "sunset"}:
         raise ValueError("--neurons-style must be voidstar|white|cyan|audio|biolum|sunset")
+    neurons_link_max_distance = max(0.0, float(args.neurons_link_max_distance))
+    neurons_curvature = max(0.0, float(args.neurons_curvature))
+    neurons_pulse_speed = max(0.0, float(args.neurons_pulse_speed))
+    neurons_connections = max(1, min(8, int(args.neurons_connections)))
 
     white_bgr = (255, 255, 255)
     rgb_mode_bgr = rgb_to_bgr(rgb_color)
@@ -694,6 +800,15 @@ def main() -> None:
         log(f"color_mode={color_mode}")
     if color_mode == "neurons":
         log(f"neurons_style={neurons_style}")
+        if neurons_link_max_distance > 0.0:
+            log(f"neurons_link_max_distance={neurons_link_max_distance:.1f}")
+        else:
+            log("neurons_link_max_distance=unlimited")
+        log(
+            f"neurons_curvature={neurons_curvature:.2f} "
+            f"neurons_pulse_speed={neurons_pulse_speed:.2f} "
+            f"neurons_connections={neurons_connections}"
+        )
 
     audio_reactive = parse_bool(args.audio_reactive)
     spark_color_temperature = max(-1.0, min(1.0, float(args.spark_color_temperature)))
@@ -986,10 +1101,20 @@ def main() -> None:
                 elif color_mode == "neurons":
                     life = max(6, int(round(life * random.uniform(1.15, 1.85))))
                     radius = max(1, int(round(radius * random.uniform(0.95, 1.45))))
-                    dendrite_dist = min(frame_w, frame_h) * random.uniform(0.05, 0.18)
-                    dendrite_angle = angle + random.uniform(-0.9, 0.9)
-                    target_x = max(0.0, min(frame_w - 1.0, x + (math.cos(dendrite_angle) * dendrite_dist)))
-                    target_y = max(0.0, min(frame_h - 1.0, y + (math.sin(dendrite_angle) * dendrite_dist)))
+                    target_xy = find_nearest_neuron_target(
+                        x=x,
+                        y=y,
+                        sparks=sparks,
+                        max_distance=neurons_link_max_distance,
+                        min_distance=max(8.0, float(radius) * 2.0),
+                    )
+                    if target_xy is not None:
+                        target_x, target_y = target_xy
+                    else:
+                        dendrite_dist = min(frame_w, frame_h) * random.uniform(0.05, 0.18)
+                        dendrite_angle = angle + random.uniform(-0.9, 0.9)
+                        target_x = max(0.0, min(frame_w - 1.0, x + (math.cos(dendrite_angle) * dendrite_dist)))
+                        target_y = max(0.0, min(frame_h - 1.0, y + (math.sin(dendrite_angle) * dendrite_dist)))
                     shape_kind = "neuron"
                     shape_ang_vel = random.uniform(-0.10, 0.10)
                 elif color_mode == "strings":
@@ -1092,14 +1217,45 @@ def main() -> None:
                 sp.vx += random.uniform(-0.15, 0.15)
                 sp.vy += random.uniform(-0.15, 0.15)
             elif color_mode == "neurons":
+                if not has_live_neuron_near(sp.target_x, sp.target_y, sparks, tolerance=max(10.0, float(sp.radius) * 3.0)):
+                    target_xy = find_nearest_neuron_target(
+                        x=sp.x,
+                        y=sp.y,
+                        sparks=sparks,
+                        max_distance=neurons_link_max_distance,
+                        min_distance=8.0,
+                    )
+                    if target_xy is not None:
+                        sp.target_x, sp.target_y = target_xy
+
                 tx = sp.target_x - sp.x
                 ty = sp.target_y - sp.y
                 dist = math.sqrt((tx * tx) + (ty * ty))
                 if dist < 5.0 and random.random() < 0.35:
-                    dendrite_dist = min(frame_w, frame_h) * random.uniform(0.04, 0.14)
-                    dendrite_angle = random.uniform(0.0, 2.0 * math.pi)
-                    sp.target_x = max(0.0, min(frame_w - 1.0, sp.x + (math.cos(dendrite_angle) * dendrite_dist)))
-                    sp.target_y = max(0.0, min(frame_h - 1.0, sp.y + (math.sin(dendrite_angle) * dendrite_dist)))
+                    target_xy = find_nearest_neuron_target(
+                        x=sp.x,
+                        y=sp.y,
+                        sparks=sparks,
+                        max_distance=neurons_link_max_distance,
+                        min_distance=8.0,
+                    )
+                    if target_xy is not None:
+                        sp.target_x, sp.target_y = target_xy
+                    else:
+                        dendrite_dist = min(frame_w, frame_h) * random.uniform(0.04, 0.14)
+                        dendrite_angle = random.uniform(0.0, 2.0 * math.pi)
+                        sp.target_x = max(0.0, min(frame_w - 1.0, sp.x + (math.cos(dendrite_angle) * dendrite_dist)))
+                        sp.target_y = max(0.0, min(frame_h - 1.0, sp.y + (math.sin(dendrite_angle) * dendrite_dist)))
+                elif random.random() < (0.05 + (0.12 * clamp01(audio_level))):
+                    target_xy = find_nearest_neuron_target(
+                        x=sp.x,
+                        y=sp.y,
+                        sparks=sparks,
+                        max_distance=neurons_link_max_distance,
+                        min_distance=8.0,
+                    )
+                    if target_xy is not None:
+                        sp.target_x, sp.target_y = target_xy
                 elif dist > 1e-6:
                     pull = (0.08 + (0.18 * audio_level)) / max(10.0, dist)
                     sp.vx += tx * pull
@@ -1216,10 +1372,7 @@ def main() -> None:
             elif color_mode == "neurons":
                 x1 = int(round(sp.x))
                 y1 = int(round(sp.y))
-                tx = int(round(sp.target_x))
-                ty = int(round(sp.target_y))
                 pulse_strength = clamp01(0.35 + (0.65 * abs(math.sin(sp.phase + (processed * 0.035)))))
-                travel_t = (0.18 * processed + (sp.phase * 0.12)) % 1.0
                 if neurons_style == "white":
                     link_color = blend_bgr(sp.color_bgr, (245, 245, 245), 0.40 + (0.42 * pulse_strength))
                     pulse_color = (255, 255, 255)
@@ -1242,19 +1395,43 @@ def main() -> None:
 
                 link_color = apply_color_temperature_bgr(link_color, spark_color_temperature)
                 pulse_color = apply_color_temperature_bgr(pulse_color, spark_color_temperature)
-                pulse_x, pulse_y = draw_neuron_curve(
-                    overlay,
-                    x1=x1,
-                    y1=y1,
-                    x2=tx,
-                    y2=ty,
-                    base_color_bgr=link_color,
-                    pulse_color_bgr=pulse_color,
-                    travel_t=travel_t,
-                    phase=sp.phase + (processed * 0.045),
-                    life_ratio=life_ratio,
-                    audio_level=audio_level,
+                nearest_targets = find_nearest_neuron_targets(
+                    x=sp.x,
+                    y=sp.y,
+                    sparks=sparks,
+                    max_distance=neurons_link_max_distance,
+                    count=neurons_connections,
+                    min_distance=8.0,
                 )
+                if nearest_targets:
+                    sp.target_x, sp.target_y = nearest_targets[0]
+                else:
+                    nearest_targets = [(sp.target_x, sp.target_y)]
+
+                pulse_x = x1
+                pulse_y = y1
+                for idx_conn, (target_x_conn, target_y_conn) in enumerate(nearest_targets):
+                    tx = int(round(target_x_conn))
+                    ty = int(round(target_y_conn))
+                    travel_t = (
+                        (0.18 * processed * neurons_pulse_speed)
+                        + (sp.phase * 0.12)
+                        + (idx_conn * 0.19)
+                    ) % 1.0
+                    pulse_x, pulse_y = draw_neuron_curve(
+                        overlay,
+                        x1=x1,
+                        y1=y1,
+                        x2=tx,
+                        y2=ty,
+                        base_color_bgr=link_color,
+                        pulse_color_bgr=pulse_color,
+                        travel_t=travel_t,
+                        phase=sp.phase + (processed * 0.045) + (idx_conn * 0.55),
+                        life_ratio=life_ratio,
+                        audio_level=audio_level,
+                        curvature=neurons_curvature,
+                    )
                 node_r = max(1, int(round(radius * (0.85 + (0.6 * pulse_strength)))))
                 cv2.circle(overlay, (x1, y1), node_r, sp.color_bgr, -1, cv2.LINE_AA)
                 if random.random() < (0.18 + (0.26 * pulse_strength)):
