@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pipeline_abstract_forms_voidstar_0.sh
+# pipeline_sensoria_voidstar_0.sh
 #
 # Performance optimizations:
 # - Reels CV overlay is expensive: run it ONCE on the full input video to create a cached
@@ -42,18 +42,18 @@ PIPELINE_MODE_DEFAULT="custom"
 RUN_60S_START=1
 RUN_90S_START=1
 RUN_180S_START=1
-RUN_360S_START=0
-RUN_600S_START=0
+RUN_360S_START=1
+RUN_600S_START=1
 RUN_60S_END=1
 RUN_90S_END=1
 RUN_180S_END=1
-RUN_360S_END=0
-RUN_600S_END=0
+RUN_360S_END=1
+RUN_600S_END=1
 RUN_FULL=1
 
 # Input/output defaults.
-INPUT_VIDEO_DEFAULT="~/WinVideos/abstract_forms_voidstar_0/abstract_forms_voidstar_0.mp4"
-OUTDIR_DEFAULT="~/WinVideos/abstract_forms_voidstar_0"
+INPUT_VIDEO_DEFAULT="/mnt/c/Users/brown/Videos/sensoria_voidstar_0/sensoria_voidstar_0.mp4"
+OUTDIR_DEFAULT="/mnt/c/Users/brown/Videos/sensoria_voidstar_0"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
 START_SECONDS_DEFAULT="4.37"
@@ -64,14 +64,14 @@ DETECT_AUDIO_START_END_DEFAULT=0
 CPS_DEFAULT=0.5
 DIVVY_SAMPLING_MODE_DEFAULT="groove"   # uniform-spread | groove | minute-averages | n-averages | recursive-halves
 DIVVY_GROOVE_BPM_DEFAULT="30"
-GLITCH_SECONDS_DEFAULT=2
+GLITCH_SECONDS_DEFAULT=1.8
 LOOP_SEAM_SECONDS_DEFAULT="2"
 
 # Reels overlay stage controls.
 ENABLE_REELS_OVERLAY_STEP=0      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
 REELS_CACHE_MODE_DEFAULT="base"  # base | per-target
-BASE_REELS_OVERLAY_PREBUILT_DEFAULT="~/WinVideos/abstract_forms_voidstar_0/abstract_forms_voidstar_0_reels_base_overlay.mp4"
+BASE_REELS_OVERLAY_PREBUILT_DEFAULT="/mnt/c/Users/brown/Videos/sensoria_voidstar_0/sensoria_voidstar_0_reels_base_overlay.mp4"
 REELS_BOOTSTRAP_EXISTING_CACHE_DEFAULT=1   # if prebuilt base overlay exists but cache key is missing, trust/seed cache key
 
 # Optional glitchfield stage that runs BEFORE reels overlay.
@@ -95,13 +95,13 @@ ENABLE_PARTICLE_SPARKS_STAGE=1
 USE_PARTICLE_SPARKS_CACHE_DEFAULT=1
 PARTICLE_SPARKS_MAX_POINTS_DEFAULT=128
 PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT=0.5
-PARTICLE_SPARKS_RATE_DEFAULT=0.2
+PARTICLE_SPARKS_RATE_DEFAULT=0.18
 PARTICLE_SPARKS_SIZE_DEFAULT=64
 PARTICLE_SPARKS_LIFE_FRAMES_DEFAULT=15
-PARTICLE_SPARKS_SPEED_DEFAULT=0.15
-PARTICLE_SPARKS_OPACITY_DEFAULT=0.5
+PARTICLE_SPARKS_SPEED_DEFAULT=0.135
+PARTICLE_SPARKS_OPACITY_DEFAULT=0.45
 PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT=1.0
-PARTICLE_SPARKS_COLOR_MODE_DEFAULT="abstract-forms"   # white | rgb | random | audio-intensity | antiparticles
+PARTICLE_SPARKS_COLOR_MODE_DEFAULT="white"   # white | rgb | random | audio-intensity | antiparticles | abstract-forms
 PARTICLE_SPARKS_COLOR_RGB_DEFAULT="255,255,255"
 PARTICLE_SPARKS_FLOOD_IN_OUT_DEFAULT=1
 PARTICLE_SPARKS_FLOOD_SECONDS_DEFAULT=2.0
@@ -115,7 +115,7 @@ USE_TITLE_HOOK_CACHE_DEFAULT=1
 TITLE_HOOK_DURATION_DEFAULT=4.0
 TITLE_HOOK_DURATION_600_DEFAULT=8.0
 TITLE_HOOK_FADE_OUT_DURATION_DEFAULT=1.3
-TITLE_HOOK_TITLE_DEFAULT='// abstract_forms (hi60t)\n// voidstar'
+TITLE_HOOK_TITLE_DEFAULT='// sensoria (hi60t)\n// voidstar'
 TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#livecoding\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding'
 TITLE_HOOK_LOGO_DEFAULT='~/code/voidstar/art/logos_alpha/voidstar_logo_0.png'
 TITLE_HOOK_LOGO_ALPHA_THRESHOLD_DEFAULT=0.99
@@ -147,7 +147,7 @@ FORCE_DEFAULT=0
 
 # Optional copy of final rendered outputs to Google Drive (WSL path style).
 ENABLE_GDRIVE_COPY_DEFAULT=1
-GDRIVE_OUTDIR_DEFAULT="~/GoogleDrive/Music/voidstar/abstract_forms"   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos mapped via symlink
+GDRIVE_OUTDIR_DEFAULT="~/GoogleDrive/Music/voidstar/sensoria"   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos mapped via symlink
 
 # Logo assignment by target direction.
 LOGO_START_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_cosmos_0.png"
@@ -1021,7 +1021,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 10 6 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 16 6 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1074,7 +1074,7 @@ run_90s_start() {
     echo "--- 90s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 90 10 90 ""
+    run_divvy_uniform_highlights "$divvy_dst" 90 16 90 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1127,7 +1127,7 @@ run_180s_start() {
     echo "--- 180s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 20 9 ""
+    run_divvy_uniform_highlights "$divvy_dst" 180 16 9 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1182,7 +1182,7 @@ run_360s_start() {
     echo "--- 360s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_360s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 360 20 18 ""
+    run_divvy_uniform_highlights "$divvy_dst" 360 16 18 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1237,7 +1237,7 @@ run_600s_start() {
     echo "--- 600s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_600s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 600 20 30 ""
+    run_divvy_uniform_highlights "$divvy_dst" 600 16 30 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1344,7 +1344,7 @@ run_60s_end() {
     echo "--- 60s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 10 6 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 60 16 6 "end"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1399,7 +1399,7 @@ run_90s_end() {
     echo "--- 90s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 90 10 9 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 90 16 9 "end"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1454,7 +1454,7 @@ run_180s_end() {
     echo "--- 180s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 20 9 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 180 16 9 "end"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1509,7 +1509,7 @@ run_360s_end() {
     echo "--- 360s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_360t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 360 20 18 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 360 16 18 "end"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1564,7 +1564,7 @@ run_600s_end() {
     echo "--- 600s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_600t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 600 20 30 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 600 16 30 "end"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1751,7 +1751,7 @@ main() {
         if [[ -n "$OUTDIR_DEFAULT" ]]; then
             OUTDIR=$(eval echo "$OUTDIR_DEFAULT")
         else
-            OUTDIR=$(eval echo "~/WinVideos/abstract_forms_voidstar_0")
+            OUTDIR=$(eval echo "/mnt/c/Users/brown/Videos/sensoria_voidstar_0")
         fi
     else
         OUTDIR=$(eval echo "$OUTDIR")
