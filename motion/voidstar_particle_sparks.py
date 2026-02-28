@@ -484,6 +484,7 @@ def draw_emmons_atom(
     color_bgr: Tuple[int, int, int],
     angle: float,
     phase: float,
+    line_thickness_scale: float,
 ) -> None:
     cx = int(round(x))
     cy = int(round(y))
@@ -491,7 +492,7 @@ def draw_emmons_atom(
 
     orbit_a = max(4, int(round(r * 1.20)))
     orbit_b = max(2, int(round(r * 0.48)))
-    orbit_thick = max(1, int(round(r * 0.04)))
+    orbit_thick = max(1, int(round(r * max(0.005, float(line_thickness_scale)))))
     electron_r = max(1, int(round(r * 0.17)))
     nucleus_r = max(1, int(round(r * 0.24)))
 
@@ -737,6 +738,18 @@ def main() -> None:
         default=1.0,
         help="Neurons: node shape irregularity multiplier (0=smooth circle, 1=default)",
     )
+    ap.add_argument(
+        "--emmons-line-thickness",
+        type=float,
+        default=0.04,
+        help="Emmons: atom line thickness scale (default 0.04)",
+    )
+    ap.add_argument(
+        "--emmons-spin-speed",
+        type=float,
+        default=0.06,
+        help="Emmons: per-frame spin phase speed (default 0.06)",
+    )
 
     ap.add_argument("--flood-in-out", type=str, default="false", help="true|false, add mirrored particle bursts at clip start/end")
     ap.add_argument("--flood-seconds", type=float, default=2.0, help="Duration in seconds for flood burst at start and end")
@@ -846,6 +859,8 @@ def main() -> None:
     neurons_pulse_boost = max(0.0, float(args.neurons_pulse_boost))
     neurons_connections = max(1, min(8, int(args.neurons_connections)))
     neurons_node_irregularity = max(0.0, float(args.neurons_node_irregularity))
+    emmons_line_thickness = max(0.0, float(args.emmons_line_thickness))
+    emmons_spin_speed = max(0.0, float(args.emmons_spin_speed))
 
     white_bgr = (255, 255, 255)
     rgb_mode_bgr = rgb_to_bgr(rgb_color)
@@ -952,6 +967,11 @@ def main() -> None:
             f"neurons_pulse_boost={neurons_pulse_boost:.2f} "
             f"neurons_connections={neurons_connections} "
             f"neurons_node_irregularity={neurons_node_irregularity:.2f}"
+        )
+    if color_mode == "emmons":
+        log(
+            f"emmons_line_thickness={emmons_line_thickness:.3f} "
+            f"emmons_spin_speed={emmons_spin_speed:.3f}"
         )
 
     audio_reactive = parse_bool(args.audio_reactive)
@@ -1641,7 +1661,8 @@ def main() -> None:
                     radius=atom_radius,
                     color_bgr=sp.color_bgr,
                     angle=sp.angle,
-                    phase=sp.phase + (processed * 0.06),
+                    phase=sp.phase + (processed * emmons_spin_speed),
+                    line_thickness_scale=emmons_line_thickness,
                 )
             else:
                 cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, sp.color_bgr, -1, cv2.LINE_AA)
