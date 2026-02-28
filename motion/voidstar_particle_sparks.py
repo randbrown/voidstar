@@ -810,6 +810,12 @@ def main() -> None:
     ap.add_argument("--crf", type=int, default=19, help="CRF for CPU encoder mode")
 
     ap.add_argument("--max-points", type=int, default=220, help="Maximum tracked points")
+    ap.add_argument(
+        "--max-live-sparks",
+        type=int,
+        default=0,
+        help="Maximum live particles (0=auto from max-points*4)",
+    )
     ap.add_argument("--point-min-distance", type=float, default=6.0, help="Minimum spacing between tracked points (pixels)")
     ap.add_argument("--track-refresh", type=int, default=5, help="Frames between reseeding features")
     ap.add_argument("--motion-threshold", type=float, default=1.2, help="Minimum pixel motion to emit sparks")
@@ -1146,6 +1152,13 @@ def main() -> None:
     if shobud_dark_suit_color == "white":
         shobud_dark_bgr = (248, 248, 248) if shobud_palette == "classic" else (220, 233, 245)
     shobud_suits = ["heart", "club", "diamond", "spade"]
+    raw_live_cap = int(args.max_live_sparks)
+    if raw_live_cap > 0:
+        live_spark_cap = max(1, raw_live_cap)
+        live_spark_cap_source = "cli"
+    else:
+        live_spark_cap = max(4, int(args.max_points) * 4)
+        live_spark_cap_source = "auto(max-points*4)"
 
     log(f"input={input_path}")
     log(f"output={output_path}")
@@ -1154,6 +1167,7 @@ def main() -> None:
         log(f"color_mode={color_mode} color_rgb={rgb_color[0]},{rgb_color[1]},{rgb_color[2]}")
     else:
         log(f"color_mode={color_mode}")
+    log(f"live_spark_cap={live_spark_cap} source={live_spark_cap_source}")
     if color_mode == "neurons":
         log(f"neurons_style={neurons_style}")
         if neurons_link_max_distance > 0.0:
@@ -1347,10 +1361,12 @@ def main() -> None:
                 )
 
         for x, y, speed in movers:
+            if len(sparks) >= live_spark_cap:
+                break
             if random.random() > spawn_prob:
                 continue
             n_spawn = 1
-            if audio_level > 0.8 and random.random() < 0.35:
+            if color_mode != "shobud" and audio_level > 0.8 and random.random() < 0.35:
                 n_spawn = 2
             if color_mode == "antiparticles" and random.random() < 0.45:
                 n_spawn += 1
@@ -1368,6 +1384,10 @@ def main() -> None:
                 n_spawn += 1
             elif color_mode == "shobud" and random.random() < (0.18 + (0.14 * audio_level)):
                 n_spawn += 1
+            remaining_slots = max(0, live_spark_cap - len(sparks))
+            if remaining_slots <= 0:
+                continue
+            n_spawn = min(n_spawn, remaining_slots)
             for _ in range(n_spawn):
                 angle = random.uniform(0.0, 2.0 * math.pi)
                 base_speed = float(args.spark_speed) * (0.65 + 0.45 * min(3.0, speed / 4.0))
