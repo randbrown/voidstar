@@ -11,6 +11,55 @@ particles
 
 
 
+
+python [voidstar_particle_sparks.py](http://_vscodecontentref_/7) INPUT.mp4 --color-mode electric
+python [voidstar_particle_sparks.py](http://_vscodecontentref_/8) INPUT.mp4 --color-mode electrostatic
+python [voidstar_particle_sparks.py](http://_vscodecontentref_/9) INPUT.mp4 --color-mode neurons
+python [voidstar_particle_sparks.py](http://_vscodecontentref_/10) INPUT.mp4 --color-mode strings
+
+
+
+--particle sparks electric
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
+--color-mode electric --spark-color-temperature 0.0 --electric-ray-boost 2.2 --spark-size 1.0 \
+--audio-reactive true \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 1.0 \
+--log-interval 1.0 --start 1000 --duration 15
+
+--flood-extra-sources 128 --flood-spawn-mult 3.0 --flood-velocity-mult 1.35 --electric-ray-boost 2 
+--audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
+
+--particle sparks electrostatic
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
+--color-mode electrostatic \
+--audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 3.0 --flood-extra-sources 128 --flood-velocity-mult 1.35 \
+--log-interval 1.0 --start 1000 --duration 15
+
+
+--particle sparks neurons
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
+--color-mode neurons \
+--audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 3.0 --flood-extra-sources 128 --flood-velocity-mult 1.35 \
+--log-interval 1.0 --start 1000 --duration 15
+
+--particle sparks strings
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
+--color-mode strings \
+--audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 3.0 --flood-extra-sources 128 --flood-velocity-mult 1.35 \
+--log-interval 1.0 --start 1000 --duration 15
+
+
 -- abstract forms:
 cd /home/brown/code/voidstar && \
 conda run -n mp311 python motion/voidstar_particle_sparks.py \
@@ -21,6 +70,7 @@ conda run -n mp311 python motion/voidstar_particle_sparks.py \
 --color-mode abstract-forms --spark-rate 0.2 --spark-size 64.0  --motion-threshold 0.5 \
 --flood-in-out true --flood-seconds 2 --flood-spawn-mult 2.0 --flood-extra-sources 128 --flood-velocity-mult 1.0 \
 --log-interval 1.0 --start 100 --duration 30 
+
 
 
 

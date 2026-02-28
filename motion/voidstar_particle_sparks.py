@@ -140,6 +140,29 @@ def blend_bgr(a: Tuple[int, int, int], b: Tuple[int, int, int], t: float) -> Tup
     )
 
 
+def apply_color_temperature_bgr(color_bgr: Tuple[int, int, int], temperature: float) -> Tuple[int, int, int]:
+    temp = max(-1.0, min(1.0, float(temperature)))
+    if abs(temp) < 1e-6:
+        return color_bgr
+
+    b, g, r = color_bgr
+    if temp > 0.0:
+        b = int(round(b * (1.0 - (0.60 * temp))))
+        g = int(round(g * (1.0 - (0.22 * temp))))
+        r = int(round(r + ((255 - r) * (0.30 * temp))))
+    else:
+        cool = -temp
+        r = int(round(r * (1.0 - (0.55 * cool))))
+        g = int(round(g * (1.0 - (0.12 * cool))))
+        b = int(round(b + ((255 - b) * (0.34 * cool))))
+
+    return (
+        max(0, min(255, b)),
+        max(0, min(255, g)),
+        max(0, min(255, r)),
+    )
+
+
 def audio_level_to_bgr(audio_level: float) -> Tuple[int, int, int]:
     level = clamp01(audio_level)
     hue = (2.0 / 3.0) * (1.0 - level)
@@ -221,6 +244,9 @@ class Spark:
     ang_vel: float = 0.0
     sides: int = 4
     stroke: int = 1
+    target_x: float = 0.0
+    target_y: float = 0.0
+    phase: float = 0.0
 
 
 def draw_abstract_form(
@@ -352,6 +378,18 @@ def main() -> None:
     ap.add_argument("--spark-jitter", type=float, default=1.1, help="Random velocity jitter")
     ap.add_argument("--spark-size", type=float, default=2.2, help="Base spark radius in pixels")
     ap.add_argument("--spark-opacity", type=float, default=0.70, help="Overlay opacity multiplier")
+    ap.add_argument(
+        "--spark-color-temperature",
+        type=float,
+        default=0.0,
+        help="Spark color temperature shift (-1.0=cooler, 0=neutral, +1.0=warmer)",
+    )
+    ap.add_argument(
+        "--electric-ray-boost",
+        type=float,
+        default=1.0,
+        help="Electric mode streak/ray intensity multiplier (0.0+; default 1.0)",
+    )
 
     ap.add_argument("--flood-in-out", type=str, default="false", help="true|false, add mirrored particle bursts at clip start/end")
     ap.add_argument("--flood-seconds", type=float, default=2.0, help="Duration in seconds for flood burst at start and end")
@@ -363,7 +401,14 @@ def main() -> None:
     ap.add_argument("--audio-reactive-gain", type=float, default=1.35, help="Audio intensity gain")
     ap.add_argument("--audio-reactive-smooth", type=float, default=0.70, help="Audio envelope smoothing")
 
-    ap.add_argument("--color-mode", default="white", help="white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes")
+    ap.add_argument(
+        "--color-mode",
+        default="white",
+        help=(
+            "white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes|"
+            "electric|electrostatic|neurons|strings"
+        ),
+    )
     ap.add_argument("--color-rgb", default="255,255,255", help="Spark color as R,G,B (used when --color-mode rgb)")
     ap.add_argument(
         "--abstract-contain-epsilon",
@@ -425,8 +470,23 @@ def main() -> None:
     color_mode = str(args.color_mode).strip().lower().replace("_", "-")
     if color_mode == "abstract-shapes":
         color_mode = "abstract-forms"
-    if color_mode not in {"white", "rgb", "random", "audio-intensity", "antiparticles", "abstract-forms"}:
-        raise ValueError("--color-mode must be white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes")
+    if color_mode not in {
+        "white",
+        "rgb",
+        "random",
+        "audio-intensity",
+        "antiparticles",
+        "abstract-forms",
+        "electric",
+        "electrostatic",
+        "neurons",
+        "strings",
+    }:
+        raise ValueError(
+            "--color-mode must be "
+            "white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes|"
+            "electric|electrostatic|neurons|strings"
+        )
 
     rgb_color = parse_rgb(args.color_rgb)
     white_bgr = (255, 255, 255)
@@ -457,6 +517,33 @@ def main() -> None:
         (255, 120, 190),
         (220, 255, 140),
     ]
+    electric_palette_bgr = [
+        (8, 86, 255),
+        (12, 108, 255),
+        (18, 132, 255),
+        (26, 156, 255),
+        (36, 182, 255),
+    ]
+    electrostatic_palette_bgr = [
+        (255, 245, 210),
+        (255, 200, 120),
+        (240, 220, 170),
+        (255, 175, 90),
+    ]
+    neuron_palette_bgr = [
+        (255, 180, 80),
+        (255, 140, 120),
+        (245, 210, 150),
+        (220, 160, 255),
+        (200, 240, 255),
+    ]
+    string_palette_bgr = [
+        (255, 130, 230),
+        (255, 220, 120),
+        (130, 235, 255),
+        (160, 255, 170),
+        (255, 150, 120),
+    ]
 
     log(f"input={input_path}")
     log(f"output={output_path}")
@@ -467,11 +554,18 @@ def main() -> None:
         log(f"color_mode={color_mode}")
 
     audio_reactive = parse_bool(args.audio_reactive)
+    spark_color_temperature = max(-1.0, min(1.0, float(args.spark_color_temperature)))
+    electric_ray_boost = max(0.0, float(args.electric_ray_boost))
     flood_in_out = parse_bool(args.flood_in_out)
     flood_seconds = max(0.0, float(args.flood_seconds))
     flood_spawn_mult = max(1.0, float(args.flood_spawn_mult))
     flood_extra_sources = max(0, int(args.flood_extra_sources))
     flood_velocity_mult = max(1.0, float(args.flood_velocity_mult))
+
+    if abs(spark_color_temperature) > 1e-6:
+        log(f"spark_color_temperature={spark_color_temperature:+.2f}")
+    if color_mode == "electric" and abs(electric_ray_boost - 1.0) > 1e-6:
+        log(f"electric_ray_boost={electric_ray_boost:.2f}")
 
     if flood_in_out:
         log(
@@ -587,6 +681,14 @@ def main() -> None:
             spawn_prob = clamp01(spawn_prob * 1.25)
         elif color_mode == "abstract-forms":
             spawn_prob = clamp01(spawn_prob * 0.95)
+        elif color_mode == "electric":
+            spawn_prob = clamp01(spawn_prob * 1.35)
+        elif color_mode == "electrostatic":
+            spawn_prob = clamp01(spawn_prob * 0.82)
+        elif color_mode == "neurons":
+            spawn_prob = clamp01(spawn_prob * 0.74)
+        elif color_mode == "strings":
+            spawn_prob = clamp01(spawn_prob * 0.92)
 
         if flood_strength > 0.0 and flood_extra_sources > 0:
             extra_count = int(round(flood_extra_sources * flood_strength))
@@ -609,6 +711,14 @@ def main() -> None:
             if color_mode == "antiparticles" and random.random() < 0.45:
                 n_spawn += 1
             elif color_mode == "abstract-forms" and audio_level > 0.65 and random.random() < 0.40:
+                n_spawn += 1
+            elif color_mode == "electric" and random.random() < (0.40 + (0.25 * audio_level)):
+                n_spawn += random.randint(1, 2)
+            elif color_mode == "electrostatic" and random.random() < (0.22 + (0.20 * audio_level)):
+                n_spawn += 1
+            elif color_mode == "neurons" and random.random() < (0.18 + (0.24 * audio_level)):
+                n_spawn += 1
+            elif color_mode == "strings" and random.random() < (0.34 + (0.18 * audio_level)):
                 n_spawn += 1
             for _ in range(n_spawn):
                 angle = random.uniform(0.0, 2.0 * math.pi)
@@ -635,12 +745,36 @@ def main() -> None:
                     palette_color = random.choice(abstract_palette_bgr)
                     audio_color = audio_level_to_bgr(form_energy)
                     spark_color_bgr = blend_bgr(palette_color, audio_color, 0.50 + (0.38 * form_energy))
+                elif color_mode == "electric":
+                    speed_level = clamp01(speed / 7.0)
+                    electric_energy = clamp01((0.55 * audio_level) + (0.45 * speed_level) + random.uniform(-0.08, 0.12))
+                    palette_color = random.choice(electric_palette_bgr)
+                    hot_core = apply_color_temperature_bgr((24, 174, 255), spark_color_temperature)
+                    spark_color_bgr = blend_bgr(palette_color, hot_core, 0.30 + (0.62 * electric_energy))
+                elif color_mode == "electrostatic":
+                    static_energy = clamp01((0.70 * audio_level) + (0.30 * clamp01(speed / 6.5)) + random.uniform(-0.05, 0.10))
+                    palette_color = random.choice(electrostatic_palette_bgr)
+                    audio_color = audio_level_to_bgr(clamp01(static_energy + 0.08))
+                    spark_color_bgr = blend_bgr(palette_color, audio_color, 0.38 + (0.35 * static_energy))
+                elif color_mode == "neurons":
+                    neuron_energy = clamp01((0.64 * audio_level) + (0.36 * clamp01(speed / 6.8)) + random.uniform(-0.10, 0.08))
+                    palette_color = random.choice(neuron_palette_bgr)
+                    audio_color = audio_level_to_bgr(clamp01(neuron_energy + 0.12))
+                    spark_color_bgr = blend_bgr(palette_color, audio_color, 0.30 + (0.42 * neuron_energy))
+                elif color_mode == "strings":
+                    string_energy = clamp01((0.46 * audio_level) + (0.54 * clamp01(speed / 7.2)) + random.uniform(-0.08, 0.08))
+                    palette_color = random.choice(string_palette_bgr)
+                    audio_color = audio_level_to_bgr(string_energy)
+                    spark_color_bgr = blend_bgr(palette_color, audio_color, 0.44 + (0.30 * string_energy))
                 else:
                     speed_level = clamp01(speed / 6.0)
                     anti_energy = clamp01((0.72 * audio_level) + (0.28 * speed_level) + random.uniform(-0.08, 0.08))
                     palette_color = random.choice(antiparticle_palette_bgr)
                     audio_color = audio_level_to_bgr(anti_energy)
                     spark_color_bgr = blend_bgr(palette_color, audio_color, 0.58 + (0.30 * anti_energy))
+
+                if abs(spark_color_temperature) > 1e-6:
+                    spark_color_bgr = apply_color_temperature_bgr(spark_color_bgr, spark_color_temperature)
 
                 charge = 0.0
                 if color_mode == "antiparticles":
@@ -650,6 +784,9 @@ def main() -> None:
                 shape_sides = 4
                 shape_stroke = 1
                 shape_ang_vel = 0.0
+                target_x = x
+                target_y = y
+                phase = random.uniform(0.0, 2.0 * math.pi)
                 if color_mode == "abstract-forms":
                     shape_kind = random.choice(["poly", "poly", "diamond", "ring"])
                     shape_sides = random.randint(3, 7)
@@ -672,6 +809,34 @@ def main() -> None:
                     for idx_rm in remove_idx:
                         if 0 <= idx_rm < len(sparks):
                             sparks[idx_rm].life = 0
+                elif color_mode == "electric":
+                    life = max(2, int(round(life * random.uniform(0.55, 0.92))))
+                    radius = max(1, int(round(radius * random.uniform(0.85, 1.25))))
+                    shape_kind = "electric"
+                elif color_mode == "electrostatic":
+                    life = max(4, int(round(life * random.uniform(0.95, 1.45))))
+                    radius = max(1, int(round(radius * random.uniform(0.85, 1.15))))
+                    jump_dist = min(frame_w, frame_h) * random.uniform(0.08, 0.22) * (0.85 + (0.65 * audio_level))
+                    target_x = max(0.0, min(frame_w - 1.0, x + (math.cos(angle) * jump_dist)))
+                    target_y = max(0.0, min(frame_h - 1.0, y + (math.sin(angle) * jump_dist)))
+                    shape_kind = "arc"
+                elif color_mode == "neurons":
+                    life = max(6, int(round(life * random.uniform(1.15, 1.85))))
+                    radius = max(1, int(round(radius * random.uniform(0.95, 1.45))))
+                    dendrite_dist = min(frame_w, frame_h) * random.uniform(0.05, 0.18)
+                    dendrite_angle = angle + random.uniform(-0.9, 0.9)
+                    target_x = max(0.0, min(frame_w - 1.0, x + (math.cos(dendrite_angle) * dendrite_dist)))
+                    target_y = max(0.0, min(frame_h - 1.0, y + (math.sin(dendrite_angle) * dendrite_dist)))
+                    shape_kind = "neuron"
+                    shape_ang_vel = random.uniform(-0.10, 0.10)
+                elif color_mode == "strings":
+                    life = max(5, int(round(life * random.uniform(1.05, 1.7))))
+                    radius = max(1, int(round(radius * random.uniform(0.75, 1.15))))
+                    shape_kind = "string"
+                    shape_ang_vel = random.uniform(-0.25, 0.25)
+                    vel *= random.uniform(0.70, 0.95)
+                    vx = math.cos(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.35, float(args.spark_jitter) * 0.35)
+                    vy = math.sin(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.35, float(args.spark_jitter) * 0.35)
 
                 sparks.append(
                     Spark(
@@ -689,6 +854,9 @@ def main() -> None:
                         ang_vel=shape_ang_vel,
                         sides=shape_sides,
                         stroke=shape_stroke,
+                        target_x=target_x,
+                        target_y=target_y,
+                        phase=phase,
                     )
                 )
 
@@ -742,10 +910,53 @@ def main() -> None:
                     swirl = 0.03 / max(45.0, dist)
                     sp.vx += -dy * swirl
                     sp.vy += dx * swirl
+            elif color_mode == "electric":
+                sp.vx += random.uniform(-0.85, 0.85) * (0.5 + (0.75 * audio_level))
+                sp.vy += random.uniform(-0.85, 0.85) * (0.5 + (0.75 * audio_level))
+            elif color_mode == "electrostatic":
+                tx = sp.target_x - sp.x
+                ty = sp.target_y - sp.y
+                dist = math.sqrt((tx * tx) + (ty * ty))
+                if dist < 4.0:
+                    jump_dist = min(frame_w, frame_h) * random.uniform(0.07, 0.20) * (0.9 + (0.7 * audio_level))
+                    jump_angle = random.uniform(0.0, 2.0 * math.pi)
+                    sp.target_x = max(0.0, min(frame_w - 1.0, sp.x + (math.cos(jump_angle) * jump_dist)))
+                    sp.target_y = max(0.0, min(frame_h - 1.0, sp.y + (math.sin(jump_angle) * jump_dist)))
+                elif dist > 1e-6:
+                    pull = (0.20 + (0.35 * audio_level)) / max(8.0, dist)
+                    sp.vx += tx * pull
+                    sp.vy += ty * pull
+                sp.vx += random.uniform(-0.15, 0.15)
+                sp.vy += random.uniform(-0.15, 0.15)
+            elif color_mode == "neurons":
+                tx = sp.target_x - sp.x
+                ty = sp.target_y - sp.y
+                dist = math.sqrt((tx * tx) + (ty * ty))
+                if dist < 5.0 and random.random() < 0.35:
+                    dendrite_dist = min(frame_w, frame_h) * random.uniform(0.04, 0.14)
+                    dendrite_angle = random.uniform(0.0, 2.0 * math.pi)
+                    sp.target_x = max(0.0, min(frame_w - 1.0, sp.x + (math.cos(dendrite_angle) * dendrite_dist)))
+                    sp.target_y = max(0.0, min(frame_h - 1.0, sp.y + (math.sin(dendrite_angle) * dendrite_dist)))
+                elif dist > 1e-6:
+                    pull = (0.08 + (0.18 * audio_level)) / max(10.0, dist)
+                    sp.vx += tx * pull
+                    sp.vy += ty * pull
+                sp.vx += random.uniform(-0.08, 0.08)
+                sp.vy += random.uniform(-0.08, 0.08)
+            elif color_mode == "strings":
+                speed_norm = math.sqrt((sp.vx * sp.vx) + (sp.vy * sp.vy))
+                if speed_norm > 1e-6:
+                    nx = -sp.vy / speed_norm
+                    ny = sp.vx / speed_norm
+                    wave = math.sin(sp.phase) * (0.20 + (0.45 * audio_level))
+                    sp.vx += nx * wave
+                    sp.vy += ny * wave
+                sp.phase += 0.30 + (0.55 * audio_level)
+                sp.angle += sp.ang_vel
 
             sp.x += sp.vx
             sp.y += sp.vy
-            if color_mode == "abstract-forms":
+            if color_mode in {"abstract-forms", "neurons"}:
                 sp.angle += sp.ang_vel
             if color_mode == "antiparticles":
                 sp.vx *= 0.972
@@ -754,6 +965,20 @@ def main() -> None:
                 sp.vx *= 0.968
                 sp.vy *= 0.968
                 sp.ang_vel *= 0.985
+            elif color_mode == "electric":
+                sp.vx *= 0.90
+                sp.vy *= 0.90
+            elif color_mode == "electrostatic":
+                sp.vx *= 0.93
+                sp.vy *= 0.93
+            elif color_mode == "neurons":
+                sp.vx *= 0.955
+                sp.vy *= 0.955
+                sp.ang_vel *= 0.992
+            elif color_mode == "strings":
+                sp.vx *= 0.965
+                sp.vy *= 0.965
+                sp.ang_vel *= 0.996
             else:
                 sp.vx *= 0.96
                 sp.vy *= 0.96
@@ -779,17 +1004,96 @@ def main() -> None:
                     sides=sp.sides,
                     stroke=stroke,
                 )
+            elif color_mode == "electric":
+                x1 = int(round(sp.x))
+                y1 = int(round(sp.y))
+                ray_boost = max(0.15, electric_ray_boost)
+                x0 = int(round(sp.x - (sp.vx * random.uniform(2.2, 4.2) * ray_boost)))
+                y0 = int(round(sp.y - (sp.vy * random.uniform(2.2, 4.2) * ray_boost)))
+                glow_mix = clamp01((0.30 + (0.70 * life_ratio)) * random.uniform(0.85, 1.15))
+                hot_target = apply_color_temperature_bgr((44, 190, 255), spark_color_temperature)
+                hot_color = blend_bgr(sp.color_bgr, hot_target, glow_mix)
+                streak_thickness = max(1, int(round((radius + 1) * (0.75 + (0.25 * ray_boost)))))
+                cv2.line(overlay, (x0, y0), (x1, y1), hot_color, streak_thickness, cv2.LINE_AA)
+                if life_ratio > 0.42 and random.random() < clamp01(0.62 * ray_boost):
+                    bx = int(round(sp.x + random.uniform(-8.0, 8.0) * ray_boost))
+                    by = int(round(sp.y + random.uniform(-8.0, 8.0) * ray_boost))
+                    cv2.line(overlay, (x1, y1), (bx, by), hot_color, 1, cv2.LINE_AA)
+                if life_ratio > 0.36 and random.random() < clamp01((0.36 + (0.32 * audio_level)) * ray_boost):
+                    ray_count = 2 if random.random() < 0.65 else 3
+                    if ray_boost > 1.0 and random.random() < clamp01(0.45 * (ray_boost - 1.0)):
+                        ray_count += 1
+                    for _ in range(ray_count):
+                        ray_angle = random.uniform(0.0, 2.0 * math.pi)
+                        ray_len = random.uniform(7.0, 18.0) * (0.9 + (0.7 * life_ratio)) * ray_boost
+                        rx = int(round(sp.x + (math.cos(ray_angle) * ray_len)))
+                        ry = int(round(sp.y + (math.sin(ray_angle) * ray_len)))
+                        cv2.line(overlay, (x1, y1), (rx, ry), hot_color, 1, cv2.LINE_AA)
+                if radius >= 1:
+                    core_r = 1 if radius <= 2 else 2
+                    core_color = apply_color_temperature_bgr((58, 200, 255), spark_color_temperature)
+                    cv2.circle(overlay, (x1, y1), core_r, core_color, -1, cv2.LINE_AA)
+            elif color_mode == "electrostatic":
+                x1 = int(round(sp.x))
+                y1 = int(round(sp.y))
+                tx = int(round(sp.target_x))
+                ty = int(round(sp.target_y))
+                if life_ratio > 0.12:
+                    mx = int(round((x1 + tx) * 0.5 + random.uniform(-4.0, 4.0)))
+                    my = int(round((y1 + ty) * 0.5 + random.uniform(-4.0, 4.0)))
+                    cv2.line(overlay, (x1, y1), (mx, my), sp.color_bgr, 1, cv2.LINE_AA)
+                    cv2.line(overlay, (mx, my), (tx, ty), sp.color_bgr, 1, cv2.LINE_AA)
+                cv2.circle(overlay, (x1, y1), max(1, radius), sp.color_bgr, -1, cv2.LINE_AA)
+            elif color_mode == "neurons":
+                x1 = int(round(sp.x))
+                y1 = int(round(sp.y))
+                tx = int(round(sp.target_x))
+                ty = int(round(sp.target_y))
+                pulse = clamp01(0.35 + (0.65 * abs(math.sin(sp.phase + (processed * 0.035)))))
+                link_color = blend_bgr(sp.color_bgr, (245, 245, 245), 0.25 + (0.45 * pulse))
+                cv2.line(overlay, (x1, y1), (tx, ty), link_color, 1, cv2.LINE_AA)
+                node_r = max(1, int(round(radius * (0.85 + (0.6 * pulse)))))
+                cv2.circle(overlay, (x1, y1), node_r, sp.color_bgr, -1, cv2.LINE_AA)
+            elif color_mode == "strings":
+                x1 = sp.x
+                y1 = sp.y
+                steps = 4
+                pts: list[tuple[int, int]] = []
+                speed_norm = max(1e-6, math.sqrt((sp.vx * sp.vx) + (sp.vy * sp.vy)))
+                nx = -sp.vy / speed_norm
+                ny = sp.vx / speed_norm
+                for i in range(steps + 1):
+                    t = i / max(1, steps)
+                    back = t * (7.0 + (6.0 * life_ratio))
+                    wave = math.sin(sp.phase - (t * math.pi * 2.0)) * (1.2 + (1.5 * audio_level))
+                    px = x1 - (sp.vx * back) + (nx * wave)
+                    py = y1 - (sp.vy * back) + (ny * wave)
+                    pts.append((int(round(px)), int(round(py))))
+                cv2.polylines(overlay, [np.array(pts, dtype=np.int32)], False, sp.color_bgr, max(1, radius), cv2.LINE_AA)
             else:
                 cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, sp.color_bgr, -1, cv2.LINE_AA)
             if color_mode == "antiparticles" and radius >= 2 and life_ratio > 0.35:
                 cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), 1, (255, 255, 255), -1, cv2.LINE_AA)
             if color_mode == "abstract-forms" and radius >= 4 and life_ratio > 0.30:
                 cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), 1, (245, 245, 245), -1, cv2.LINE_AA)
+            if color_mode == "electric" and radius >= 1 and life_ratio > 0.35:
+                accent_color = apply_color_temperature_bgr((32, 178, 255), spark_color_temperature)
+                cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), 1, accent_color, -1, cv2.LINE_AA)
+            if color_mode == "neurons" and life_ratio > 0.22 and random.random() < 0.24:
+                cv2.circle(overlay, (int(round(sp.target_x)), int(round(sp.target_y))), 1, (255, 245, 235), -1, cv2.LINE_AA)
             alive.append(sp)
 
         sparks = alive
 
         alpha = clamp01(float(args.spark_opacity) * (0.55 + 0.75 * min(1.2, audio_level)))
+        if color_mode == "electric":
+            alpha = clamp01(alpha * (1.0 + (0.26 * max(0.0, electric_ray_boost))))
+        elif color_mode == "electrostatic":
+            alpha = clamp01(alpha * 1.02)
+        elif color_mode == "neurons":
+            alpha = clamp01(alpha * 0.95)
+        elif color_mode == "strings":
+            alpha = clamp01(alpha * 0.98)
         if alpha > 0:
             frame = cv2.addWeighted(frame, 1.0, overlay, alpha, 0.0)
 
