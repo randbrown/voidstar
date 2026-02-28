@@ -68,13 +68,27 @@ conda run -n mp311 python motion/voidstar_particle_sparks.py \
 cd /home/brown/code/voidstar && \
 conda run -n mp311 python motion/voidstar_particle_sparks.py \
 /home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
---color-mode neurons --neurons-style sunset   \
 --color-mode emmons --spark-size 10 --spark-life-frames 48 --max-points 16 --point-min-distance 140 \
 --motion-threshold 0.5 --neurons-pulse-boost 2 \
 --audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
 --flood-in-out true --flood-seconds 2 --flood-spawn-mult 2.0 --flood-extra-sources 4 --flood-velocity-mult 1.35 \
 --log-interval 1.0 --start 1000 --duration 15
 
+
+--particle sparks shobud
+cd /home/brown/code/voidstar && \
+conda run -n mp311 python motion/voidstar_particle_sparks.py \
+/home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
+--color-mode shobud --spark-size 10 --spark-life-frames 48 --max-points 8 --point-min-distance 256 \
+--shobud-render filled --shobud-dark-suit-color black --shobud-palette classic \
+--shobud-wobble 1.0 --shobud-edge-shimmer 0 --shobud-edge-width 1 --shobud-rotation-speed 0.02 --shobud-stroke-width 1 \
+--motion-threshold 0.5 --neurons-pulse-boost 2 \
+--audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 2.0 --flood-extra-sources 4 --flood-velocity-mult 1.35 \
+--log-interval 1.0 --start 1000 --duration 15
+
+--shobud outline variant:
+--shobud-render outline --shobud-dark-suit-color black --shobud-palette classic --shobud-stroke-width 1 --shobud-edge-shimmer 0 --shobud-edge-width 1
 
 
 --particle sparks strings

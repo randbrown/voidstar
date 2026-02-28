@@ -536,6 +536,119 @@ def draw_emmons_atom(
     cv2.circle(canvas, (cx, cy), nucleus_r, color_bgr, -1, cv2.LINE_AA)
 
 
+def draw_shobud_suit(
+    canvas: np.ndarray,
+    x: float,
+    y: float,
+    radius: int,
+    color_bgr: Tuple[int, int, int],
+    suit: str,
+    angle: float,
+    outline_only: bool,
+    stroke_scale: float,
+    edge_shimmer: float,
+    edge_width: float,
+    shimmer_phase: float,
+) -> None:
+    cx = float(x)
+    cy = float(y)
+    r = max(3.0, float(radius))
+    h, w = canvas.shape[:2]
+    cos_t = math.cos(angle)
+    sin_t = math.sin(angle)
+
+    def rot(px: float, py: float) -> tuple[int, int]:
+        rx = cx + (px * cos_t) - (py * sin_t)
+        ry = cy + (px * sin_t) + (py * cos_t)
+        return int(round(rx)), int(round(ry))
+
+    stroke = max(1, int(round(max(0.0, float(stroke_scale)))))
+    shimmer_base = clamp01(float(edge_shimmer))
+    shimmer_wave = 0.5 + (0.5 * math.sin(float(shimmer_phase)))
+    shimmer_amt = clamp01(shimmer_base * (0.35 + (0.65 * shimmer_wave)))
+    shimmer_color = blend_bgr(color_bgr, (245, 245, 245), 0.55 + (0.35 * shimmer_amt))
+    shimmer_edge_enabled = float(edge_width) > 0.0
+    shimmer_thickness = max(1, int(round(max(0.0, float(edge_width)) + (1.5 * shimmer_amt))))
+
+    mask = np.zeros((h, w), dtype=np.uint8)
+
+    if suit == "diamond":
+        pts = np.array(
+            [
+                rot(0.0, -1.15 * r),
+                rot(0.88 * r, 0.0),
+                rot(0.0, 1.15 * r),
+                rot(-0.88 * r, 0.0),
+            ],
+            dtype=np.int32,
+        )
+        cv2.fillPoly(mask, [pts], 255, cv2.LINE_AA)
+    elif suit == "heart":
+        lcx, lcy = rot(-0.42 * r, -0.22 * r)
+        rcx, rcy = rot(0.42 * r, -0.22 * r)
+        bottom = rot(0.0, 1.05 * r)
+        left_knot = rot(-0.92 * r, 0.15 * r)
+        right_knot = rot(0.92 * r, 0.15 * r)
+        tri = np.array([left_knot, bottom, right_knot], dtype=np.int32)
+        rad = max(2, int(round(0.58 * r)))
+        cv2.circle(mask, (lcx, lcy), rad, 255, -1, cv2.LINE_AA)
+        cv2.circle(mask, (rcx, rcy), rad, 255, -1, cv2.LINE_AA)
+        cv2.fillPoly(mask, [tri], 255, cv2.LINE_AA)
+    elif suit == "club":
+        c1 = rot(0.0, -0.58 * r)
+        c2 = rot(-0.60 * r, 0.05 * r)
+        c3 = rot(0.60 * r, 0.05 * r)
+        rad = max(2, int(round(0.52 * r)))
+        stem_tri = np.array(
+            [
+                rot(0.0, 1.18 * r),
+                rot(-0.26 * r, 0.55 * r),
+                rot(0.26 * r, 0.55 * r),
+            ],
+            dtype=np.int32,
+        )
+        cv2.circle(mask, c1, rad, 255, -1, cv2.LINE_AA)
+        cv2.circle(mask, c2, rad, 255, -1, cv2.LINE_AA)
+        cv2.circle(mask, c3, rad, 255, -1, cv2.LINE_AA)
+        cv2.fillPoly(mask, [stem_tri], 255, cv2.LINE_AA)
+    else:
+        top_l = rot(-0.42 * r, 0.22 * r)
+        top_r = rot(0.42 * r, 0.22 * r)
+        bottom = rot(0.0, -1.05 * r)
+        left_knot = rot(-0.92 * r, -0.15 * r)
+        right_knot = rot(0.92 * r, -0.15 * r)
+        tri = np.array([left_knot, bottom, right_knot], dtype=np.int32)
+        rad = max(2, int(round(0.58 * r)))
+        stem_tri = np.array(
+            [
+                rot(0.0, 1.16 * r),
+                rot(-0.24 * r, 0.53 * r),
+                rot(0.24 * r, 0.53 * r),
+            ],
+            dtype=np.int32,
+        )
+        cv2.circle(mask, top_l, rad, 255, -1, cv2.LINE_AA)
+        cv2.circle(mask, top_r, rad, 255, -1, cv2.LINE_AA)
+        cv2.fillPoly(mask, [tri], 255, cv2.LINE_AA)
+        cv2.fillPoly(mask, [stem_tri], 255, cv2.LINE_AA)
+
+    contours_info = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = contours_info[0] if len(contours_info) == 2 else contours_info[1]
+    if not contours:
+        return
+
+    if not outline_only:
+        color_layer = np.zeros_like(canvas, dtype=np.uint8)
+        color_layer[:, :] = color_bgr
+        cv2.copyTo(color_layer, mask, canvas)
+
+    if outline_only:
+        cv2.drawContours(canvas, contours, -1, color_bgr, stroke, cv2.LINE_AA)
+
+    if shimmer_amt > 0.0 and shimmer_edge_enabled:
+        cv2.drawContours(canvas, contours, -1, shimmer_color, shimmer_thickness, cv2.LINE_AA)
+
+
 def find_nearest_neuron_target(
     x: float,
     y: float,
@@ -750,6 +863,51 @@ def main() -> None:
         default=0.06,
         help="Emmons: per-frame spin phase speed (default 0.06)",
     )
+    ap.add_argument(
+        "--shobud-render",
+        default="filled",
+        help="ShoBud: suit render mode filled|outline",
+    )
+    ap.add_argument(
+        "--shobud-stroke-width",
+        type=float,
+        default=1.0,
+        help="ShoBud: outline stroke width in pixels (min 1)",
+    )
+    ap.add_argument(
+        "--shobud-rotation-speed",
+        type=float,
+        default=0.028,
+        help="ShoBud: per-frame logo rotation speed",
+    )
+    ap.add_argument(
+        "--shobud-wobble",
+        type=float,
+        default=0.0,
+        help="ShoBud: vintage steel wobble amount (0=off)",
+    )
+    ap.add_argument(
+        "--shobud-edge-shimmer",
+        type=float,
+        default=0.0,
+        help="ShoBud: edge shimmer intensity (0=off)",
+    )
+    ap.add_argument(
+        "--shobud-edge-width",
+        type=float,
+        default=1.0,
+        help="ShoBud: shimmer edge width in pixels (0 disables shimmer contour)",
+    )
+    ap.add_argument(
+        "--shobud-palette",
+        default="classic",
+        help="ShoBud: color palette classic|cream-cherry",
+    )
+    ap.add_argument(
+        "--shobud-dark-suit-color",
+        default="black",
+        help="ShoBud: non-red suit color black|white",
+    )
 
     ap.add_argument("--flood-in-out", type=str, default="false", help="true|false, add mirrored particle bursts at clip start/end")
     ap.add_argument("--flood-seconds", type=float, default=2.0, help="Duration in seconds for flood burst at start and end")
@@ -766,7 +924,7 @@ def main() -> None:
         default="white",
         help=(
             "white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes|"
-            "electric|electrostatic|neurons|strings|emmons"
+            "electric|electrostatic|neurons|strings|emmons|shobud"
         ),
     )
     ap.add_argument("--color-rgb", default="255,255,255", help="Spark color as R,G,B (used when --color-mode rgb)")
@@ -842,11 +1000,12 @@ def main() -> None:
         "neurons",
         "strings",
         "emmons",
+        "shobud",
     }:
         raise ValueError(
             "--color-mode must be "
             "white|rgb|random|audio-intensity|antiparticles|abstract-forms|abstract-shapes|"
-            "electric|electrostatic|neurons|strings|emmons"
+            "electric|electrostatic|neurons|strings|emmons|shobud"
         )
 
     rgb_color = parse_rgb(args.color_rgb)
@@ -861,6 +1020,20 @@ def main() -> None:
     neurons_node_irregularity = max(0.0, float(args.neurons_node_irregularity))
     emmons_line_thickness = max(0.0, float(args.emmons_line_thickness))
     emmons_spin_speed = max(0.0, float(args.emmons_spin_speed))
+    shobud_render = str(args.shobud_render).strip().lower().replace("_", "-")
+    if shobud_render not in {"filled", "outline"}:
+        raise ValueError("--shobud-render must be filled|outline")
+    shobud_stroke_width = max(0.0, float(args.shobud_stroke_width))
+    shobud_rotation_speed = max(0.0, float(args.shobud_rotation_speed))
+    shobud_wobble = max(0.0, float(args.shobud_wobble))
+    shobud_edge_shimmer = max(0.0, float(args.shobud_edge_shimmer))
+    shobud_edge_width = max(0.0, float(args.shobud_edge_width))
+    shobud_palette = str(args.shobud_palette).strip().lower().replace("_", "-")
+    if shobud_palette not in {"classic", "cream-cherry"}:
+        raise ValueError("--shobud-palette must be classic|cream-cherry")
+    shobud_dark_suit_color = str(args.shobud_dark_suit_color).strip().lower().replace("_", "-")
+    if shobud_dark_suit_color not in {"black", "white"}:
+        raise ValueError("--shobud-dark-suit-color must be black|white")
 
     white_bgr = (255, 255, 255)
     rgb_mode_bgr = rgb_to_bgr(rgb_color)
@@ -947,6 +1120,11 @@ def main() -> None:
         (185, 140, 95),
         (85, 210, 248),
     ]
+    shobud_red_bgr = (30, 35, 220) if shobud_palette == "classic" else (42, 58, 205)
+    shobud_dark_bgr = (24, 24, 24)
+    if shobud_dark_suit_color == "white":
+        shobud_dark_bgr = (248, 248, 248) if shobud_palette == "classic" else (220, 233, 245)
+    shobud_suits = ["heart", "club", "diamond", "spade"]
 
     log(f"input={input_path}")
     log(f"output={output_path}")
@@ -972,6 +1150,17 @@ def main() -> None:
         log(
             f"emmons_line_thickness={emmons_line_thickness:.3f} "
             f"emmons_spin_speed={emmons_spin_speed:.3f}"
+        )
+    if color_mode == "shobud":
+        log(
+            f"shobud_render={shobud_render} "
+            f"shobud_stroke_width={shobud_stroke_width:.2f} "
+            f"shobud_rotation_speed={shobud_rotation_speed:.3f} "
+            f"shobud_wobble={shobud_wobble:.2f} "
+            f"shobud_edge_shimmer={shobud_edge_shimmer:.2f} "
+            f"shobud_edge_width={shobud_edge_width:.2f} "
+            f"shobud_palette={shobud_palette} "
+            f"shobud_dark_suit_color={shobud_dark_suit_color}"
         )
 
     audio_reactive = parse_bool(args.audio_reactive)
@@ -1112,6 +1301,8 @@ def main() -> None:
             spawn_prob = clamp01(spawn_prob * 0.92)
         elif color_mode == "emmons":
             spawn_prob = clamp01(spawn_prob * 0.82)
+        elif color_mode == "shobud":
+            spawn_prob = clamp01(spawn_prob * 0.72)
 
         if flood_strength > 0.0 and flood_extra_sources > 0:
             extra_count = int(round(flood_extra_sources * flood_strength))
@@ -1144,6 +1335,8 @@ def main() -> None:
             elif color_mode == "strings" and random.random() < (0.34 + (0.18 * audio_level)):
                 n_spawn += 1
             elif color_mode == "emmons" and random.random() < (0.22 + (0.18 * audio_level)):
+                n_spawn += 1
+            elif color_mode == "shobud" and random.random() < (0.18 + (0.14 * audio_level)):
                 n_spawn += 1
             for _ in range(n_spawn):
                 angle = random.uniform(0.0, 2.0 * math.pi)
@@ -1214,6 +1407,9 @@ def main() -> None:
                     spark_color_bgr = blend_bgr(palette_color, audio_color, 0.44 + (0.30 * string_energy))
                 elif color_mode == "emmons":
                     spark_color_bgr = random.choice(emmons_palette_bgr)
+                elif color_mode == "shobud":
+                    shobud_suit = random.choice(shobud_suits)
+                    spark_color_bgr = shobud_red_bgr if shobud_suit in {"heart", "diamond"} else shobud_dark_bgr
                 else:
                     speed_level = clamp01(speed / 6.0)
                     anti_energy = clamp01((0.72 * audio_level) + (0.28 * speed_level) + random.uniform(-0.08, 0.08))
@@ -1303,6 +1499,15 @@ def main() -> None:
                     vel *= random.uniform(0.35, 0.65)
                     vx = math.cos(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.20, float(args.spark_jitter) * 0.20)
                     vy = math.sin(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.20, float(args.spark_jitter) * 0.20)
+                elif color_mode == "shobud":
+                    life = max(9, int(round(life * random.uniform(1.25, 2.15))))
+                    radius = max(4, int(round(radius * random.uniform(1.35, 2.20))))
+                    shape_kind = "shobud"
+                    shape_sides = shobud_suits.index(shobud_suit)
+                    shape_ang_vel = random.uniform(-0.020, 0.020)
+                    vel *= random.uniform(0.22, 0.45)
+                    vx = math.cos(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.10, float(args.spark_jitter) * 0.10)
+                    vy = math.sin(angle) * vel + random.uniform(-float(args.spark_jitter) * 0.10, float(args.spark_jitter) * 0.10)
 
                 sparks.append(
                     Spark(
@@ -1445,6 +1650,15 @@ def main() -> None:
                 sp.vy += random.uniform(-0.05, 0.05) * (0.5 + (0.5 * audio_level))
                 sp.phase += 0.12 + (0.26 * audio_level)
                 sp.angle += sp.ang_vel
+            elif color_mode == "shobud":
+                sp.vx += random.uniform(-0.025, 0.025) * (0.4 + (0.5 * audio_level))
+                sp.vy += random.uniform(-0.025, 0.025) * (0.4 + (0.5 * audio_level))
+                if shobud_wobble > 0.0:
+                    wobble_amp = shobud_wobble * (0.06 + (0.12 * audio_level))
+                    sp.vx += math.sin((sp.phase * 0.85) + (processed * 0.032)) * wobble_amp
+                    sp.vy += math.cos((sp.phase * 1.10) - (processed * 0.028)) * (wobble_amp * 0.82)
+                sp.phase += 0.05 + (0.08 * audio_level)
+                sp.angle += shobud_rotation_speed
             elif color_mode == "strings":
                 speed_norm = math.sqrt((sp.vx * sp.vx) + (sp.vy * sp.vy))
                 if speed_norm > 1e-6:
@@ -1458,7 +1672,7 @@ def main() -> None:
 
             sp.x += sp.vx
             sp.y += sp.vy
-            if color_mode in {"abstract-forms", "neurons", "emmons"}:
+            if color_mode in {"abstract-forms", "neurons", "emmons", "shobud"}:
                 sp.angle += sp.ang_vel
             if color_mode == "antiparticles":
                 sp.vx *= 0.972
@@ -1481,6 +1695,10 @@ def main() -> None:
                 sp.vx *= 0.964
                 sp.vy *= 0.964
                 sp.ang_vel *= 0.996
+            elif color_mode == "shobud":
+                sp.vx *= 0.976
+                sp.vy *= 0.976
+                sp.ang_vel *= 0.998
             elif color_mode == "strings":
                 sp.vx *= 0.965
                 sp.vy *= 0.965
@@ -1664,6 +1882,24 @@ def main() -> None:
                     phase=sp.phase + (processed * emmons_spin_speed),
                     line_thickness_scale=emmons_line_thickness,
                 )
+            elif color_mode == "shobud":
+                suit_idx = int(sp.sides) % len(shobud_suits)
+                suit_name = shobud_suits[suit_idx]
+                suit_radius = max(3, int(round(radius * (1.1 + (0.55 * life_ratio)))))
+                draw_shobud_suit(
+                    overlay,
+                    x=sp.x,
+                    y=sp.y,
+                    radius=suit_radius,
+                    color_bgr=sp.color_bgr,
+                    suit=suit_name,
+                    angle=sp.angle,
+                    outline_only=(shobud_render == "outline"),
+                    stroke_scale=shobud_stroke_width,
+                    edge_shimmer=shobud_edge_shimmer,
+                    edge_width=shobud_edge_width,
+                    shimmer_phase=(sp.phase + (processed * 0.08) + (0.15 * suit_idx)),
+                )
             else:
                 cv2.circle(overlay, (int(round(sp.x)), int(round(sp.y))), radius, sp.color_bgr, -1, cv2.LINE_AA)
             if color_mode == "antiparticles" and radius >= 2 and life_ratio > 0.35:
@@ -1701,6 +1937,8 @@ def main() -> None:
             alpha = clamp01(alpha * 0.98)
         elif color_mode == "emmons":
             alpha = clamp01(alpha * 0.96)
+        elif color_mode == "shobud":
+            alpha = clamp01(alpha * 0.92)
         if alpha > 0:
             frame = cv2.addWeighted(frame, 1.0, overlay, alpha, 0.0)
 
