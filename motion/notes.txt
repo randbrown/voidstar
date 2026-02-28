@@ -35,9 +35,9 @@ conda run -n mp311 python motion/voidstar_particle_sparks.py \
 cd /home/brown/code/voidstar && \
 conda run -n mp311 python motion/voidstar_particle_sparks.py \
 /home/brown/WinVideos/sensoria_voidstar_0/sensoria_voidstar_0.mp4 \
---color-mode electrostatic \
---audio-reactive true --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
---flood-in-out true --flood-seconds 2 --flood-spawn-mult 3.0 --flood-extra-sources 128 --flood-velocity-mult 1.35 \
+--color-mode electrostatic --max-points 64 --track-refresh 8 --motion-threshold 0.25 \
+--audio-reactive false --audio-reactive-gain 1.35 --audio-reactive-smooth 0.85 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 1.5 --flood-extra-sources 16 --flood-velocity-mult 1.5 \
 --log-interval 1.0 --start 1000 --duration 15
 
 

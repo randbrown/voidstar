@@ -306,6 +306,58 @@ def draw_abstract_form(
         cv2.polylines(canvas, [inner], True, color_bgr, 1, cv2.LINE_AA)
 
 
+def draw_electrostatic_arc(
+    canvas: np.ndarray,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    color_bgr: Tuple[int, int, int],
+    life_ratio: float,
+    audio_level: float,
+) -> None:
+    dx = float(x2 - x1)
+    dy = float(y2 - y1)
+    dist = math.sqrt((dx * dx) + (dy * dy))
+    if dist < 2.0:
+        cv2.line(canvas, (x1, y1), (x2, y2), color_bgr, 1, cv2.LINE_AA)
+        return
+
+    nx = -dy / dist
+    ny = dx / dist
+    dir_x = dx / dist
+    dir_y = dy / dist
+
+    segs = max(4, min(11, int(round(dist / 14.0)) + int(round(2.0 * clamp01(audio_level)))))
+    amp = min(22.0, max(2.5, dist * (0.10 + (0.10 * clamp01(audio_level)))))
+    amp *= 0.55 + (0.70 * clamp01(life_ratio))
+
+    pts: list[tuple[int, int]] = [(x1, y1)]
+    for i in range(1, segs):
+        t = i / max(1, segs)
+        envelope = max(0.0, 1.0 - abs((2.0 * t) - 1.0))
+        perp = random.uniform(-amp, amp) * envelope
+        along = random.uniform(-2.0, 2.0)
+        px = (x1 + (dx * t)) + (nx * perp) + (dir_x * along)
+        py = (y1 + (dy * t)) + (ny * perp) + (dir_y * along)
+        pts.append((int(round(px)), int(round(py))))
+    pts.append((x2, y2))
+
+    arc = np.array(pts, dtype=np.int32)
+    glow_color = blend_bgr(color_bgr, (255, 245, 230), 0.18 + (0.28 * clamp01(audio_level)))
+    cv2.polylines(canvas, [arc], False, glow_color, 2, cv2.LINE_AA)
+    cv2.polylines(canvas, [arc], False, color_bgr, 1, cv2.LINE_AA)
+
+    if len(pts) >= 5 and random.random() < (0.22 + (0.30 * clamp01(audio_level))):
+        branch_idx = random.randint(2, len(pts) - 3)
+        bx, by = pts[branch_idx]
+        branch_len = random.uniform(4.0, min(18.0, dist * 0.35))
+        branch_angle = math.atan2(dy, dx) + random.uniform(-1.2, 1.2)
+        ex = int(round(bx + (math.cos(branch_angle) * branch_len)))
+        ey = int(round(by + (math.sin(branch_angle) * branch_len)))
+        cv2.line(canvas, (bx, by), (ex, ey), color_bgr, 1, cv2.LINE_AA)
+
+
 def abstract_form_spawn_policy(
     x: float,
     y: float,
@@ -1039,10 +1091,16 @@ def main() -> None:
                 tx = int(round(sp.target_x))
                 ty = int(round(sp.target_y))
                 if life_ratio > 0.12:
-                    mx = int(round((x1 + tx) * 0.5 + random.uniform(-4.0, 4.0)))
-                    my = int(round((y1 + ty) * 0.5 + random.uniform(-4.0, 4.0)))
-                    cv2.line(overlay, (x1, y1), (mx, my), sp.color_bgr, 1, cv2.LINE_AA)
-                    cv2.line(overlay, (mx, my), (tx, ty), sp.color_bgr, 1, cv2.LINE_AA)
+                    draw_electrostatic_arc(
+                        overlay,
+                        x1=x1,
+                        y1=y1,
+                        x2=tx,
+                        y2=ty,
+                        color_bgr=sp.color_bgr,
+                        life_ratio=life_ratio,
+                        audio_level=audio_level,
+                    )
                 cv2.circle(overlay, (x1, y1), max(1, radius), sp.color_bgr, -1, cv2.LINE_AA)
             elif color_mode == "neurons":
                 x1 = int(round(sp.x))
