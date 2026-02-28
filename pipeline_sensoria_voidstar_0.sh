@@ -67,7 +67,7 @@ DETECT_AUDIO_START_END_DEFAULT=1
 CPS_DEFAULT=0.5
 DIVVY_SAMPLING_MODE_DEFAULT="groove"   # uniform-spread | groove | minute-averages | n-averages | recursive-halves
 DIVVY_GROOVE_BPM_DEFAULT="30"
-GLITCH_SECONDS_DEFAULT=1.8
+GLITCH_SECONDS_DEFAULT=2
 LOOP_SEAM_SECONDS_DEFAULT="2"
 
 # Reels overlay stage controls.
@@ -96,21 +96,24 @@ GLITCHFIELD_CUSTOM_ARGS=""      # used when preset=custom
 # Optional particle sparks stage (runs after divvy highlights, before dvdlogo).
 ENABLE_PARTICLE_SPARKS_STAGE=1
 USE_PARTICLE_SPARKS_CACHE_DEFAULT=1
-PARTICLE_SPARKS_MAX_POINTS_DEFAULT=128
-PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT=0.5
+PARTICLE_SPARKS_MAX_POINTS_DEFAULT=32
+PARTICLE_SPARKS_MAX_LIVE_SPARKS_DEFAULT=32
+PARTICLE_SPARKS_TRACK_REFRESH_DEFAULT=8
+PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT=0.25
 PARTICLE_SPARKS_RATE_DEFAULT=0.18
 PARTICLE_SPARKS_SIZE_DEFAULT=8
 PARTICLE_SPARKS_LIFE_FRAMES_DEFAULT=15
 PARTICLE_SPARKS_SPEED_DEFAULT=0.135
 PARTICLE_SPARKS_OPACITY_DEFAULT=0.45
-PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT=1.0
-PARTICLE_SPARKS_COLOR_MODE_DEFAULT="white"   # white | rgb | random | audio-intensity | antiparticles | abstract-forms
+PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT=1.35
+PARTICLE_SPARKS_AUDIO_SMOOTH_DEFAULT=0.85
+PARTICLE_SPARKS_COLOR_MODE_DEFAULT="electrostatic"   # white | rgb | random | audio-intensity | antiparticles | abstract-forms | electric | electrostatic | neurons | strings | emmons | shobud
 PARTICLE_SPARKS_COLOR_RGB_DEFAULT="255,255,255"
 PARTICLE_SPARKS_FLOOD_IN_OUT_DEFAULT=1
 PARTICLE_SPARKS_FLOOD_SECONDS_DEFAULT=2.0
-PARTICLE_SPARKS_FLOOD_SPAWN_MULT_DEFAULT=2.0
-PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT=128
-PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=1
+PARTICLE_SPARKS_FLOOD_SPAWN_MULT_DEFAULT=4
+PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES_DEFAULT=32
+PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=1.5
 
 # Optional title hook stage (runs last, after logo/particle stages).
 ENABLE_TITLE_HOOK_STAGE=1
@@ -831,7 +834,7 @@ run_optional_particle_sparks_on_clip() {
     require_file "PARTICLE_SPARKS" "$PARTICLE_SPARKS"
 
     local sparks_cache_sig
-    sparks_cache_sig="particle_sparks|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${PARTICLE_SPARKS}|script_fp=$(file_fingerprint "$PARTICLE_SPARKS")|max_points=${PARTICLE_SPARKS_MAX_POINTS}|motion_threshold=${PARTICLE_SPARKS_MOTION_THRESHOLD}|spark_rate=${PARTICLE_SPARKS_RATE}|spark_size=${PARTICLE_SPARKS_SIZE}|spark_life=${PARTICLE_SPARKS_LIFE_FRAMES}|spark_speed=${PARTICLE_SPARKS_SPEED}|spark_opacity=${PARTICLE_SPARKS_OPACITY}|audio_gain=${PARTICLE_SPARKS_AUDIO_GAIN}|color_mode=${PARTICLE_SPARKS_COLOR_MODE}|color_rgb=${PARTICLE_SPARKS_COLOR_RGB}|flood_in_out=${PARTICLE_SPARKS_FLOOD_IN_OUT}|flood_seconds=${PARTICLE_SPARKS_FLOOD_SECONDS}|flood_spawn_mult=${PARTICLE_SPARKS_FLOOD_SPAWN_MULT}|flood_extra_sources=${PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES}|flood_velocity_mult=${PARTICLE_SPARKS_FLOOD_VELOCITY_MULT}"
+    sparks_cache_sig="particle_sparks|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${PARTICLE_SPARKS}|script_fp=$(file_fingerprint "$PARTICLE_SPARKS")|max_points=${PARTICLE_SPARKS_MAX_POINTS}|max_live_sparks=${PARTICLE_SPARKS_MAX_LIVE_SPARKS}|track_refresh=${PARTICLE_SPARKS_TRACK_REFRESH}|motion_threshold=${PARTICLE_SPARKS_MOTION_THRESHOLD}|spark_rate=${PARTICLE_SPARKS_RATE}|spark_size=${PARTICLE_SPARKS_SIZE}|spark_life=${PARTICLE_SPARKS_LIFE_FRAMES}|spark_speed=${PARTICLE_SPARKS_SPEED}|spark_opacity=${PARTICLE_SPARKS_OPACITY}|audio_gain=${PARTICLE_SPARKS_AUDIO_GAIN}|audio_smooth=${PARTICLE_SPARKS_AUDIO_SMOOTH}|color_mode=${PARTICLE_SPARKS_COLOR_MODE}|color_rgb=${PARTICLE_SPARKS_COLOR_RGB}|flood_in_out=${PARTICLE_SPARKS_FLOOD_IN_OUT}|flood_seconds=${PARTICLE_SPARKS_FLOOD_SECONDS}|flood_spawn_mult=${PARTICLE_SPARKS_FLOOD_SPAWN_MULT}|flood_extra_sources=${PARTICLE_SPARKS_FLOOD_EXTRA_SOURCES}|flood_velocity_mult=${PARTICLE_SPARKS_FLOOD_VELOCITY_MULT}"
 
     if [[ "$USE_PARTICLE_SPARKS_CACHE" -eq 1 ]]; then
         should_rebuild "$target" --dep "$input_clip" --dep "$PARTICLE_SPARKS" --sig "$sparks_cache_sig" || {
@@ -847,6 +850,8 @@ run_optional_particle_sparks_on_clip() {
         --output "$target" \
         --start 0 --duration 0 \
         --max-points "$PARTICLE_SPARKS_MAX_POINTS" \
+        --max-live-sparks "$PARTICLE_SPARKS_MAX_LIVE_SPARKS" \
+        --track-refresh "$PARTICLE_SPARKS_TRACK_REFRESH" \
         --motion-threshold "$PARTICLE_SPARKS_MOTION_THRESHOLD" \
         --spark-rate "$PARTICLE_SPARKS_RATE" \
         --spark-size "$PARTICLE_SPARKS_SIZE" \
@@ -855,6 +860,7 @@ run_optional_particle_sparks_on_clip() {
         --spark-opacity "$PARTICLE_SPARKS_OPACITY" \
         --audio-reactive true \
         --audio-reactive-gain "$PARTICLE_SPARKS_AUDIO_GAIN" \
+        --audio-reactive-smooth "$PARTICLE_SPARKS_AUDIO_SMOOTH" \
         --color-mode "$PARTICLE_SPARKS_COLOR_MODE" \
         --color-rgb "$PARTICLE_SPARKS_COLOR_RGB" \
         --flood-in-out "$( [[ "$PARTICLE_SPARKS_FLOOD_IN_OUT" -eq 1 ]] && echo true || echo false )" \
@@ -1635,6 +1641,8 @@ main() {
     USE_PARTICLE_SPARKS_CACHE="$USE_PARTICLE_SPARKS_CACHE_DEFAULT"
     USE_TITLE_HOOK_CACHE="$USE_TITLE_HOOK_CACHE_DEFAULT"
     PARTICLE_SPARKS_MAX_POINTS="$PARTICLE_SPARKS_MAX_POINTS_DEFAULT"
+    PARTICLE_SPARKS_MAX_LIVE_SPARKS="$PARTICLE_SPARKS_MAX_LIVE_SPARKS_DEFAULT"
+    PARTICLE_SPARKS_TRACK_REFRESH="$PARTICLE_SPARKS_TRACK_REFRESH_DEFAULT"
     PARTICLE_SPARKS_MOTION_THRESHOLD="$PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT"
     PARTICLE_SPARKS_RATE="$PARTICLE_SPARKS_RATE_DEFAULT"
     PARTICLE_SPARKS_SIZE="$PARTICLE_SPARKS_SIZE_DEFAULT"
@@ -1642,6 +1650,7 @@ main() {
     PARTICLE_SPARKS_SPEED="$PARTICLE_SPARKS_SPEED_DEFAULT"
     PARTICLE_SPARKS_OPACITY="$PARTICLE_SPARKS_OPACITY_DEFAULT"
     PARTICLE_SPARKS_AUDIO_GAIN="$PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT"
+    PARTICLE_SPARKS_AUDIO_SMOOTH="$PARTICLE_SPARKS_AUDIO_SMOOTH_DEFAULT"
     PARTICLE_SPARKS_COLOR_MODE="$PARTICLE_SPARKS_COLOR_MODE_DEFAULT"
     PARTICLE_SPARKS_COLOR_RGB="$PARTICLE_SPARKS_COLOR_RGB_DEFAULT"
     PARTICLE_SPARKS_FLOOD_IN_OUT="$PARTICLE_SPARKS_FLOOD_IN_OUT_DEFAULT"
@@ -1711,6 +1720,8 @@ main() {
             --skip-title-hook) ENABLE_TITLE_HOOK_STAGE=0; shift ;;
             --no-title-hook-cache) USE_TITLE_HOOK_CACHE=0; shift ;;
             --particle-sparks-max-points) PARTICLE_SPARKS_MAX_POINTS="$2"; shift 2 ;;
+            --particle-sparks-max-live-sparks) PARTICLE_SPARKS_MAX_LIVE_SPARKS="$2"; shift 2 ;;
+            --particle-sparks-track-refresh) PARTICLE_SPARKS_TRACK_REFRESH="$2"; shift 2 ;;
             --particle-sparks-motion-threshold) PARTICLE_SPARKS_MOTION_THRESHOLD="$2"; shift 2 ;;
             --particle-sparks-rate) PARTICLE_SPARKS_RATE="$2"; shift 2 ;;
             --particle-sparks-size) PARTICLE_SPARKS_SIZE="$2"; shift 2 ;;
@@ -1718,6 +1729,7 @@ main() {
             --particle-sparks-speed) PARTICLE_SPARKS_SPEED="$2"; shift 2 ;;
             --particle-sparks-opacity) PARTICLE_SPARKS_OPACITY="$2"; shift 2 ;;
             --particle-sparks-audio-gain) PARTICLE_SPARKS_AUDIO_GAIN="$2"; shift 2 ;;
+            --particle-sparks-audio-smooth) PARTICLE_SPARKS_AUDIO_SMOOTH="$2"; shift 2 ;;
             --particle-sparks-color-mode) PARTICLE_SPARKS_COLOR_MODE="$2"; shift 2 ;;
             --particle-sparks-color-rgb) PARTICLE_SPARKS_COLOR_RGB="$2"; shift 2 ;;
             --particle-sparks-flood-in-out) PARTICLE_SPARKS_FLOOD_IN_OUT="$2"; shift 2 ;;
