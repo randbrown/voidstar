@@ -78,12 +78,12 @@ conda run -n mp311 python motion/voidstar_particle_sparks.py \
 cd /home/brown/code/voidstar && \
 conda run -n mp311 python motion/voidstar_particle_sparks.py \
 /home/brown/WinVideos/sensorium_voidstar_0/sensorium_voidstar_0.mp4 \
---color-mode emmons --spark-size 12 --spark-life-frames 30 --max-points 8 --point-min-distance 512 --max-live-sparks 32 \
---spark-rate 0.5 --motion-threshold 0.7 --spark-speed 1.9 --spark-jitter 1.3 --spark-opacity 0.6 --emmons-spin-speed 0.02 \
---spark-repel-strength 0.22 --spark-repel-radius 72 \
---audio-reactive true --audio-reactive-gain 1.2 --audio-reactive-smooth 0.7 \
---flood-in-out true --flood-seconds 2 --flood-spawn-mult 4.0 --flood-extra-sources 8 --flood-velocity-mult 1.15 \
---log-interval 1.0 --start 100 --duration 15 
+--color-mode emmons --spark-size 14 --spark-life-frames 45 --max-points 16 --point-min-distance 444 --max-live-sparks 16 \
+--spark-rate 0.5 --motion-threshold 0.7 --spark-speed 1.9 --spark-jitter 1.3 --spark-opacity 0.7 --emmons-spin-speed 0.02 \
+--spark-repel-strength 1 --spark-repel-radius 72 \
+--audio-reactive true --audio-reactive-gain 1.3 --audio-reactive-smooth 0.7 \
+--flood-in-out true --flood-seconds 2 --flood-spawn-mult 4.0 --flood-extra-sources 16 --flood-velocity-mult 1.15 \
+--log-interval 1.0 --start 200 --duration 15 
 
 
 --particle sparks shobud
