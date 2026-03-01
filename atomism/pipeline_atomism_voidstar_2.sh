@@ -59,7 +59,7 @@ INPUT_VIDEO_DEFAULT="~/WinVideos/atomism/atomism_voidstar_2.mp4"
 OUTDIR_DEFAULT="~/WinVideos/atomism"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
-START_SECONDS_DEFAULT="5.5"
+START_SECONDS_DEFAULT="7.5"
 YOUTUBE_FULL_SECONDS_DEFAULT=""
 DETECT_AUDIO_START_END_DEFAULT=0
 
@@ -75,7 +75,7 @@ LOOP_SEAM_SECONDS_DEFAULT="2"
 ENABLE_REELS_OVERLAY_STEP=1      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
 REELS_CACHE_MODE_DEFAULT="base"  # base | per-target
-BASE_REELS_OVERLAY_PREBUILT_DEFAULT="/mnt/c/Users/brown/Videos/sensorium_voidstar_0/sensorium_voidstar_0_reels_base_overlay.mp4"
+BASE_REELS_OVERLAY_PREBUILT_DEFAULT="~/WinVideos/atomism/atomism_voidstar_2_reels_base_overlay.mp4"
 REELS_BOOTSTRAP_EXISTING_CACHE_DEFAULT=1   # if prebuilt base overlay exists but cache key is missing, trust/seed cache key
 
 # Optional glitchfield stage that runs BEFORE reels overlay.
@@ -526,12 +526,18 @@ build_base_reels_overlay() {
         echo "[reels] cache disabled: rebuilding base overlay"
     fi
 
-    python3 "$REELS_OVERLAY" "$source_video" \
+    local reels_tmp
+    reels_tmp="$(mktemp -d "/tmp/reels_cv_overlay_${PIPELINE_LOG_TAG:-voidstar}_${STEM:-clip}_base_XXXXXX")"
+    if ! TMPDIR="$reels_tmp" python3 "$REELS_OVERLAY" "$source_video" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids false \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color false --overlay-color 255,255,255 \
-        --output "$target"
+        --output "$target"; then
+        rm -rf "$reels_tmp"
+        return 1
+    fi
+    rm -rf "$reels_tmp"
 
     write_cache_signature "$target" "$reels_cache_sig"
 
@@ -562,13 +568,19 @@ run_optional_reels_overlay_on_clip() {
         echo "[reels per-target] cache disabled: rebuilding stage clip" >&2
     fi
 
-    python3 "$REELS_OVERLAY" "$input_clip" \
+    local reels_tmp
+    reels_tmp="$(mktemp -d "/tmp/reels_cv_overlay_${PIPELINE_LOG_TAG:-voidstar}_${STEM:-clip}_pertarget_XXXXXX")"
+    if ! TMPDIR="$reels_tmp" python3 "$REELS_OVERLAY" "$input_clip" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids false \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
         --velocity-color false --overlay-color 255,255,255 \
         --output "$target" \
-        1>&2
+        1>&2; then
+        rm -rf "$reels_tmp"
+        return 1
+    fi
+    rm -rf "$reels_tmp"
 
     [[ -f "$target" ]] || die "Per-target reels overlay did not produce output: $target"
 
@@ -1039,7 +1051,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 16 6 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1092,7 +1104,7 @@ run_90s_start() {
     echo "--- 90s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 90 16 90 ""
+    run_divvy_uniform_highlights "$divvy_dst" 90 15 6 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1145,7 +1157,7 @@ run_180s_start() {
     echo "--- 180s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 32 9 ""
+    run_divvy_uniform_highlights "$divvy_dst" 180 15 12 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1362,7 +1374,7 @@ run_60s_end() {
     echo "--- 60s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 16 6 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 60 4  "end"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1417,7 +1429,7 @@ run_90s_end() {
     echo "--- 90s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 90 16 9 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 90 15 6 "end"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1472,7 +1484,7 @@ run_180s_end() {
     echo "--- 180s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 16 9 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 180 15 12 "end"
 
     local logo tag target
     logo="$LOGO_END"
