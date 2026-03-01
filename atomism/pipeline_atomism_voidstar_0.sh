@@ -59,7 +59,7 @@ INPUT_VIDEO_DEFAULT="~/WinVideos/atomism/atomism_voidstar_0.mp4"
 OUTDIR_DEFAULT="~/WinVideos/atomism"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
-START_SECONDS_DEFAULT="1.5"
+START_SECONDS_DEFAULT="3"
 YOUTUBE_FULL_SECONDS_DEFAULT=""
 DETECT_AUDIO_START_END_DEFAULT=0
 
@@ -1051,7 +1051,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 16 6 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 14 4 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1104,7 +1104,7 @@ run_90s_start() {
     echo "--- 90s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_90s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 90 16 90 ""
+    run_divvy_uniform_highlights "$divvy_dst" 90 14 6 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1157,7 +1157,7 @@ run_180s_start() {
     echo "--- 180s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 32 9 ""
+    run_divvy_uniform_highlights "$divvy_dst" 180 28 6 ""
 
     local logo tag target
     logo="$LOGO_START"
