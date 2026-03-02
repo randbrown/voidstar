@@ -490,6 +490,49 @@ finalize_target_output_name() {
     echo "$canonical_path"
 }
 
+write_project_notes_file() {
+    local notes_path="$PROJECT_ROOT/projects/${STEM}.txt"
+    local hashtags
+    hashtags="${TITLE_HOOK_SECONDARY_TEXT//\\n/ }"
+    hashtags="$(echo "$hashtags" | xargs)"
+
+    local first_title_line
+    first_title_line="${TITLE_HOOK_TITLE%%\\n*}"
+    local base_label="${first_title_line#// }"
+
+    local take_suffix="${PIPELINE_LOG_TAG##*_}"
+    if [[ "$take_suffix" == "$PIPELINE_LOG_TAG" || ! "$take_suffix" =~ ^[0-9]+$ ]]; then
+        take_suffix="${STEM##*_}"
+    fi
+
+    local hi60_label hi180_label full_label
+    hi60_label="${base_label/hi60s/hi60s}"
+    hi180_label="${base_label/hi60s/hi180s}"
+    full_label="${base_label/hi60s/full}"
+
+    cat > "$notes_path" <<EOF
+// atomism_${take_suffix} (original)
+// "${STEM}" @by voidstar(randbrown)
+${STEM}.mp4
+${hashtags}
+
+// ${hi60_label}
+// "${hi60_label}" @by voidstar(randbrown)
+${STEM}_hi60s.mp4
+${hashtags}
+
+// ${hi180_label}
+// "${hi180_label}" @by voidstar(randbrown)
+${STEM}_hi180s.mp4
+${hashtags}
+
+// ${full_label}
+// "${full_label}" @by voidstar(randbrown)
+${STEM}_full.mp4
+${hashtags}
+EOF
+}
+
 compute_60_window() {
     local ss="$START_SECONDS"
     local full=""
@@ -1555,6 +1598,8 @@ main() {
     echo "Sync:  gdrive_copy=${ENABLE_GDRIVE_COPY} gdrive_outdir=${GDRIVE_OUTDIR:-unset}"
 
     PROJECT_ROOT="/home/$USER/code/voidstar"
+    write_project_notes_file
+
     find_script() {
         local script_name="$1"
         local found
