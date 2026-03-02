@@ -41,15 +41,9 @@ PIPELINE_LOG_TAG_DEFAULT="atomism_1"
 
 # For custom mode, choose exactly which targets run.
 RUN_60S_START=1
-RUN_90S_START=0
 RUN_180S_START=1
-RUN_360S_START=0
-RUN_600S_START=0
 RUN_60S_END=0
-RUN_90S_END=0
 RUN_180S_END=0
-RUN_360S_END=0
-RUN_600S_END=0
 RUN_FULL=1
 
 ##NOTE: sensorium uses tiny electrical sparks (including flood in/out)
@@ -67,8 +61,17 @@ DETECT_AUDIO_START_END_DEFAULT=0
 CPS_DEFAULT=0.5
 DIVVY_SAMPLING_MODE_DEFAULT="groove"   # uniform-spread | groove | minute-averages | n-averages | recursive-halves
 DIVVY_GROOVE_BPM_DEFAULT="30"
+DIVVY_60S_START_SAMPLE_SECONDS_DEFAULT=14
+DIVVY_60S_START_SEGMENTS_DEFAULT=4
+DIVVY_180S_START_SAMPLE_SECONDS_DEFAULT=28
+DIVVY_180S_START_SEGMENTS_DEFAULT=6
+DIVVY_60S_END_SAMPLE_SECONDS_DEFAULT=16
+DIVVY_60S_END_SEGMENTS_DEFAULT=6
+DIVVY_180S_END_SAMPLE_SECONDS_DEFAULT=16
+DIVVY_180S_END_SEGMENTS_DEFAULT=9
 GLITCH_SECONDS_DEFAULT=1.7
 LOOP_SEAM_SECONDS_DEFAULT="2"
+PREVIEW_REELS_OVERLAY_DEFAULT=0
 
 ##NOTE: sensorium reels overlay is white only with ids/boxes disabled
 # Reels overlay stage controls.
@@ -1051,7 +1054,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 14 4 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 "$DIVVY_60S_START_SAMPLE_SECONDS" "$DIVVY_60S_START_SEGMENTS" ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1100,64 +1103,11 @@ run_60s_start() {
     copy_to_gdrive_if_enabled "$final_target"
 }
 
-run_90s_start() {
-    echo "--- 90s highlight (START) ---"
-    local divvy_dst="$OUTDIR/${STEM}_highlights_90s_overlay.mp4"
-
-    run_divvy_uniform_highlights "$divvy_dst" 90 14 6 ""
-
-    local logo tag target
-    logo="$LOGO_START"
-    tag="$(basename "${logo%.*}")"
-    local source_for_effects="$divvy_dst"
-    local reels_dst="$OUTDIR/${STEM}_highlights_90s_overlay_reels.mp4"
-    source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "90s-start")"
-    local source_for_logo="$source_for_effects"
-    local glitch_dst="$OUTDIR/${STEM}_highlights_90s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "90s-start")"
-
-    target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90s_overlay_logo.mp4" "$tag")"
-    local logo_stage="$target"
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        logo_stage="${target%.mp4}_pre_sparks.mp4"
-    fi
-    local dvdlogo_profile="cinema_local_track_v1_start083"
-    local dvdlogo_sig
-    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
-
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
-            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-            --output "$logo_stage"
-            write_cache_signature "$logo_stage" "$dvdlogo_sig"
-    fi
-
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "90s-start-post-logo" >/dev/null
-    fi
-
-    local final_target="$target"
-    local title_hook_target="${target%.mp4}_titlehook.mp4"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "90s-start-title-hook" "hi90s")"
-    final_target="$(finalize_target_output_name "$final_target" "hi90s")"
-
-    copy_to_gdrive_if_enabled "$final_target"
-}
-
 run_180s_start() {
     echo "--- 180s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 28 6 ""
+    run_divvy_uniform_highlights "$divvy_dst" 180 "$DIVVY_180S_START_SAMPLE_SECONDS" "$DIVVY_180S_START_SEGMENTS" ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -1204,116 +1154,6 @@ run_180s_start() {
     hook_duration="$(title_hook_duration_for_target_seconds 180)"
     final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "180s-start-title-hook" "hi180s" "$hook_duration")"
     final_target="$(finalize_target_output_name "$final_target" "hi180s")"
-
-    copy_to_gdrive_if_enabled "$final_target"
-}
-
-run_360s_start() {
-    echo "--- 360s highlight (START) ---"
-    local divvy_dst="$OUTDIR/${STEM}_highlights_360s_overlay.mp4"
-
-    run_divvy_uniform_highlights "$divvy_dst" 360 16 18 ""
-
-    local logo tag target
-    logo="$LOGO_START"
-    tag="$(basename "${logo%.*}")"
-    local source_for_effects="$divvy_dst"
-    local reels_dst="$OUTDIR/${STEM}_highlights_360s_overlay_reels.mp4"
-    source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "360s-start")"
-    local source_for_logo="$source_for_effects"
-    local glitch_dst="$OUTDIR/${STEM}_highlights_360s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "360s-start")"
-
-    target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_360s_overlay_logo.mp4" "$tag")"
-    local logo_stage="$target"
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        logo_stage="${target%.mp4}_pre_sparks.mp4"
-    fi
-    local dvdlogo_profile="cinema_local_track_v1_start083"
-    local dvdlogo_sig
-    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
-
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
-            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-            --output "$logo_stage"
-            write_cache_signature "$logo_stage" "$dvdlogo_sig"
-    fi
-
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "360s-start-post-logo" >/dev/null
-    fi
-
-    local final_target="$target"
-    local title_hook_target="${target%.mp4}_titlehook.mp4"
-    local hook_duration
-    hook_duration="$(title_hook_duration_for_target_seconds 360)"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "360s-start-title-hook" "hi360s" "$hook_duration")"
-    final_target="$(finalize_target_output_name "$final_target" "hi360s")"
-
-    copy_to_gdrive_if_enabled "$final_target"
-}
-
-run_600s_start() {
-    echo "--- 600s highlight (START) ---"
-    local divvy_dst="$OUTDIR/${STEM}_highlights_600s_overlay.mp4"
-
-    run_divvy_uniform_highlights "$divvy_dst" 600 16 30 ""
-
-    local logo tag target
-    logo="$LOGO_START"
-    tag="$(basename "${logo%.*}")"
-    local source_for_effects="$divvy_dst"
-    local reels_dst="$OUTDIR/${STEM}_highlights_600s_overlay_reels.mp4"
-    source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "600s-start")"
-    local source_for_logo="$source_for_effects"
-    local glitch_dst="$OUTDIR/${STEM}_highlights_600s_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "600s-start")"
-
-    target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_600s_overlay_logo.mp4" "$tag")"
-    local logo_stage="$target"
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        logo_stage="${target%.mp4}_pre_sparks.mp4"
-    fi
-    local dvdlogo_profile="cinema_local_track_v1_start083"
-    local dvdlogo_sig
-    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
-
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
-            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-            --output "$logo_stage"
-            write_cache_signature "$logo_stage" "$dvdlogo_sig"
-    fi
-
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "600s-start-post-logo" >/dev/null
-    fi
-
-    local final_target="$target"
-    local title_hook_target="${target%.mp4}_titlehook.mp4"
-    local hook_duration
-    hook_duration="$(title_hook_duration_for_target_seconds 600)"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "600s-start-title-hook" "hi600s" "$hook_duration")"
-    final_target="$(finalize_target_output_name "$final_target" "hi600s")"
 
     copy_to_gdrive_if_enabled "$final_target"
 }
@@ -1374,7 +1214,7 @@ run_60s_end() {
     echo "--- 60s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 16 6 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 60 "$DIVVY_60S_END_SAMPLE_SECONDS" "$DIVVY_60S_END_SEGMENTS" "end"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1425,66 +1265,11 @@ run_60s_end() {
     copy_to_gdrive_if_enabled "$final_target"
 }
 
-run_90s_end() {
-    echo "--- 90s highlight (END) ---"
-    local divvy_dst="$OUTDIR/${STEM}_highlights_90t_overlay.mp4"
-
-    run_divvy_uniform_highlights "$divvy_dst" 90 16 9 "end"
-
-    local logo tag target
-    logo="$LOGO_END"
-    tag="$(basename "${logo%.*}")"
-    local source_for_effects="$divvy_dst"
-    local reels_dst="$OUTDIR/${STEM}_highlights_90t_overlay_reels.mp4"
-    source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "90s-end")"
-    local source_for_logo="$source_for_effects"
-    local glitch_dst="$OUTDIR/${STEM}_highlights_90t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "90s-end")"
-
-    target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_90t_overlay_logo.mp4" "$tag")"
-    local logo_stage="$target"
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        logo_stage="${target%.mp4}_pre_sparks.mp4"
-    fi
-    local dvdlogo_profile="cinema_local_track_v1_start083"
-    local dvdlogo_sig
-    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
-
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .8 --start-y .83 \
-            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-            --output "$logo_stage"
-            write_cache_signature "$logo_stage" "$dvdlogo_sig"
-    fi
-
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "90s-end-post-logo" >/dev/null
-    fi
-
-    local final_target="$target"
-    local title_hook_target="${target%.mp4}_titlehook.mp4"
-    local hook_duration
-    hook_duration="$(title_hook_duration_for_target_seconds 90)"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "90s-end-title-hook" "hi90t" "$hook_duration")"
-    final_target="$(finalize_target_output_name "$final_target" "hi90t")"
-
-    copy_to_gdrive_if_enabled "$final_target"
-}
-
 run_180s_end() {
     echo "--- 180s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 16 9 "end"
+    run_divvy_uniform_highlights "$divvy_dst" 180 "$DIVVY_180S_END_SAMPLE_SECONDS" "$DIVVY_180S_END_SEGMENTS" "end"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1535,122 +1320,21 @@ run_180s_end() {
     copy_to_gdrive_if_enabled "$final_target"
 }
 
-run_360s_end() {
-    echo "--- 360s highlight (END) ---"
-    local divvy_dst="$OUTDIR/${STEM}_highlights_360t_overlay.mp4"
-
-    run_divvy_uniform_highlights "$divvy_dst" 360 16 18 "end"
-
-    local logo tag target
-    logo="$LOGO_END"
-    tag="$(basename "${logo%.*}")"
-    local source_for_effects="$divvy_dst"
-    local reels_dst="$OUTDIR/${STEM}_highlights_360t_overlay_reels.mp4"
-    source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "360s-end")"
-    local source_for_logo="$source_for_effects"
-    local glitch_dst="$OUTDIR/${STEM}_highlights_360t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "360s-end")"
-
-    target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_360t_overlay_logo.mp4" "$tag")"
-    local logo_stage="$target"
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        logo_stage="${target%.mp4}_pre_sparks.mp4"
-    fi
-    local dvdlogo_profile="cinema_local_track_v1_start077"
-    local dvdlogo_sig
-    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
-
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
-            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-            --output "$logo_stage"
-            write_cache_signature "$logo_stage" "$dvdlogo_sig"
-    fi
-
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "360s-end-post-logo" >/dev/null
-    fi
-
-    local final_target="$target"
-    local title_hook_target="${target%.mp4}_titlehook.mp4"
-    local hook_duration
-    hook_duration="$(title_hook_duration_for_target_seconds 360)"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "360s-end-title-hook" "hi360t" "$hook_duration")"
-    final_target="$(finalize_target_output_name "$final_target" "hi360t")"
-
-    copy_to_gdrive_if_enabled "$final_target"
-}
-
-run_600s_end() {
-    echo "--- 600s highlight (END) ---"
-    local divvy_dst="$OUTDIR/${STEM}_highlights_600t_overlay.mp4"
-
-    run_divvy_uniform_highlights "$divvy_dst" 600 16 30 "end"
-
-    local logo tag target
-    logo="$LOGO_END"
-    tag="$(basename "${logo%.*}")"
-    local source_for_effects="$divvy_dst"
-    local reels_dst="$OUTDIR/${STEM}_highlights_600t_overlay_reels.mp4"
-    source_for_effects="$(run_optional_reels_overlay_on_clip "$divvy_dst" "$reels_dst" "600s-end")"
-    local source_for_logo="$source_for_effects"
-    local glitch_dst="$OUTDIR/${STEM}_highlights_600t_overlay_glitchfield_${GLITCHFIELD_PRESET}.mp4"
-    source_for_logo="$(run_optional_glitchfield_on_clip "$source_for_effects" "$glitch_dst" "600s-end")"
-
-    target="$(with_logo_suffix "$OUTDIR/${STEM}_highlights_600t_overlay_logo.mp4" "$tag")"
-    local logo_stage="$target"
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        logo_stage="${target%.mp4}_pre_sparks.mp4"
-    fi
-    local dvdlogo_profile="cinema_local_track_v1_start077"
-    local dvdlogo_sig
-    dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
-
-    if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
-            --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
-            --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
-            --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
-            --local-point-track-refresh 8 --local-point-track-opacity 0.77 --local-point-track-decay 0.77 \
-            --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity .77 --voidstar-colorize true --start-x .77 --start-y .79 \
-            --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
-            --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
-            --output "$logo_stage"
-            write_cache_signature "$logo_stage" "$dvdlogo_sig"
-    fi
-
-    if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
-        run_optional_particle_sparks_on_clip "$logo_stage" "$target" "600s-end-post-logo" >/dev/null
-    fi
-
-    local final_target="$target"
-    local title_hook_target="${target%.mp4}_titlehook.mp4"
-    local hook_duration
-    hook_duration="$(title_hook_duration_for_target_seconds 600)"
-    final_target="$(run_optional_title_hook_on_clip "$target" "$title_hook_target" "600s-end-title-hook" "hi600t" "$hook_duration")"
-    final_target="$(finalize_target_output_name "$final_target" "hi600t")"
-
-    copy_to_gdrive_if_enabled "$final_target"
-}
-
 main() {
     FORCE="$FORCE_DEFAULT"
     INPUT_VIDEO=""; OUTDIR=""
     START_SECONDS="$START_SECONDS_DEFAULT"; YOUTUBE_FULL_SECONDS="$YOUTUBE_FULL_SECONDS_DEFAULT"; DETECT_AUDIO_START_END="$DETECT_AUDIO_START_END_DEFAULT"; CPS="$CPS_DEFAULT"; GLITCH_SECONDS="$GLITCH_SECONDS_DEFAULT"; LOOP_SEAM_SECONDS="$LOOP_SEAM_SECONDS_DEFAULT"
     DIVVY_SAMPLING_MODE="$DIVVY_SAMPLING_MODE_DEFAULT"
     DIVVY_GROOVE_BPM="$DIVVY_GROOVE_BPM_DEFAULT"
+    DIVVY_60S_START_SAMPLE_SECONDS="$DIVVY_60S_START_SAMPLE_SECONDS_DEFAULT"
+    DIVVY_60S_START_SEGMENTS="$DIVVY_60S_START_SEGMENTS_DEFAULT"
+    DIVVY_180S_START_SAMPLE_SECONDS="$DIVVY_180S_START_SAMPLE_SECONDS_DEFAULT"
+    DIVVY_180S_START_SEGMENTS="$DIVVY_180S_START_SEGMENTS_DEFAULT"
+    DIVVY_60S_END_SAMPLE_SECONDS="$DIVVY_60S_END_SAMPLE_SECONDS_DEFAULT"
+    DIVVY_60S_END_SEGMENTS="$DIVVY_60S_END_SEGMENTS_DEFAULT"
+    DIVVY_180S_END_SAMPLE_SECONDS="$DIVVY_180S_END_SAMPLE_SECONDS_DEFAULT"
+    DIVVY_180S_END_SEGMENTS="$DIVVY_180S_END_SEGMENTS_DEFAULT"
+    PREVIEW_REELS_OVERLAY="$PREVIEW_REELS_OVERLAY_DEFAULT"
     BASE_REELS_OVERLAY_PREBUILT="$BASE_REELS_OVERLAY_PREBUILT_DEFAULT"
     REELS_BOOTSTRAP_EXISTING_CACHE="$REELS_BOOTSTRAP_EXISTING_CACHE_DEFAULT"
     LOGO_START="$LOGO_START_DEFAULT"
@@ -1762,6 +1446,8 @@ main() {
             --cps) CPS="$2"; shift 2 ;;
             --divvy-sampling-mode) DIVVY_SAMPLING_MODE="$2"; shift 2 ;;
             --divvy-groove-bpm) DIVVY_GROOVE_BPM="$2"; shift 2 ;;
+            --preview-reels-overlay) PREVIEW_REELS_OVERLAY=1; shift ;;
+            --preview-no-reels-overlay) PREVIEW_REELS_OVERLAY=0; shift ;;
             --glitch-seconds) GLITCH_SECONDS="$2"; shift 2 ;;
             --loop-seam-seconds) LOOP_SEAM_SECONDS="$2"; shift 2 ;;
             --jobs|-j) JOBS="$2"; shift 2 ;;
@@ -1918,9 +1604,11 @@ main() {
     done
 
     if (( mode_preview == 1 )); then
-        echo "--- Preview phase (quick 60s start/end, reels off) ---"
+        echo "--- Preview phase (quick 60s start/end) ---"
         local reels_overlay_saved="$ENABLE_REELS_OVERLAY_STEP"
-        ENABLE_REELS_OVERLAY_STEP=0
+        if [[ "$PREVIEW_REELS_OVERLAY" -eq 0 ]]; then
+            ENABLE_REELS_OVERLAY_STEP=0
+        fi
         run_60s_start
         run_60s_end
         ENABLE_REELS_OVERLAY_STEP="$reels_overlay_saved"
