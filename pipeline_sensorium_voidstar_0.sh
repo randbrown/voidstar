@@ -253,6 +253,7 @@ copy_to_gdrive_if_enabled() {
     mkdir -p "$GDRIVE_OUTDIR"
     local dst="$GDRIVE_OUTDIR/$(basename "$src")"
     cp -f "$src" "$dst"
+    refresh_output_timestamp "$dst"
     echo "[gdrive] copied: $dst"
 }
 
@@ -331,6 +332,21 @@ file_fingerprint() {
     echo "${mtime}:${size}"
 }
 
+refresh_output_timestamp() {
+    local path="$1"
+    [[ -f "$path" ]] || return 0
+
+    touch "$path" 2>/dev/null || true
+
+    if command -v powershell.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
+        local win_path
+        win_path="$(wslpath -w "$path" 2>/dev/null || true)"
+        if [[ -n "$win_path" ]]; then
+            WIN_PATH="$win_path" powershell.exe -NoProfile -Command '$p=$env:WIN_PATH; if (Test-Path $p) { $t=Get-Date; $i=Get-Item $p; $i.CreationTime=$t; $i.LastWriteTime=$t; $i.LastAccessTime=$t }' >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
 dvdlogo_cache_signature() {
     local profile="$1"
     local source_clip="$2"
@@ -372,11 +388,13 @@ rename_output() {
     fi
 
     if mv -vf "$src" "$dst" >&2; then
+        refresh_output_timestamp "$dst"
         return 0
     fi
 
     echo "Warning: mv failed for $src -> $dst; trying copy fallback" >&2
     if cp -f "$src" "$dst" && rm -f "$src"; then
+        refresh_output_timestamp "$dst"
         echo "copied '$src' -> '$dst' (fallback)" >&2
         return 0
     fi
@@ -466,6 +484,8 @@ finalize_target_output_name() {
     if [[ "$produced_path" != "$canonical_path" ]]; then
         rename_output "$produced_path" "$canonical_path" || die "Could not stage final output: $canonical_path"
     fi
+
+    refresh_output_timestamp "$canonical_path"
 
     echo "$canonical_path"
 }
