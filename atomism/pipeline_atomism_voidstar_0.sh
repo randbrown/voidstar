@@ -36,7 +36,7 @@ set -euo pipefail
 #    PIPELINE_MODE_DEFAULT="preview"
 
 # Pipeline mode: all | end-only | preview | custom | preview,custom
-PIPELINE_MODE_DEFAULT="preview,custom"
+PIPELINE_MODE_DEFAULT="custom"
 PIPELINE_LOG_TAG_DEFAULT="atomism_0"
 
 # For custom mode, choose exactly which targets run.
@@ -130,7 +130,7 @@ TITLE_HOOK_DURATION_DEFAULT=4.0
 TITLE_HOOK_DURATION_600_DEFAULT=8.0
 TITLE_HOOK_FADE_OUT_DURATION_DEFAULT=1.3
 TITLE_HOOK_TITLE_DEFAULT='// atomism (hi60s_0)\n// voidstar'
-TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#livecoding\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding'
+TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#emmonssteelguitar\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding'
 TITLE_HOOK_LOGO_DEFAULT='~/code/voidstar/art/logos_alpha/voidstar_logo_0.png'
 TITLE_HOOK_LOGO_ALPHA_THRESHOLD_DEFAULT=0.99
 TITLE_HOOK_LOGO_INTENSITY_DEFAULT=1.0
