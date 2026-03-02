@@ -3,17 +3,17 @@
 atomism_voidstar_2.mp4
 #livecoding #pedalsteel #improvisedmusic #opencvpython #vibecoding
 
-// atomism_2 (hi60s)
-// "atomism_voidstar_2 (hi60s)" @by voidstar(randbrown)
+// atomism (hi60s_2)
+// "atomism (hi60s_2)" @by voidstar(randbrown)
 atomism_voidstar_2_hi60s.mp4
 #livecoding #pedalsteel #improvisedmusic #opencvpython #vibecoding
 
-// atomism_2 (hi180s)
-// "atomism_voidstar_2 (hi180s)" @by voidstar(randbrown)
+// atomism (hi180s_2)
+// "atomism (hi180s_2)" @by voidstar(randbrown)
 atomism_voidstar_2_hi180s.mp4
 #livecoding #pedalsteel #improvisedmusic #opencvpython #vibecoding
 
-// atomism_2 (full)
-// "atomism_voidstar_2 (full)" @by voidstar(randbrown)
+// atomism (full_2)
+// "atomism (full_2)" @by voidstar(randbrown)
 atomism_voidstar_2_full.mp4
 #livecoding #pedalsteel #improvisedmusic #opencvpython #vibecoding
