@@ -2074,7 +2074,7 @@ def main() -> None:
 
     cap.release()
 
-    mux_cmd = [
+    mux_cmd_base = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-i", str(tmp_video),
         "-ss", str(start_sec),
@@ -2082,14 +2082,17 @@ def main() -> None:
         "-map", "0:v:0",
         "-map", "1:a:0?",
         "-c:v", "copy",
-        "-c:a", "aac",
-        "-b:a", "320k",
         "-shortest",
     ]
     if args.duration > 0:
-        mux_cmd += ["-t", str(float(args.duration))]
-    mux_cmd += [str(output_path)]
-    run_cmd(mux_cmd, heartbeat_label="audio mux", heartbeat_interval_sec=0.75)
+        mux_cmd_base += ["-t", str(float(args.duration))]
+
+    mux_cmd_copy = [*mux_cmd_base, "-c:a", "copy", str(output_path)]
+    try:
+        run_cmd(mux_cmd_copy, heartbeat_label="audio mux (copy)", heartbeat_interval_sec=0.75)
+    except RuntimeError:
+        mux_cmd_aac = [*mux_cmd_base, "-c:a", "aac", "-b:a", "320k", str(output_path)]
+        run_cmd(mux_cmd_aac, heartbeat_label="audio mux (aac fallback)", heartbeat_interval_sec=0.75)
 
     try:
         tmp_video.unlink(missing_ok=True)

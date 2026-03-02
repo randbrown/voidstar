@@ -2431,11 +2431,21 @@ def run_highlights(args: argparse.Namespace) -> None:
 				)
 
 				if has_audio:
-					filter_parts.append("[abase]asetpts=PTS-STARTPTS[aout]")
+					filter_parts.append("[abase]asetpts=PTS-STARTPTS[araw]")
 			else:
 				filter_parts.append("[vbase]setpts=PTS-STARTPTS[vout]")
 				if has_audio:
-					filter_parts.append("[abase]asetpts=PTS-STARTPTS[aout]")
+					filter_parts.append("[abase]asetpts=PTS-STARTPTS[araw]")
+
+			if has_audio:
+				filter_parts.append(
+					"[araw]"
+					"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+					"aresample=48000:resampler=soxr:precision=28,"
+					"alimiter=limit=0.89:attack=5:release=50,"
+					"aresample=async=1:first_pts=0,"
+					"asetpts=PTS-STARTPTS[aout]"
+				)
 
 			filter_complex = ";".join(filter_parts)
 
