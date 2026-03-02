@@ -69,6 +69,7 @@ DIVVY_60S_END_SAMPLE_SECONDS_DEFAULT=14
 DIVVY_60S_END_SEGMENTS_DEFAULT=4
 DIVVY_180S_END_SAMPLE_SECONDS_DEFAULT=28
 DIVVY_180S_END_SEGMENTS_DEFAULT=6
+DIVVY_TRUNCATE_TO_FULL_CLIPS_DEFAULT=1
 GLITCH_SECONDS_DEFAULT=1.7
 LOOP_SEAM_SECONDS_DEFAULT="2"
 PREVIEW_REELS_OVERLAY_DEFAULT=0
@@ -178,6 +179,9 @@ LOGO_END_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_text_0.png"
 die() { echo "Error: $*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 require_file() { local label="$1" path="$2"; [[ -f "$path" ]] || die "Missing $label file: $path"; }
+log_cmd() { printf '[cmd] ' >&2; printf '%q ' "$@" >&2; printf '\n' >&2; }
+run_logged() { log_cmd "$@"; "$@"; }
+run_logged_with_tmpdir() { local tmpdir="$1"; shift; log_cmd env TMPDIR="$tmpdir" "$@"; TMPDIR="$tmpdir" "$@"; }
 
 GDRIVE_READY=0
 
@@ -594,7 +598,7 @@ build_base_reels_overlay() {
 
     local reels_tmp
     reels_tmp="$(mktemp -d "/tmp/reels_cv_overlay_${PIPELINE_LOG_TAG:-voidstar}_${STEM:-clip}_base_XXXXXX")"
-    if ! TMPDIR="$reels_tmp" python3 "$REELS_OVERLAY" "$source_video" \
+    if ! run_logged_with_tmpdir "$reels_tmp" python3 "$REELS_OVERLAY" "$source_video" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids false \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
@@ -636,7 +640,7 @@ run_optional_reels_overlay_on_clip() {
 
     local reels_tmp
     reels_tmp="$(mktemp -d "/tmp/reels_cv_overlay_${PIPELINE_LOG_TAG:-voidstar}_${STEM:-clip}_pertarget_XXXXXX")"
-    if ! TMPDIR="$reels_tmp" python3 "$REELS_OVERLAY" "$input_clip" \
+    if ! run_logged_with_tmpdir "$reels_tmp" python3 "$REELS_OVERLAY" "$input_clip" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids false \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
@@ -760,7 +764,7 @@ run_optional_pre_reels_glitchfield() {
         echo "[pre-reels glitchfield] cache disabled: rebuilding stage clip" >&2
     fi
 
-    python3 "$glitchfield_script" "$input_clip" \
+    run_logged python3 "$glitchfield_script" "$input_clip" \
         "${gf_args[@]}" \
         --seed "$PRE_REELS_GLITCHFIELD_SEED" \
         1>&2
@@ -886,7 +890,7 @@ run_optional_glitchfield_on_clip() {
         echo "[glitchfield] cache disabled: rebuilding glitchfield clip" >&2
     fi
 
-    python3 "$glitchfield_script" "$input_clip" \
+    run_logged python3 "$glitchfield_script" "$input_clip" \
         "${gf_args[@]}" \
         --seed "$GLITCHFIELD_SEED" \
         1>&2
@@ -929,7 +933,7 @@ run_optional_particle_sparks_on_clip() {
         echo "[particle-sparks] cache disabled: rebuilding stage clip" >&2
     fi
 
-    python3 "$PARTICLE_SPARKS" "$input_clip" \
+    run_logged python3 "$PARTICLE_SPARKS" "$input_clip" \
         --output "$target" \
         --start 0 --duration 0 \
         --color-mode "$PARTICLE_SPARKS_COLOR_MODE" \
@@ -999,7 +1003,7 @@ run_optional_title_hook_on_clip() {
         echo "[title-hook] cache disabled: rebuilding stage clip" >&2
     fi
 
-    python3 "$TITLE_HOOK_SCRIPT" "$input_clip" \
+    run_logged python3 "$TITLE_HOOK_SCRIPT" "$input_clip" \
         --output "$target" \
         --title "$resolved_title" \
         --secondary-text "$TITLE_HOOK_SECONDARY_TEXT" \
@@ -1056,8 +1060,12 @@ run_divvy_uniform_highlights() {
             --video-encoder libx264 --preset medium --out-dir "$OUTDIR"
             --output "$output_path"
             --glitch-seconds "$glitch_try" --glitch-style vuwind --loop-seam-seconds "$LOOP_SEAM_SECONDS"
-            --sampling-mode "$DIVVY_SAMPLING_MODE" --sample-seconds "$sample_seconds" #--truncate-to-full-clips
+            --sampling-mode "$DIVVY_SAMPLING_MODE" --sample-seconds "$sample_seconds"
         )
+
+        if [[ "${DIVVY_TRUNCATE_TO_FULL_CLIPS:-0}" -eq 1 ]]; then
+            cmd+=(--truncate-to-full-clips)
+        fi
 
         if awk -v v="$CPS" 'BEGIN { exit !(v > 0) }'; then
             cmd+=(--cps "$CPS")
@@ -1077,6 +1085,7 @@ run_divvy_uniform_highlights() {
         local err_file
         err_file="$(mktemp /tmp/voidstar_divvy_highlights_err.XXXXXX)"
 
+        log_cmd "${cmd[@]}"
         if "${cmd[@]}" 2> >(tee "$err_file" >&2); then
             rm -f "$err_file"
             return 0
@@ -1143,7 +1152,7 @@ run_60s_start() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
@@ -1196,7 +1205,7 @@ run_180s_start() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
@@ -1248,7 +1257,7 @@ run_full() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
@@ -1303,7 +1312,7 @@ run_60s_end() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
@@ -1358,7 +1367,7 @@ run_180s_end() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity .5 \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
@@ -1401,6 +1410,7 @@ main() {
     DIVVY_60S_END_SEGMENTS="$DIVVY_60S_END_SEGMENTS_DEFAULT"
     DIVVY_180S_END_SAMPLE_SECONDS="$DIVVY_180S_END_SAMPLE_SECONDS_DEFAULT"
     DIVVY_180S_END_SEGMENTS="$DIVVY_180S_END_SEGMENTS_DEFAULT"
+    DIVVY_TRUNCATE_TO_FULL_CLIPS="$DIVVY_TRUNCATE_TO_FULL_CLIPS_DEFAULT"
     PREVIEW_REELS_OVERLAY="$PREVIEW_REELS_OVERLAY_DEFAULT"
     BASE_REELS_OVERLAY_PREBUILT="$BASE_REELS_OVERLAY_PREBUILT_DEFAULT"
     REELS_BOOTSTRAP_EXISTING_CACHE="$REELS_BOOTSTRAP_EXISTING_CACHE_DEFAULT"
