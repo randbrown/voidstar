@@ -58,9 +58,9 @@ YOUTUBE_FULL_SECONDS_DEFAULT=""
 DETECT_AUDIO_START_END_DEFAULT=0
 
 # Timing/style defaults.
-CPS_DEFAULT=0.5
+CPS_DEFAULT=0
 DIVVY_SAMPLING_MODE_DEFAULT="groove"   # uniform-spread | groove | minute-averages | n-averages | recursive-halves
-DIVVY_GROOVE_BPM_DEFAULT="30"
+DIVVY_GROOVE_BPM_DEFAULT="0"
 DIVVY_60S_START_SAMPLE_SECONDS_DEFAULT=15
 DIVVY_60S_START_SEGMENTS_DEFAULT=4
 DIVVY_180S_START_SAMPLE_SECONDS_DEFAULT=15
@@ -104,13 +104,13 @@ PARTICLE_SPARKS_MAX_POINTS_DEFAULT=16
 PARTICLE_SPARKS_POINT_MIN_DISTANCE_DEFAULT=444
 PARTICLE_SPARKS_MAX_LIVE_SPARKS_DEFAULT=16
 PARTICLE_SPARKS_MOTION_THRESHOLD_DEFAULT=0.7
-PARTICLE_SPARKS_RATE_DEFAULT=0.5
+PARTICLE_SPARKS_RATE_DEFAULT=0.7
 PARTICLE_SPARKS_SIZE_DEFAULT=14
 PARTICLE_SPARKS_LIFE_FRAMES_DEFAULT=45
 PARTICLE_SPARKS_SPEED_DEFAULT=1.9
 PARTICLE_SPARKS_JITTER_DEFAULT=1.3
 PARTICLE_SPARKS_OPACITY_DEFAULT=0.7
-PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT=1.3
+PARTICLE_SPARKS_AUDIO_GAIN_DEFAULT=1.7
 PARTICLE_SPARKS_AUDIO_SMOOTH_DEFAULT=0.7
 PARTICLE_SPARKS_COLOR_MODE_DEFAULT="emmons"   # white | rgb | random | audio-intensity | antiparticles | abstract-forms
 PARTICLE_SPARKS_EMMONS_SPIN_SPEED_DEFAULT=0.02
@@ -1055,11 +1055,15 @@ run_divvy_uniform_highlights() {
             "${HIGHLIGHTS_TIME_ARGS[@]}" --target-length-seconds "$target_seconds"
             --video-encoder libx264 --preset medium --out-dir "$OUTDIR"
             --output "$output_path"
-            --glitch-seconds "$glitch_try" --glitch-style vuwind --cps "$CPS" --loop-seam-seconds "$LOOP_SEAM_SECONDS"
+            --glitch-seconds "$glitch_try" --glitch-style vuwind --loop-seam-seconds "$LOOP_SEAM_SECONDS"
             --sampling-mode "$DIVVY_SAMPLING_MODE" --sample-seconds "$sample_seconds" #--truncate-to-full-clips
         )
 
-        if [[ "$DIVVY_SAMPLING_MODE" == "groove" ]]; then
+        if awk -v v="$CPS" 'BEGIN { exit !(v > 0) }'; then
+            cmd+=(--cps "$CPS")
+        fi
+
+        if [[ "$DIVVY_SAMPLING_MODE" == "groove" ]] && awk -v v="$DIVVY_GROOVE_BPM" 'BEGIN { exit !(v > 0) }'; then
             cmd+=(--bpm "$DIVVY_GROOVE_BPM")
         fi
 
