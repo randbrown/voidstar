@@ -1618,7 +1618,7 @@ main() {
             ENABLE_REELS_OVERLAY_STEP=0
         fi
         run_60s_start
-        run_60s_end
+        #run_60s_end
         ENABLE_REELS_OVERLAY_STEP="$reels_overlay_saved"
     fi
 
