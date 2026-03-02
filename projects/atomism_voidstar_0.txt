@@ -1,19 +1,19 @@
 // atomism_0 (original)
 // "atomism_voidstar_0" @by voidstar(randbrown)
 atomism_voidstar_0.mp4
-#livecoding #pedalsteel #improvisedmusic #opencvpython #vibecoding
+#emmonssteelguitar #pedalsteel #improvisedmusic #opencvpython #vibecoding
 
 // atomism (hi60s_0)
 // "atomism (hi60s_0)" @by voidstar(randbrown)
 atomism_voidstar_0_hi60s.mp4
-#livecoding #pedalsteel #improvisedmusic #opencvpython #vibecoding
+#emmonssteelguitar #pedalsteel #improvisedmusic #opencvpython #vibecoding
 
 // atomism (hi180s_0)
 // "atomism (hi180s_0)" @by voidstar(randbrown)
 atomism_voidstar_0_hi180s.mp4
-#livecoding #pedalsteel #improvisedmusic #opencvpython #vibecoding
+#emmonssteelguitar #pedalsteel #improvisedmusic #opencvpython #vibecoding
 
 // atomism (full_0)
 // "atomism (full_0)" @by voidstar(randbrown)
 atomism_voidstar_0_full.mp4
-#livecoding #pedalsteel #improvisedmusic #opencvpython #vibecoding
+#emmonssteelguitar #pedalsteel #improvisedmusic #opencvpython #vibecoding
