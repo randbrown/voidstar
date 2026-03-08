@@ -9,7 +9,7 @@ CONFIG_FILE="$SCRIPT_DIR/config/pipeline_interactionism_voidstar_0.conf.sh"
 PROJECT_DIR_DEFAULT="~/WinVideos/interactionism"
 SOURCES_DIR_DEFAULT="~/WinVideos/interactionism/sources"
 OUTDIR_DEFAULT="~/WinVideos/interactionism"
-COMBINED_INPUT_DEFAULT="~/WinVideos/interactionism/interactionism_sources_combined.mp4"
+COMBINED_INPUT_DEFAULT="~/WinVideos/interactionism/interactionism.mp4"
 
 PROJECT_DIR=""
 SOURCES_DIR=""
@@ -32,7 +32,7 @@ interactionism pipeline (multi-source, atomism-based)
 Defaults:
   project-dir:    ~/WinVideos/interactionism
   sources-dir:    ~/WinVideos/interactionism/sources
-  combined-input: ~/WinVideos/interactionism/interactionism_sources_combined.mp4
+    combined-input: ~/WinVideos/interactionism/interactionism.mp4
   outdir:         ~/WinVideos/interactionism
 
 Behavior:

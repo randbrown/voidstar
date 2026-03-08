@@ -1,19 +1,19 @@
 // atomism_0 (original)
-// "interactionism_sources_combined" @by voidstar(randbrown)
-interactionism_sources_combined.mp4
+// "interactionism" @by voidstar(randbrown)
+interactionism.mp4
 #pedalsteel #ambient #interactionism #voidstar
 
 // interactionism (hi60s)
 // "interactionism (hi60s)" @by voidstar(randbrown)
-interactionism_sources_combined_hi60s.mp4
+interactionism_hi60s.mp4
 #pedalsteel #ambient #interactionism #voidstar
 
 // interactionism (hi180s)
 // "interactionism (hi180s)" @by voidstar(randbrown)
-interactionism_sources_combined_hi180s.mp4
+interactionism_hi180s.mp4
 #pedalsteel #ambient #interactionism #voidstar
 
 // interactionism (full)
 // "interactionism (full)" @by voidstar(randbrown)
-interactionism_sources_combined_full.mp4
+interactionism_full.mp4
 #pedalsteel #ambient #interactionism #voidstar
