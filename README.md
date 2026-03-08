@@ -81,6 +81,36 @@ Stability is maintained per-tool, not necessarily across the entire repo.
 
 ---
 
+## Interactionism Pipeline
+
+The `interactionism` pipeline is a multi-source workflow built on top of the `atomism` base pipeline.
+
+- Source folder: `~/WinVideos/interactionism/sources` (all video files are included)
+- Default output folder: `~/WinVideos/interactionism`
+- Default particle theme: `shobud`
+- Default divvy style: `groove`
+- CV reels overlay is disabled by default in interactionism config
+
+### Commands
+
+- Standard render (combined source -> 60s, 180s, full):
+	- `./pipeline_interactionism_voidstar_0.sh`
+- Fast iteration preset:
+	- `./interactionism_fast.sh`
+- Full-quality preset:
+	- `./interactionism_full.sh`
+
+### Optional per-source series
+
+- Combined + individual source outputs:
+	- `./pipeline_interactionism_voidstar_0.sh --individual`
+- Individual only:
+	- `./pipeline_interactionism_voidstar_0.sh --individual-only`
+
+All additional CLI flags are forwarded to the base pipeline.
+
+---
+
 ## Status
 
 This is an **active, evolving workspace**.
