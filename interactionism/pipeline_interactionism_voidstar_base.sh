@@ -56,6 +56,10 @@ OUTDIR_DEFAULT="~/WinVideos/interactionism"
 START_SECONDS_DEFAULT="3"
 YOUTUBE_FULL_SECONDS_DEFAULT=""
 DETECT_AUDIO_START_END_DEFAULT=0
+ENABLE_AUTO_PRETRIM_INPUT_DEFAULT=0
+AUTO_PRETRIM_PRE_ROLL_SECONDS_DEFAULT="0.2"
+AUTO_PRETRIM_SILENCE_NOISE_DB_DEFAULT="-45dB"
+AUTO_PRETRIM_SILENCE_MIN_DURATION_DEFAULT="0.12"
 
 # Timing/style defaults.
 CPS_DEFAULT=0
@@ -454,6 +458,85 @@ import math
 d=float("$dur")
 print(int(math.floor(d)))
 PY
+}
+
+detect_first_audio_activity_seconds() {
+    local video="$1"
+    local noise_db="$2"
+    local min_silence="$3"
+
+    ffmpeg -hide_banner -loglevel info -i "$video" \
+        -af "silencedetect=noise=${noise_db}:d=${min_silence}" \
+        -f null - 2>&1 | awk '
+            /silence_start:/ && first_start == "" {
+                first_start = $NF
+                gsub(/[^0-9.\-]/, "", first_start)
+            }
+            /silence_end:/ && first_end == "" {
+                for (i = 1; i <= NF; i++) {
+                    if ($i == "silence_end:") {
+                        first_end = $(i + 1)
+                        gsub(/[^0-9.\-]/, "", first_end)
+                        break
+                    }
+                }
+            }
+            END {
+                if (first_start == "" || first_end == "") {
+                    exit
+                }
+                if ((first_start + 0.0) > 0.05) {
+                    exit
+                }
+                printf "%.6f", (first_end + 0.0)
+            }
+        '
+}
+
+run_optional_input_pretrim() {
+    local input_video="$1"
+
+    [[ "${ENABLE_AUTO_PRETRIM_INPUT:-0}" -eq 1 ]] || { echo "$input_video"; return 0; }
+
+    local onset_seconds
+    onset_seconds="$(detect_first_audio_activity_seconds "$input_video" "$AUTO_PRETRIM_SILENCE_NOISE_DB" "$AUTO_PRETRIM_SILENCE_MIN_DURATION")"
+    if [[ -z "$onset_seconds" ]]; then
+        echo "[pretrim] no leading silence detected; keeping input unchanged" >&2
+        echo "$input_video"
+        return 0
+    fi
+
+    local trim_start_seconds
+    trim_start_seconds="$(awk -v onset="$onset_seconds" -v preroll="$AUTO_PRETRIM_PRE_ROLL_SECONDS" 'BEGIN { t = onset - preroll; if (t < 0) t = 0; printf "%.6f", t }')"
+    if ! awk -v t="$trim_start_seconds" 'BEGIN { exit (t > 0.0005) ? 0 : 1 }'; then
+        echo "[pretrim] detected onset near start (${onset_seconds}s); keeping input unchanged" >&2
+        echo "$input_video"
+        return 0
+    fi
+
+    local trim_tag target trim_sig
+    trim_tag="${trim_start_seconds//./p}"
+    target="$OUTDIR/${STEM}_pretrim_s${trim_tag}.mp4"
+    trim_sig="pretrim|input=${input_video}|input_fp=$(file_fingerprint "$input_video")|start=${trim_start_seconds}|preroll=${AUTO_PRETRIM_PRE_ROLL_SECONDS}|noise=${AUTO_PRETRIM_SILENCE_NOISE_DB}|min_silence=${AUTO_PRETRIM_SILENCE_MIN_DURATION}"
+
+    if should_rebuild "$target" --dep "$input_video" --sig "$trim_sig"; then
+        echo "[pretrim] trimming input with stream copy at ${trim_start_seconds}s (onset=${onset_seconds}s, preroll=${AUTO_PRETRIM_PRE_ROLL_SECONDS}s)" >&2
+        if ! run_logged ffmpeg -y -hide_banner -loglevel error \
+            -ss "$trim_start_seconds" -i "$input_video" \
+            -map 0 -c copy -copyinkf -avoid_negative_ts make_zero \
+            "$target"; then
+            echo "[pretrim] warning: trim failed; keeping input unchanged" >&2
+            echo "$input_video"
+            return 0
+        fi
+        write_cache_signature "$target" "$trim_sig"
+    else
+        echo "[pretrim] using cached trimmed input: $target" >&2
+    fi
+
+    [[ -f "$target" ]] || { echo "$input_video"; return 0; }
+    refresh_output_timestamp "$target"
+    echo "$target"
 }
 
 expand_logo_patterns() {
@@ -1467,6 +1550,10 @@ main() {
     FORCE="$FORCE_DEFAULT"
     INPUT_VIDEO=""; OUTDIR=""
     START_SECONDS="$START_SECONDS_DEFAULT"; YOUTUBE_FULL_SECONDS="$YOUTUBE_FULL_SECONDS_DEFAULT"; DETECT_AUDIO_START_END="$DETECT_AUDIO_START_END_DEFAULT"; CPS="$CPS_DEFAULT"; GLITCH_SECONDS="$GLITCH_SECONDS_DEFAULT"; LOOP_SEAM_SECONDS="$LOOP_SEAM_SECONDS_DEFAULT"
+    ENABLE_AUTO_PRETRIM_INPUT="$ENABLE_AUTO_PRETRIM_INPUT_DEFAULT"
+    AUTO_PRETRIM_PRE_ROLL_SECONDS="$AUTO_PRETRIM_PRE_ROLL_SECONDS_DEFAULT"
+    AUTO_PRETRIM_SILENCE_NOISE_DB="$AUTO_PRETRIM_SILENCE_NOISE_DB_DEFAULT"
+    AUTO_PRETRIM_SILENCE_MIN_DURATION="$AUTO_PRETRIM_SILENCE_MIN_DURATION_DEFAULT"
     DIVVY_SAMPLING_MODE="$DIVVY_SAMPLING_MODE_DEFAULT"
     DIVVY_GROOVE_BPM="$DIVVY_GROOVE_BPM_DEFAULT"
     DIVVY_60S_START_SAMPLE_SECONDS="$DIVVY_60S_START_SAMPLE_SECONDS_DEFAULT"
@@ -1668,9 +1755,13 @@ main() {
     esac
 
     require_cmd python3
+    require_cmd ffmpeg
     require_cmd ffprobe
     mkdir -p "$OUTDIR"
     require_file "INPUT_VIDEO" "$INPUT_VIDEO"
+
+    local original_input_video="$INPUT_VIDEO"
+    INPUT_VIDEO="$(run_optional_input_pretrim "$INPUT_VIDEO")"
 
     INPUT_DURATION_SECONDS="$(get_video_duration_seconds "$INPUT_VIDEO")"
     if [[ -z "${LOOP_SEAM_SECONDS}" ]]; then LOOP_SEAM_SECONDS="$GLITCH_SECONDS"; fi
@@ -1682,6 +1773,9 @@ main() {
     detect_dbg="off"; if [[ "$DETECT_AUDIO_START_END" -eq 1 ]]; then detect_dbg="on"; fi
 
     echo "Input: $INPUT_VIDEO"
+    if [[ "$INPUT_VIDEO" != "$original_input_video" ]]; then
+        echo "Input (original): $original_input_video"
+    fi
     echo "Stem:  $STEM"
     echo "Out:   $OUTDIR"
     echo "Dur:   ${INPUT_DURATION_SECONDS}s"
