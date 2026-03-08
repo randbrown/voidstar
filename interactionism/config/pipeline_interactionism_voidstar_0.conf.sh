@@ -56,7 +56,7 @@ TITLE_HOOK_DURATION_DEFAULT=4.0
 TITLE_HOOK_DURATION_600_DEFAULT=8.0
 TITLE_HOOK_FADE_OUT_DURATION_DEFAULT=1.3
 TITLE_HOOK_TITLE_DEFAULT='// interactionism (hi60s)\n// voidstar'
-TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#pedalsteel\n#ambient\n#interactionism\n#voidstar'
+TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#pedalsteel\n#improvisedmusic\n#interactionism\n#voidstar'
 
 ENABLE_GDRIVE_COPY_DEFAULT=1
 GDRIVE_OUTDIR_DEFAULT="~/GoogleDrive/Music/voidstar/interactionism"

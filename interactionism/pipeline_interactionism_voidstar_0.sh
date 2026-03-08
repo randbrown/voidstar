@@ -228,6 +228,14 @@ run_series_for_input() {
         "${BASE_ARGS[@]}"
 }
 
+as_bool_01() {
+    local value="${1:-0}"
+    case "$value" in
+        1|true|TRUE|True|yes|YES|on|ON) printf '1\n' ;;
+        *) printf '0\n' ;;
+    esac
+}
+
 main() {
     require_cmd python3
     require_cmd ffmpeg
@@ -311,10 +319,23 @@ main() {
         esac
     done
 
+    REBUILD_COMBINED="$(as_bool_01 "$REBUILD_COMBINED")"
+    RUN_INDIVIDUAL="$(as_bool_01 "$RUN_INDIVIDUAL")"
+    INDIVIDUAL_ONLY="$(as_bool_01 "$INDIVIDUAL_ONLY")"
+
+    if [[ "$INDIVIDUAL_ONLY" -eq 1 ]]; then
+        RUN_INDIVIDUAL=1
+        REBUILD_COMBINED=0
+    fi
+
     PROJECT_DIR="$(expand_path "${PROJECT_DIR:-${PROJECT_DIR_DEFAULT:-~/WinVideos/interactionism}}")"
     SOURCES_DIR="$(expand_path "${SOURCES_DIR:-${SOURCES_DIR_DEFAULT:-~/WinVideos/interactionism/sources}}")"
     OUTDIR="$(expand_path "${OUTDIR:-${OUTDIR_DEFAULT:-~/WinVideos/interactionism}}")"
-    COMBINED_INPUT="$(expand_path "${COMBINED_INPUT:-${COMBINED_INPUT_DEFAULT:-~/WinVideos/interactionism/interactionism.mp4}}")"
+    if [[ "$INDIVIDUAL_ONLY" -eq 0 ]]; then
+        COMBINED_INPUT="$(expand_path "${COMBINED_INPUT:-${COMBINED_INPUT_DEFAULT:-~/WinVideos/interactionism/interactionism.mp4}}")"
+    else
+        COMBINED_INPUT=""
+    fi
     DVDLOGO_SCRIPT="$(find_script "voidstar_dvd_logo.py")"
     TITLE_HOOK_SCRIPT="$(find_script "voidstar_title_hook.py")"
 
@@ -332,6 +353,9 @@ main() {
     echo "[interactionism] clips found: ${#SOURCE_FILES[@]}"
     echo "[interactionism] dvdlogo: $DVDLOGO_SCRIPT"
     echo "[interactionism] title hook: $TITLE_HOOK_SCRIPT"
+    if [[ "$INDIVIDUAL_ONLY" -eq 1 ]]; then
+        echo "[interactionism] individual-only mode: skipping normalization + combined clip build"
+    fi
 
     if [[ "$INDIVIDUAL_ONLY" -eq 0 ]]; then
         build_combined_clip "$COMBINED_INPUT"
