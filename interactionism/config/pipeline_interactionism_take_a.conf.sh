@@ -12,7 +12,7 @@ INDIVIDUAL_ONLY_DEFAULT=0
 ### ---------------------------------------------------------------------------
 ### Interactionism render/take metadata controls (base pipeline)
 ### ---------------------------------------------------------------------------
-PIPELINE_LOG_TAG_DEFAULT="interactionism_0"
+PIPELINE_LOG_TAG_DEFAULT="interactionism"
 PIPELINE_MODE_DEFAULT="custom"
 START_SECONDS_DEFAULT="8.5"
 YOUTUBE_FULL_SECONDS_DEFAULT=""

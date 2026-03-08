@@ -1,22 +1,22 @@
 ### ---------------------------------------------------------------------------
-### Interactionism take controls (orchestrator-level)
+### atemporalism take controls (orchestrator-level)
 ### ---------------------------------------------------------------------------
-PROJECT_DIR_DEFAULT="~/WinVideos/interactionism"
-SOURCES_DIR_DEFAULT="~/WinVideos/interactionism/sources"
-OUTDIR_DEFAULT="~/WinVideos/interactionism"
-COMBINED_INPUT_DEFAULT="~/WinVideos/interactionism/interactionism.mp4"
+PROJECT_DIR_DEFAULT="~/WinVideos/atemporalism"
+SOURCES_DIR_DEFAULT="~/WinVideos/atemporalism/sources"
+OUTDIR_DEFAULT="~/WinVideos/atemporalism"
+COMBINED_INPUT_DEFAULT="~/WinVideos/atemporalism/atemporalism.mp4"
 REBUILD_COMBINED_DEFAULT=0
-RUN_INDIVIDUAL_DEFAULT=0
+RUN_INDIVIDUAL_DEFAULT=1
 INDIVIDUAL_ONLY_DEFAULT=0
 
 ### ---------------------------------------------------------------------------
-### Interactionism render/take metadata controls (base pipeline)
+### atemporalism render/take metadata controls (base pipeline)
 ### ---------------------------------------------------------------------------
-PIPELINE_LOG_TAG_DEFAULT="interactionism_0"
+PIPELINE_LOG_TAG_DEFAULT="atemporalism"
 PIPELINE_MODE_DEFAULT="custom"
-START_SECONDS_DEFAULT="8.5"
+START_SECONDS_DEFAULT="0"
 YOUTUBE_FULL_SECONDS_DEFAULT=""
-DETECT_AUDIO_START_END_DEFAULT=0
+DETECT_AUDIO_START_END_DEFAULT=1
 
 RUN_60S_START=1
 RUN_180S_START=1
@@ -55,8 +55,8 @@ PARTICLE_SPARKS_FLOOD_VELOCITY_MULT_DEFAULT=2
 TITLE_HOOK_DURATION_DEFAULT=4.0
 TITLE_HOOK_DURATION_600_DEFAULT=8.0
 TITLE_HOOK_FADE_OUT_DURATION_DEFAULT=1.3
-TITLE_HOOK_TITLE_DEFAULT='// interactionism (hi60s)\n// voidstar'
-TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#pedalsteel\n#ambient\n#interactionism\n#voidstar'
+TITLE_HOOK_TITLE_DEFAULT='// atemporalism (hi60s)\n// voidstar'
+TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#pedalsteel\n#ambient\n#atemporalism\n#voidstar'
 
 ENABLE_GDRIVE_COPY_DEFAULT=1
-GDRIVE_OUTDIR_DEFAULT="~/GoogleDrive/Music/voidstar/interactionism"
+GDRIVE_OUTDIR_DEFAULT="~/GoogleDrive/Music/voidstar/atemporalism"

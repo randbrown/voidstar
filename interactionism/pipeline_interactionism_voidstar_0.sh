@@ -3,13 +3,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-ATOMISM_BASE="$ROOT_DIR/atomism/pipeline_atomism_voidstar_base.sh"
-CONFIG_FILE="$SCRIPT_DIR/config/pipeline_interactionism_voidstar_0.conf.sh"
+INTERACTIONISM_BASE="$SCRIPT_DIR/pipeline_interactionism_voidstar_base.sh"
+CONFIG_FILE_DEFAULT="$SCRIPT_DIR/config/pipeline_interactionism_voidstar_0.conf.sh"
+CONFIG_FILE="$CONFIG_FILE_DEFAULT"
+DVDLOGO_SCRIPT=""
+TITLE_HOOK_SCRIPT=""
 
 PROJECT_DIR_DEFAULT="~/WinVideos/interactionism"
 SOURCES_DIR_DEFAULT="~/WinVideos/interactionism/sources"
 OUTDIR_DEFAULT="~/WinVideos/interactionism"
 COMBINED_INPUT_DEFAULT="~/WinVideos/interactionism/interactionism.mp4"
+REBUILD_COMBINED_DEFAULT=0
+RUN_INDIVIDUAL_DEFAULT=0
+INDIVIDUAL_ONLY_DEFAULT=0
 
 PROJECT_DIR=""
 SOURCES_DIR=""
@@ -25,11 +31,46 @@ declare -a SOURCE_FILES=()
 die() { echo "Error: $*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"; }
 
+find_script() {
+    local script_name="$1"
+    local found
+    found=$(find "$ROOT_DIR" -type f -name "$script_name" | head -n 1)
+    [[ -n "$found" ]] || die "Could not find required script: $script_name in $ROOT_DIR"
+    printf '%s\n' "$found"
+}
+
+resolve_config_path() {
+    local raw="$1"
+    local resolved=""
+    if [[ "$raw" == ~* ]]; then
+        eval "resolved=$raw"
+    elif [[ "$raw" == /* ]]; then
+        resolved="$raw"
+    elif [[ -f "$raw" ]]; then
+        resolved="$(readlink -f "$raw" 2>/dev/null || echo "$raw")"
+    else
+        resolved="$SCRIPT_DIR/$raw"
+    fi
+    printf '%s\n' "$resolved"
+}
+
+load_orchestrator_config_file() {
+    local cfg_raw="$1"
+    local cfg
+    cfg="$(resolve_config_path "$cfg_raw")"
+    [[ -f "$cfg" ]] || die "Config file not found: $cfg"
+    # shellcheck disable=SC1090
+    source "$cfg"
+    CONFIG_FILE="$cfg"
+    echo "[interactionism] config: $CONFIG_FILE"
+}
+
 usage() {
     cat <<'EOF'
-interactionism pipeline (multi-source, atomism-based)
+interactionism pipeline (multi-source, interactionism-based)
 
 Defaults:
+    config:         interactionism/config/pipeline_interactionism_voidstar_0.conf.sh
   project-dir:    ~/WinVideos/interactionism
   sources-dir:    ~/WinVideos/interactionism/sources
     combined-input: ~/WinVideos/interactionism/interactionism.mp4
@@ -37,10 +78,13 @@ Defaults:
 
 Behavior:
   - Builds a single combined source clip from all videos under sources-dir.
-  - Runs the standard 60s/180s/full target series via atomism base pipeline.
+    - Runs the standard 60s/180s/full target series via interactionism base pipeline.
+    - Uses interactionism dvdlogo stage (voidstar_dvd_logo.py).
+    - Uses interactionism title screen stage (voidstar_title_hook.py).
   - Uses interactionism config defaults (shobud particle theme, reels overlay off).
 
 Options:
+    --config PATH            Config file (per-take settings for paths/titles/targets/timing).
   --project-dir PATH       Project folder root.
   --sources-dir PATH       Folder containing source clips (recursive scan).
   --combined-input PATH    Path for generated combined source clip.
@@ -51,7 +95,7 @@ Options:
   --no-individual          Disable per-source renders.
   -h, --help               Show this help.
 
-Any other args are forwarded to atomism base pipeline (for example: --mode, --jobs, --force).
+Any other args are forwarded to interactionism base pipeline (for example: --mode, --jobs, --force).
 EOF
 }
 
@@ -176,20 +220,48 @@ run_series_for_input() {
 
     mkdir -p "$outdir"
     echo "[interactionism] rendering series for: $input_video"
-    "$ATOMISM_BASE" \
+    "$INTERACTIONISM_BASE" \
         --config "$CONFIG_FILE" \
         --input "$input_video" \
         --outdir "$outdir" \
-        --skip-reels-overlay \
+        --use-title-hook \
         "${BASE_ARGS[@]}"
 }
 
 main() {
+    require_cmd python3
     require_cmd ffmpeg
     require_cmd ffprobe
 
+    local -a argv
+    argv=("$@")
+    local idx=0
+    while [[ $idx -lt ${#argv[@]} ]]; do
+        case "${argv[$idx]}" in
+            --config)
+                [[ $((idx + 1)) -lt ${#argv[@]} ]] || die "--config requires a value"
+                CONFIG_FILE="${argv[$((idx + 1))]}"
+                idx=$((idx + 2))
+                ;;
+            *)
+                idx=$((idx + 1))
+                ;;
+        esac
+    done
+
+    load_orchestrator_config_file "$CONFIG_FILE"
+
+    REBUILD_COMBINED="${REBUILD_COMBINED_DEFAULT:-0}"
+    RUN_INDIVIDUAL="${RUN_INDIVIDUAL_DEFAULT:-0}"
+    INDIVIDUAL_ONLY="${INDIVIDUAL_ONLY_DEFAULT:-0}"
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --config)
+                [[ $# -ge 2 ]] || die "--config requires a value"
+                CONFIG_FILE="$(resolve_config_path "$2")"
+                shift 2
+                ;;
             --project-dir)
                 [[ $# -ge 2 ]] || die "--project-dir requires a value"
                 PROJECT_DIR="$2"
@@ -239,13 +311,17 @@ main() {
         esac
     done
 
-    PROJECT_DIR="$(expand_path "${PROJECT_DIR:-$PROJECT_DIR_DEFAULT}")"
-    SOURCES_DIR="$(expand_path "${SOURCES_DIR:-$SOURCES_DIR_DEFAULT}")"
-    OUTDIR="$(expand_path "${OUTDIR:-$OUTDIR_DEFAULT}")"
-    COMBINED_INPUT="$(expand_path "${COMBINED_INPUT:-$COMBINED_INPUT_DEFAULT}")"
+    PROJECT_DIR="$(expand_path "${PROJECT_DIR:-${PROJECT_DIR_DEFAULT:-~/WinVideos/interactionism}}")"
+    SOURCES_DIR="$(expand_path "${SOURCES_DIR:-${SOURCES_DIR_DEFAULT:-~/WinVideos/interactionism/sources}}")"
+    OUTDIR="$(expand_path "${OUTDIR:-${OUTDIR_DEFAULT:-~/WinVideos/interactionism}}")"
+    COMBINED_INPUT="$(expand_path "${COMBINED_INPUT:-${COMBINED_INPUT_DEFAULT:-~/WinVideos/interactionism/interactionism.mp4}}")"
+    DVDLOGO_SCRIPT="$(find_script "voidstar_dvd_logo.py")"
+    TITLE_HOOK_SCRIPT="$(find_script "voidstar_title_hook.py")"
 
-    [[ -x "$ATOMISM_BASE" ]] || [[ -f "$ATOMISM_BASE" ]] || die "Missing atomism base pipeline: $ATOMISM_BASE"
+    [[ -x "$INTERACTIONISM_BASE" ]] || [[ -f "$INTERACTIONISM_BASE" ]] || die "Missing interactionism base pipeline: $INTERACTIONISM_BASE"
     [[ -f "$CONFIG_FILE" ]] || die "Missing interactionism config: $CONFIG_FILE"
+    [[ -f "$DVDLOGO_SCRIPT" ]] || die "Missing dvdlogo script: $DVDLOGO_SCRIPT"
+    [[ -f "$TITLE_HOOK_SCRIPT" ]] || die "Missing title hook script: $TITLE_HOOK_SCRIPT"
     [[ -d "$SOURCES_DIR" ]] || die "Sources folder not found: $SOURCES_DIR"
 
     video_list_from_sources "$SOURCES_DIR"
@@ -254,6 +330,8 @@ main() {
     echo "[interactionism] project: $PROJECT_DIR"
     echo "[interactionism] sources: $SOURCES_DIR"
     echo "[interactionism] clips found: ${#SOURCE_FILES[@]}"
+    echo "[interactionism] dvdlogo: $DVDLOGO_SCRIPT"
+    echo "[interactionism] title hook: $TITLE_HOOK_SCRIPT"
 
     if [[ "$INDIVIDUAL_ONLY" -eq 0 ]]; then
         build_combined_clip "$COMBINED_INPUT"
