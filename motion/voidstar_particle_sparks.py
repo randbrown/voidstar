@@ -617,9 +617,9 @@ def draw_shobud_suit(
         rad = max(2, int(round(0.52 * r)))
         stem_tri = np.array(
             [
-                rot(0.0, 1.18 * r),
-                rot(-0.26 * r, 0.55 * r),
-                rot(0.26 * r, 0.55 * r),
+                rot(0.0, 0.55 * r),
+                rot(-0.26 * r, 1.18 * r),
+                rot(0.26 * r, 1.18 * r),
             ],
             dtype=np.int32,
         )
@@ -637,9 +637,9 @@ def draw_shobud_suit(
         rad = max(2, int(round(0.58 * r)))
         stem_tri = np.array(
             [
-                rot(0.0, 1.16 * r),
-                rot(-0.24 * r, 0.53 * r),
-                rot(0.24 * r, 0.53 * r),
+                rot(0.0, 0.53 * r),
+                rot(-0.24 * r, 1.16 * r),
+                rot(0.24 * r, 1.16 * r),
             ],
             dtype=np.int32,
         )

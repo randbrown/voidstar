@@ -7,7 +7,7 @@ OUTDIR_DEFAULT="~/WinVideos/atemporalism"
 COMBINED_INPUT_DEFAULT="~/WinVideos/atemporalism/atemporalism.mp4"
 REBUILD_COMBINED_DEFAULT=0
 RUN_INDIVIDUAL_DEFAULT=1
-INDIVIDUAL_ONLY_DEFAULT=0
+INDIVIDUAL_ONLY_DEFAULT=1
 
 ### ---------------------------------------------------------------------------
 ### atemporalism render/take metadata controls (base pipeline)
