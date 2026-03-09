@@ -187,6 +187,11 @@ DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY_DEFAULT=0.77
 DVDLOGO_VOIDSTAR_PRESET_DEFAULT="cinema"
 DVDLOGO_VOIDSTAR_COLORIZE_DEFAULT="true"
 
+# Minimal resume controls (full target): bypass divvy/reels/glitchfield/dvdlogo by supplying
+# an already-built post-dvdlogo clip, then optionally trim its start before sparks/title hook.
+RESUME_INPUT_CLIP_DEFAULT=""
+RESUME_TRIM_SECONDS_DEFAULT="0"
+
 load_pipeline_config_file() {
     local config_path="$1"
     [[ -n "$config_path" ]] || return 0
@@ -537,6 +542,40 @@ run_optional_input_pretrim() {
     fi
 
     [[ -f "$target" ]] || { echo "$input_video"; return 0; }
+    refresh_output_timestamp "$target"
+    echo "$target"
+}
+
+run_optional_resume_trim() {
+    local input_clip="$1"
+    local stage_label="$2"
+
+    if ! awk -v t="${RESUME_TRIM_SECONDS:-0}" 'BEGIN { exit (t > 0.0005) ? 0 : 1 }'; then
+        echo "$input_clip"
+        return 0
+    fi
+
+    local trim_tag target trim_sig
+    trim_tag="${RESUME_TRIM_SECONDS//./p}"
+    target="$OUTDIR/${STEM}_${stage_label}_resume_trim_s${trim_tag}.mp4"
+    trim_sig="resume_trim|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|trim=${RESUME_TRIM_SECONDS}"
+
+    if should_rebuild "$target" --dep "$input_clip" --sig "$trim_sig"; then
+        echo "[resume] trimming first ${RESUME_TRIM_SECONDS}s from ${stage_label} resume clip" >&2
+        if ! run_logged ffmpeg -y -hide_banner -loglevel error \
+            -ss "$RESUME_TRIM_SECONDS" -i "$input_clip" \
+            -map 0 -c copy -copyinkf -avoid_negative_ts make_zero \
+            "$target"; then
+            echo "[resume] warning: trim failed; using untrimmed resume clip" >&2
+            echo "$input_clip"
+            return 0
+        fi
+        write_cache_signature "$target" "$trim_sig"
+    else
+        echo "[resume] using cached trimmed clip: $target" >&2
+    fi
+
+    [[ -f "$target" ]] || { echo "$input_clip"; return 0; }
     refresh_output_timestamp "$target"
     echo "$target"
 }
@@ -1366,6 +1405,35 @@ run_180s_start() {
 
 run_full() {
     echo "--- FULL (YouTube) ---"
+
+    local logo tag target
+    logo="$LOGO_START"
+    tag="$(basename "${logo%.*}")"
+    target="$(with_logo_suffix "$OUTDIR/${STEM}_full_overlay_logo.mp4" "$tag")"
+
+    if [[ -n "${RESUME_INPUT_CLIP:-}" ]]; then
+        require_file "RESUME_INPUT_CLIP" "$RESUME_INPUT_CLIP"
+        echo "[resume] run_full using provided clip: $RESUME_INPUT_CLIP"
+
+        local source_for_post_logo
+        source_for_post_logo="$(run_optional_resume_trim "$RESUME_INPUT_CLIP" "full")"
+
+        local final_target="$source_for_post_logo"
+        if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
+            run_optional_particle_sparks_on_clip "$source_for_post_logo" "$target" "full-post-logo" >/dev/null
+            final_target="$target"
+        fi
+
+        local title_hook_target="${target%.mp4}_titlehook.mp4"
+        local hook_duration
+        hook_duration="$(title_hook_duration_for_target_seconds "$INPUT_DURATION_SECONDS")"
+        final_target="$(run_optional_title_hook_on_clip "$final_target" "$title_hook_target" "full-title-hook" "full" "$hook_duration")"
+        final_target="$(finalize_target_output_name "$final_target" "full")"
+
+        copy_to_gdrive_if_enabled "$final_target"
+        return 0
+    fi
+
     local base_overlay="$BASE_REELS_OVERLAY"
     require_file "BASE_REELS_OVERLAY" "$base_overlay"
 
@@ -1374,10 +1442,6 @@ run_full() {
     source_for_effects="$(run_optional_reels_overlay_on_clip "$base_overlay" "$reels_dst" "full")"
     local source_for_logo="$source_for_effects"
 
-    local logo tag target
-    logo="$LOGO_START"
-    tag="$(basename "${logo%.*}")"
-    target="$(with_logo_suffix "$OUTDIR/${STEM}_full_overlay_logo.mp4" "$tag")"
     local logo_stage="$target"
     if [[ "$ENABLE_PARTICLE_SPARKS_STAGE" -eq 1 ]]; then
         logo_stage="${target%.mp4}_pre_sparks.mp4"
@@ -1577,6 +1641,8 @@ main() {
     DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY="$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY_DEFAULT"
     DVDLOGO_VOIDSTAR_PRESET="$DVDLOGO_VOIDSTAR_PRESET_DEFAULT"
     DVDLOGO_VOIDSTAR_COLORIZE="$DVDLOGO_VOIDSTAR_COLORIZE_DEFAULT"
+    RESUME_INPUT_CLIP="$RESUME_INPUT_CLIP_DEFAULT"
+    RESUME_TRIM_SECONDS="$RESUME_TRIM_SECONDS_DEFAULT"
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
     REELS_CACHE_MODE="$REELS_CACHE_MODE_DEFAULT"
     USE_PRE_REELS_GLITCHFIELD_CACHE="$USE_PRE_REELS_GLITCHFIELD_CACHE_DEFAULT"
@@ -1696,6 +1762,8 @@ main() {
             --preview-no-reels-overlay) PREVIEW_REELS_OVERLAY=0; shift ;;
             --glitch-seconds) GLITCH_SECONDS="$2"; shift 2 ;;
             --loop-seam-seconds) LOOP_SEAM_SECONDS="$2"; shift 2 ;;
+            --resume-input-clip) RESUME_INPUT_CLIP="$2"; shift 2 ;;
+            --resume-trim-seconds) RESUME_TRIM_SECONDS="$2"; shift 2 ;;
             --jobs|-j) JOBS="$2"; shift 2 ;;
             --no-reels-cache) USE_REELS_CACHE=0; shift ;;
             --no-glitchfield-cache) USE_GLITCHFIELD_CACHE=0; shift ;;
@@ -1734,6 +1802,10 @@ main() {
 
     if [[ -n "${BASE_REELS_OVERLAY_PREBUILT:-}" ]]; then
         BASE_REELS_OVERLAY_PREBUILT=$(eval echo "$BASE_REELS_OVERLAY_PREBUILT")
+    fi
+
+    if [[ -n "${RESUME_INPUT_CLIP:-}" ]]; then
+        RESUME_INPUT_CLIP=$(eval echo "$RESUME_INPUT_CLIP")
     fi
 
     if [[ "$ENABLE_GDRIVE_COPY" -eq 1 && -n "${GDRIVE_OUTDIR:-}" ]]; then
@@ -1784,7 +1856,7 @@ main() {
     echo "Out:   $OUTDIR"
     echo "Dur:   ${INPUT_DURATION_SECONDS}s"
     echo "Args:  start=${start_dbg}s full=${full_dbg}s detect_audio=${detect_dbg} cps=${CPS} divvy_mode=${DIVVY_SAMPLING_MODE} divvy_bpm=${DIVVY_GROOVE_BPM} glitch=${GLITCH_SECONDS}s loop_seam=${LOOP_SEAM_SECONDS}s"
-    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} title_hook=${ENABLE_TITLE_HOOK_STAGE} title_hook_cache=${USE_TITLE_HOOK_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} jobs=${JOBS}"
+    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} title_hook=${ENABLE_TITLE_HOOK_STAGE} title_hook_cache=${USE_TITLE_HOOK_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} resume_clip=${RESUME_INPUT_CLIP:-unset} resume_trim=${RESUME_TRIM_SECONDS} jobs=${JOBS}"
     echo "Sync:  gdrive_copy=${ENABLE_GDRIVE_COPY} gdrive_outdir=${GDRIVE_OUTDIR:-unset}"
 
     PROJECT_ROOT="/home/$USER/code/voidstar"
@@ -1830,16 +1902,20 @@ main() {
         BASE_REELS_OVERLAY="$BASE_REELS_OVERLAY_PREBUILT"
     fi
     REELS_INPUT_VIDEO="$INPUT_VIDEO"
-    local pre_reels_glitch_dst="$OUTDIR/${STEM}_pre_reels_glitchfield_${PRE_REELS_GLITCHFIELD_PRESET}.mp4"
-    REELS_INPUT_VIDEO="$(run_optional_pre_reels_glitchfield "$INPUT_VIDEO" "$pre_reels_glitch_dst")"
-    if [[ "$ENABLE_REELS_OVERLAY_STEP" -eq 1 && "$REELS_CACHE_MODE" == "base" ]]; then
-        build_base_reels_overlay
-    elif [[ "$ENABLE_REELS_OVERLAY_STEP" -eq 1 ]]; then
-        echo "[pipeline] reels overlay in per-target mode (base precompute skipped)"
-        BASE_REELS_OVERLAY="$REELS_INPUT_VIDEO"
+    if [[ -n "${RESUME_INPUT_CLIP:-}" ]]; then
+        echo "[resume] skipping pre-reels/reels base build (resume input clip provided)"
     else
-        echo "[pipeline] reels overlay step bypassed (using pre-reels source video directly)"
-        BASE_REELS_OVERLAY="$REELS_INPUT_VIDEO"
+        local pre_reels_glitch_dst="$OUTDIR/${STEM}_pre_reels_glitchfield_${PRE_REELS_GLITCHFIELD_PRESET}.mp4"
+        REELS_INPUT_VIDEO="$(run_optional_pre_reels_glitchfield "$INPUT_VIDEO" "$pre_reels_glitch_dst")"
+        if [[ "$ENABLE_REELS_OVERLAY_STEP" -eq 1 && "$REELS_CACHE_MODE" == "base" ]]; then
+            build_base_reels_overlay
+        elif [[ "$ENABLE_REELS_OVERLAY_STEP" -eq 1 ]]; then
+            echo "[pipeline] reels overlay in per-target mode (base precompute skipped)"
+            BASE_REELS_OVERLAY="$REELS_INPUT_VIDEO"
+        else
+            echo "[pipeline] reels overlay step bypassed (using pre-reels source video directly)"
+            BASE_REELS_OVERLAY="$REELS_INPUT_VIDEO"
+        fi
     fi
 
     local mode_csv mode_part
