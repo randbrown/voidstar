@@ -58,7 +58,7 @@ YOUTUBE_FULL_SECONDS_DEFAULT=""
 DETECT_AUDIO_START_END_DEFAULT=0
 ENABLE_AUTO_PRETRIM_INPUT_DEFAULT=0
 AUTO_PRETRIM_PRE_ROLL_SECONDS_DEFAULT="0.2"
-AUTO_PRETRIM_SILENCE_NOISE_DB_DEFAULT="-45dB"
+AUTO_PRETRIM_SILENCE_NOISE_DB_DEFAULT="-66dB"
 AUTO_PRETRIM_SILENCE_MIN_DURATION_DEFAULT="0.12"
 
 # Timing/style defaults.
@@ -139,7 +139,7 @@ PARTICLE_SPARKS_SHOBUD_DARK_SUIT_COLOR_DEFAULT="black"
 # Optional title hook stage (runs last, after logo/particle stages).
 ENABLE_TITLE_HOOK_STAGE=1
 USE_TITLE_HOOK_CACHE_DEFAULT=1
-TITLE_HOOK_DURATION_DEFAULT=4.0
+TITLE_HOOK_DURATION_DEFAULT=10.0
 TITLE_HOOK_DURATION_600_DEFAULT=8.0
 TITLE_HOOK_FADE_OUT_DURATION_DEFAULT=1.3
 TITLE_HOOK_TITLE_DEFAULT='// interactionism (hi60s)\n// voidstar'
@@ -184,6 +184,8 @@ LOGO_END_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_emblem_text_0.png"
 DVDLOGO_OPACITY_DEFAULT=0.5
 DVDLOGO_LOCAL_POINT_TRACK_OPACITY_DEFAULT=0.77
 DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY_DEFAULT=0.77
+DVDLOGO_VOIDSTAR_PRESET_DEFAULT="cinema"
+DVDLOGO_VOIDSTAR_COLORIZE_DEFAULT="true"
 
 load_pipeline_config_file() {
     local config_path="$1"
@@ -396,7 +398,7 @@ dvdlogo_cache_signature() {
     local profile="$1"
     local source_clip="$2"
     local logo_path="$3"
-    echo "dvdlogo|profile=${profile}|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${DVDLOGO}|script_fp=$(file_fingerprint "$DVDLOGO")|opacity=${DVDLOGO_OPACITY}|track_opacity=${DVDLOGO_LOCAL_POINT_TRACK_OPACITY}|link_opacity=${DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY}"
+    echo "dvdlogo|profile=${profile}|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${DVDLOGO}|script_fp=$(file_fingerprint "$DVDLOGO")|opacity=${DVDLOGO_OPACITY}|track_opacity=${DVDLOGO_LOCAL_POINT_TRACK_OPACITY}|link_opacity=${DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY}|voidstar_preset=${DVDLOGO_VOIDSTAR_PRESET}|voidstar_colorize=${DVDLOGO_VOIDSTAR_COLORIZE}"
 }
 
 titlehook_cache_signature() {
@@ -1283,12 +1285,12 @@ run_60s_start() {
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset "$DVDLOGO_VOIDSTAR_PRESET" \
             --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
             --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
             --local-point-track-refresh 8 --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.77 \
             --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize true --start-x .8 --start-y .83 \
+            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize "$DVDLOGO_VOIDSTAR_COLORIZE" --start-x .8 --start-y .83 \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
@@ -1336,12 +1338,12 @@ run_180s_start() {
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset "$DVDLOGO_VOIDSTAR_PRESET" \
             --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
             --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
             --local-point-track-refresh 8 --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.77 \
             --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize true --start-x .8 --start-y .83 \
+            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize "$DVDLOGO_VOIDSTAR_COLORIZE" --start-x .8 --start-y .83 \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
@@ -1388,12 +1390,12 @@ run_full() {
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset "$DVDLOGO_VOIDSTAR_PRESET" \
             --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
             --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
             --local-point-track-refresh 8 --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.77 \
             --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize true --start-x .77 --start-y .79 \
+            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize "$DVDLOGO_VOIDSTAR_COLORIZE" --start-x .77 --start-y .79 \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
@@ -1443,12 +1445,12 @@ run_60s_end() {
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset "$DVDLOGO_VOIDSTAR_PRESET" \
             --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
             --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
             --local-point-track-refresh 8 --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.77 \
             --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize true --start-x .8 --start-y .83 \
+            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize "$DVDLOGO_VOIDSTAR_COLORIZE" --start-x .8 --start-y .83 \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
@@ -1498,12 +1500,12 @@ run_180s_end() {
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale .4 --logo-rotate-speed 0 --trails 0.85 --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow 1.0 --audio-reactive-scale 0.5 --audio-reactive-gain 2.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
+            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset "$DVDLOGO_VOIDSTAR_PRESET" \
             --local-point-track true --local-point-track-scale 1.2 --local-point-track-pad-px 0 \
             --local-point-track-max-points 256 --local-point-track-radius 256 --local-point-track-min-distance 128 \
             --local-point-track-refresh 8 --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.77 \
             --local-point-track-link-neighbors 8 --local-point-track-link-thickness 1 \
-            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize true --start-x .77 --start-y .79 \
+            --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize "$DVDLOGO_VOIDSTAR_COLORIZE" --start-x .77 --start-y .79 \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
             --output "$logo_stage"
@@ -1573,6 +1575,8 @@ main() {
     DVDLOGO_OPACITY="$DVDLOGO_OPACITY_DEFAULT"
     DVDLOGO_LOCAL_POINT_TRACK_OPACITY="$DVDLOGO_LOCAL_POINT_TRACK_OPACITY_DEFAULT"
     DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY="$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY_DEFAULT"
+    DVDLOGO_VOIDSTAR_PRESET="$DVDLOGO_VOIDSTAR_PRESET_DEFAULT"
+    DVDLOGO_VOIDSTAR_COLORIZE="$DVDLOGO_VOIDSTAR_COLORIZE_DEFAULT"
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
     REELS_CACHE_MODE="$REELS_CACHE_MODE_DEFAULT"
     USE_PRE_REELS_GLITCHFIELD_CACHE="$USE_PRE_REELS_GLITCHFIELD_CACHE_DEFAULT"
