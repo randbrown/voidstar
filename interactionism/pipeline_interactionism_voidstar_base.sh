@@ -192,6 +192,11 @@ DVDLOGO_VOIDSTAR_COLORIZE_DEFAULT="true"
 RESUME_INPUT_CLIP_DEFAULT=""
 RESUME_TRIM_SECONDS_DEFAULT="0"
 
+# Trim-only controls (full target): output a single divvy trim result and skip downstream effects.
+TRIM_ONLY_DEFAULT=0
+TRIM_ONLY_CUT_ACCURACY_DEFAULT="accurate"   # accurate | copy
+TRIM_ONLY_OUTPUT_DEFAULT=""
+
 load_pipeline_config_file() {
     local config_path="$1"
     [[ -n "$config_path" ]] || return 0
@@ -1406,6 +1411,39 @@ run_180s_start() {
 run_full() {
     echo "--- FULL (YouTube) ---"
 
+    if [[ "$TRIM_ONLY" -eq 1 ]]; then
+        echo "[trim-only] full target via divvy trim"
+        local trim_tmp_out trim_out final_target
+        trim_tmp_out="$OUTDIR/${STEM}_full_trim.mp4"
+        trim_out="$trim_tmp_out"
+        if [[ -n "${TRIM_ONLY_OUTPUT:-}" ]]; then
+            trim_out="$TRIM_ONLY_OUTPUT"
+        fi
+
+        local -a trim_cmd
+        trim_cmd=(
+            python3 "$DIVVY" trim "$INPUT_VIDEO"
+            --output "$trim_out"
+            --cut-accuracy "$TRIM_ONLY_CUT_ACCURACY"
+        )
+        if [[ "$DETECT_AUDIO_START_END" -eq 1 ]]; then
+            trim_cmd+=(--detect-audio-start-end)
+        fi
+        if [[ -n "${START_SECONDS:-}" ]]; then
+            trim_cmd+=(--start-seconds "$START_SECONDS")
+        fi
+        if [[ -n "${YOUTUBE_FULL_SECONDS:-}" ]]; then
+            trim_cmd+=(--youtube-full-seconds "$YOUTUBE_FULL_SECONDS")
+        fi
+
+        run_logged "${trim_cmd[@]}"
+        [[ -f "$trim_out" ]] || die "Trim-only output missing: $trim_out"
+
+        final_target="$(finalize_target_output_name "$trim_out" "full")"
+        copy_to_gdrive_if_enabled "$final_target"
+        return 0
+    fi
+
     local logo tag target
     logo="$LOGO_START"
     tag="$(basename "${logo%.*}")"
@@ -1643,6 +1681,9 @@ main() {
     DVDLOGO_VOIDSTAR_COLORIZE="$DVDLOGO_VOIDSTAR_COLORIZE_DEFAULT"
     RESUME_INPUT_CLIP="$RESUME_INPUT_CLIP_DEFAULT"
     RESUME_TRIM_SECONDS="$RESUME_TRIM_SECONDS_DEFAULT"
+    TRIM_ONLY="$TRIM_ONLY_DEFAULT"
+    TRIM_ONLY_CUT_ACCURACY="$TRIM_ONLY_CUT_ACCURACY_DEFAULT"
+    TRIM_ONLY_OUTPUT="$TRIM_ONLY_OUTPUT_DEFAULT"
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
     REELS_CACHE_MODE="$REELS_CACHE_MODE_DEFAULT"
     USE_PRE_REELS_GLITCHFIELD_CACHE="$USE_PRE_REELS_GLITCHFIELD_CACHE_DEFAULT"
@@ -1764,6 +1805,10 @@ main() {
             --loop-seam-seconds) LOOP_SEAM_SECONDS="$2"; shift 2 ;;
             --resume-input-clip) RESUME_INPUT_CLIP="$2"; shift 2 ;;
             --resume-trim-seconds) RESUME_TRIM_SECONDS="$2"; shift 2 ;;
+            --trim-only) TRIM_ONLY=1; shift ;;
+            --no-trim-only) TRIM_ONLY=0; shift ;;
+            --trim-only-cut-accuracy) TRIM_ONLY_CUT_ACCURACY="$2"; shift 2 ;;
+            --trim-only-output) TRIM_ONLY_OUTPUT="$2"; shift 2 ;;
             --jobs|-j) JOBS="$2"; shift 2 ;;
             --no-reels-cache) USE_REELS_CACHE=0; shift ;;
             --no-glitchfield-cache) USE_GLITCHFIELD_CACHE=0; shift ;;
@@ -1808,6 +1853,10 @@ main() {
         RESUME_INPUT_CLIP=$(eval echo "$RESUME_INPUT_CLIP")
     fi
 
+    if [[ -n "${TRIM_ONLY_OUTPUT:-}" ]]; then
+        TRIM_ONLY_OUTPUT=$(eval echo "$TRIM_ONLY_OUTPUT")
+    fi
+
     if [[ "$ENABLE_GDRIVE_COPY" -eq 1 && -n "${GDRIVE_OUTDIR:-}" ]]; then
         GDRIVE_OUTDIR=$(eval echo "$GDRIVE_OUTDIR")
     fi
@@ -1828,6 +1877,17 @@ main() {
         1|true|TRUE|True|yes|YES|on|ON) PARTICLE_SPARKS_FLOOD_IN_OUT=1 ;;
         0|false|FALSE|False|no|NO|off|OFF) PARTICLE_SPARKS_FLOOD_IN_OUT=0 ;;
         *) die "Unknown --particle-sparks-flood-in-out value: ${PARTICLE_SPARKS_FLOOD_IN_OUT} (use 1|0|true|false)" ;;
+    esac
+
+    case "${TRIM_ONLY}" in
+        1|true|TRUE|True|yes|YES|on|ON) TRIM_ONLY=1 ;;
+        0|false|FALSE|False|no|NO|off|OFF) TRIM_ONLY=0 ;;
+        *) die "Unknown --trim-only value: ${TRIM_ONLY} (use 1|0|true|false)" ;;
+    esac
+
+    case "${TRIM_ONLY_CUT_ACCURACY}" in
+        accurate|copy) ;;
+        *) die "Unknown --trim-only-cut-accuracy value: ${TRIM_ONLY_CUT_ACCURACY} (use accurate|copy)" ;;
     esac
 
     require_cmd python3
@@ -1856,7 +1916,7 @@ main() {
     echo "Out:   $OUTDIR"
     echo "Dur:   ${INPUT_DURATION_SECONDS}s"
     echo "Args:  start=${start_dbg}s full=${full_dbg}s detect_audio=${detect_dbg} cps=${CPS} divvy_mode=${DIVVY_SAMPLING_MODE} divvy_bpm=${DIVVY_GROOVE_BPM} glitch=${GLITCH_SECONDS}s loop_seam=${LOOP_SEAM_SECONDS}s"
-    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} title_hook=${ENABLE_TITLE_HOOK_STAGE} title_hook_cache=${USE_TITLE_HOOK_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} resume_clip=${RESUME_INPUT_CLIP:-unset} resume_trim=${RESUME_TRIM_SECONDS} jobs=${JOBS}"
+    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} title_hook=${ENABLE_TITLE_HOOK_STAGE} title_hook_cache=${USE_TITLE_HOOK_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} resume_clip=${RESUME_INPUT_CLIP:-unset} resume_trim=${RESUME_TRIM_SECONDS} trim_only=${TRIM_ONLY} trim_only_cut=${TRIM_ONLY_CUT_ACCURACY} jobs=${JOBS}"
     echo "Sync:  gdrive_copy=${ENABLE_GDRIVE_COPY} gdrive_outdir=${GDRIVE_OUTDIR:-unset}"
 
     PROJECT_ROOT="/home/$USER/code/voidstar"
@@ -1871,38 +1931,44 @@ main() {
     }
 
     DIVVY=$(find_script "divvy.py")
-    REELS_OVERLAY=$(find_script "reels_cv_overlay.py")
-    DVDLOGO=$(find_script "voidstar_dvd_logo.py")
-    TITLE_HOOK_SCRIPT=$(find_script "voidstar_title_hook.py")
-    GLITCHFIELD=$(find_script "glitchfield.py")
-    PARTICLE_SPARKS=$(find_script "voidstar_particle_sparks.py")
     require_file "DIVVY" "$DIVVY"
-    require_file "REELS_OVERLAY" "$REELS_OVERLAY"
-    require_file "DVDLOGO" "$DVDLOGO"
-    require_file "GLITCHFIELD" "$GLITCHFIELD"
-    require_file "PARTICLE_SPARKS" "$PARTICLE_SPARKS"
-    if [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]]; then
-        require_file "TITLE_HOOK_SCRIPT" "$TITLE_HOOK_SCRIPT"
-    fi
+    if [[ "$TRIM_ONLY" -eq 0 ]]; then
+        REELS_OVERLAY=$(find_script "reels_cv_overlay.py")
+        DVDLOGO=$(find_script "voidstar_dvd_logo.py")
+        TITLE_HOOK_SCRIPT=$(find_script "voidstar_title_hook.py")
+        GLITCHFIELD=$(find_script "glitchfield.py")
+        PARTICLE_SPARKS=$(find_script "voidstar_particle_sparks.py")
+        require_file "REELS_OVERLAY" "$REELS_OVERLAY"
+        require_file "DVDLOGO" "$DVDLOGO"
+        require_file "GLITCHFIELD" "$GLITCHFIELD"
+        require_file "PARTICLE_SPARKS" "$PARTICLE_SPARKS"
+        if [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]]; then
+            require_file "TITLE_HOOK_SCRIPT" "$TITLE_HOOK_SCRIPT"
+        fi
 
-    LOGO_START="$(eval echo "$LOGO_START")"
-    LOGO_END="$(eval echo "$LOGO_END")"
-    TITLE_HOOK_LOGO="$(eval echo "$TITLE_HOOK_LOGO")"
-    require_file "LOGO_START" "$LOGO_START"
-    require_file "LOGO_END" "$LOGO_END"
-    if [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]]; then
-        require_file "TITLE_HOOK_LOGO" "$TITLE_HOOK_LOGO"
+        LOGO_START="$(eval echo "$LOGO_START")"
+        LOGO_END="$(eval echo "$LOGO_END")"
+        TITLE_HOOK_LOGO="$(eval echo "$TITLE_HOOK_LOGO")"
+        require_file "LOGO_START" "$LOGO_START"
+        require_file "LOGO_END" "$LOGO_END"
+        if [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]]; then
+            require_file "TITLE_HOOK_LOGO" "$TITLE_HOOK_LOGO"
+        fi
+        echo "Using logo mapping:"
+        echo "  *s/start -> $LOGO_START"
+        echo "  *t/end   -> $LOGO_END"
+    else
+        echo "[trim-only] skipping logo/effects dependency checks"
     fi
-    echo "Using logo mapping:"
-    echo "  *s/start -> $LOGO_START"
-    echo "  *t/end   -> $LOGO_END"
 
     BASE_REELS_OVERLAY="$OUTDIR/${STEM}_reels_base_overlay.mp4"
     if [[ -n "${BASE_REELS_OVERLAY_PREBUILT:-}" ]]; then
         BASE_REELS_OVERLAY="$BASE_REELS_OVERLAY_PREBUILT"
     fi
     REELS_INPUT_VIDEO="$INPUT_VIDEO"
-    if [[ -n "${RESUME_INPUT_CLIP:-}" ]]; then
+    if [[ "$TRIM_ONLY" -eq 1 ]]; then
+        echo "[trim-only] skipping pre-reels/reels base build"
+    elif [[ -n "${RESUME_INPUT_CLIP:-}" ]]; then
         echo "[resume] skipping pre-reels/reels base build (resume input clip provided)"
     else
         local pre_reels_glitch_dst="$OUTDIR/${STEM}_pre_reels_glitchfield_${PRE_REELS_GLITCHFIELD_PRESET}.mp4"

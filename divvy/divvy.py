@@ -1094,6 +1094,20 @@ def build_highlights_default_filename(input_path: Path, args: argparse.Namespace
 	)
 
 
+def build_trim_default_filename(input_path: Path, args: argparse.Namespace) -> str:
+	start_seconds = 0.0 if args.start_seconds is None else float(args.start_seconds)
+	full_seconds = 0.0 if args.youtube_full_seconds is None else float(args.youtube_full_seconds)
+	start_tag = float_tag(max(0.0, start_seconds), digits=3)
+	full_tag = float_tag(max(0.0, full_seconds), digits=3)
+	detect_tag = "detect1" if bool(args.detect_audio_start_end) else "detect0"
+	return (
+		f"{input_path.stem}__trim"
+		f"__start-{start_tag}s"
+		f"__full-{full_tag}s"
+		f"__{detect_tag}.mp4"
+	)
+
+
 def add_split_args(ap: argparse.ArgumentParser) -> None:
 	ap.add_argument("input", help="Input video path")
 	ap.add_argument(
@@ -1450,6 +1464,86 @@ def add_highlights_args(ap: argparse.ArgumentParser) -> None:
 		"--truncate-to-full-clips",
 		action="store_true",
 		help="If target would end with a partial final clip, omit that clip and end early using only full selected clips",
+	)
+
+
+def add_trim_args(ap: argparse.ArgumentParser) -> None:
+	ap.add_argument("input", help="Input video path for trim mode")
+	ap.add_argument(
+		"--out-dir",
+		default=None,
+		help="Output directory for trim (used when --output is not set)",
+	)
+	ap.add_argument(
+		"--output",
+		default=None,
+		help="Output trim video path (default: auto name in input dir)",
+	)
+	ap.add_argument(
+		"--start-seconds",
+		type=float,
+		default=None,
+		help="Start time in source video for trim window (default: 0, or auto-detected with --detect-audio-start-end)",
+	)
+	ap.add_argument(
+		"--youtube-full-seconds",
+		type=float,
+		default=None,
+		help="Trim window length from start-seconds (default: remaining duration, or auto-trimmed with --detect-audio-start-end)",
+	)
+	ap.add_argument(
+		"--detect-audio-start-end",
+		action="store_true",
+		help="Auto-detect first/last non-silent audio and use as default trim window",
+	)
+	ap.add_argument(
+		"--cut-accuracy",
+		choices=["accurate", "copy"],
+		default="accurate",
+		help="accurate=re-encode for exact trim boundaries (default), copy=stream copy faster but less exact",
+	)
+	ap.add_argument(
+		"--log-interval",
+		type=float,
+		default=1.0,
+		help="Progress print interval in seconds",
+	)
+	ap.add_argument(
+		"--ffmpeg-extra",
+		default="",
+		help="Optional extra ffmpeg args appended to trim command",
+	)
+	ap.add_argument(
+		"--video-encoder",
+		default="auto",
+		help="Video encoder for accurate mode (auto/libx264/h264_nvenc/libx265/hevc_nvenc)",
+	)
+	ap.add_argument(
+		"--preset",
+		default="p5",
+		help="Encoder preset (e.g. p5 for nvenc, medium for libx264)",
+	)
+	ap.add_argument(
+		"--crf",
+		type=int,
+		default=18,
+		help="CRF for libx264/libx265 accurate mode",
+	)
+	ap.add_argument(
+		"--nvenc-cq",
+		type=int,
+		default=19,
+		help="CQ value for NVENC accurate mode (lower=better quality)",
+	)
+	ap.add_argument(
+		"--audio-codec",
+		default="aac",
+		help="Audio codec for accurate mode",
+	)
+	ap.add_argument(
+		"--audio-bitrate",
+		default="320k",
+		help="Audio bitrate for accurate mode",
 	)
 
 
@@ -1910,6 +2004,152 @@ def run_recombine(args: argparse.Namespace) -> None:
 	print(f"[voidstar] reverse_order={'on' if args.reverse_order else 'off'}")
 	print(f"[voidstar] transitions={transition_count} style={args.glitch_style} duration={glitch_dur:.6f}s")
 	print(f"[voidstar] loop_perfect={'on' if loop_perfect else 'off'}")
+	print(f"[voidstar] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
+
+
+def run_trim(args: argparse.Namespace) -> None:
+	input_path = Path(args.input).expanduser().resolve()
+	if not input_path.exists():
+		raise FileNotFoundError(f"Input not found: {input_path}")
+
+	if args.output:
+		out_path = Path(args.output).expanduser().resolve()
+	elif args.out_dir:
+		out_path = Path(args.out_dir).expanduser().resolve() / build_trim_default_filename(input_path, args)
+	else:
+		out_path = input_path.parent / build_trim_default_filename(input_path, args)
+	out_path.parent.mkdir(parents=True, exist_ok=True)
+
+	video_duration, has_audio = probe_duration_and_audio(input_path)
+	if video_duration <= 0:
+		raise RuntimeError("Could not determine input duration")
+
+	detected_window: tuple[float, float] | None = None
+	if args.detect_audio_start_end and has_audio:
+		detected_window = detect_audio_active_window(input_path, video_duration)
+		if detected_window is not None:
+			print(
+				f"[voidstar] detect_audio_start_end=on "
+				f"detected_start={detected_window[0]:.3f}s detected_end={detected_window[1]:.3f}s"
+			)
+		else:
+			print("[voidstar] detect_audio_start_end=on detection_failed -> using full video window")
+
+	if args.start_seconds is None:
+		if detected_window is not None:
+			window_start = max(0.0, detected_window[0])
+		else:
+			window_start = 0.0
+	else:
+		window_start = max(0.0, float(args.start_seconds))
+	if window_start >= video_duration:
+		raise ValueError("--start-seconds is beyond input duration")
+
+	default_window_end = video_duration
+	if detected_window is not None:
+		default_window_end = min(video_duration, max(window_start, detected_window[1]))
+
+	if args.youtube_full_seconds is None:
+		window_len = max(0.0, default_window_end - window_start)
+	else:
+		if args.youtube_full_seconds <= 0:
+			raise ValueError("--youtube-full-seconds must be > 0")
+		window_len = min(max(0.0, float(args.youtube_full_seconds)), max(0.0, video_duration - window_start))
+	if window_len <= 0:
+		raise ValueError("Trim window length is zero after clamping to input duration")
+
+	enc = choose_video_encoder(args.video_encoder)
+	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
+
+	print(f"[voidstar] trim_input={input_path}")
+	print(f"[voidstar] output={out_path}")
+	print(f"[voidstar] trim_start={window_start:.6f}s trim_duration={window_len:.6f}s")
+	print(f"[voidstar] cut_accuracy={args.cut_accuracy}")
+	if args.cut_accuracy == "accurate":
+		print(f"[voidstar] accurate_encoder={enc} audio={args.audio_codec}@{args.audio_bitrate}")
+	else:
+		print("[voidstar] mode=stream-copy (faster, but boundaries may drift from requested times)")
+
+	if args.cut_accuracy == "copy":
+		cmd: list[str] = [
+			"ffmpeg",
+			"-hide_banner",
+			"-loglevel",
+			"error",
+			"-nostats",
+			"-progress",
+			"pipe:1",
+			"-y",
+			"-ss",
+			f"{window_start:.6f}",
+			"-t",
+			f"{window_len:.6f}",
+			"-i",
+			str(input_path),
+			"-map",
+			"0",
+			"-c",
+			"copy",
+			"-avoid_negative_ts",
+			"make_zero",
+			*extra_args,
+			str(out_path),
+		]
+	else:
+		cmd = [
+			"ffmpeg",
+			"-hide_banner",
+			"-loglevel",
+			"error",
+			"-nostats",
+			"-progress",
+			"pipe:1",
+			"-y",
+			"-ss",
+			f"{window_start:.6f}",
+			"-i",
+			str(input_path),
+			"-t",
+			f"{window_len:.6f}",
+			"-map",
+			"0:v:0",
+			"-map",
+			"0:a:0?",
+			"-c:v",
+			enc,
+		]
+
+		if enc in {"h264_nvenc", "hevc_nvenc"}:
+			cmd += ["-preset", args.preset, "-rc", "vbr", "-cq", str(args.nvenc_cq), "-b:v", "0"]
+		elif enc in {"libx264", "libx265"}:
+			cmd += ["-preset", args.preset, "-crf", str(args.crf)]
+
+		cmd += [
+			"-c:a",
+			args.audio_codec,
+			"-b:a",
+			args.audio_bitrate,
+			"-movflags",
+			"+faststart",
+			*extra_args,
+			str(out_path),
+		]
+
+	started = time.time()
+	run_ffmpeg_with_progress(
+		cmd=cmd,
+		label="trim",
+		total_duration=max(1e-6, window_len),
+		started_at=started,
+		log_interval=args.log_interval,
+	)
+
+	elapsed_total = time.time() - started
+	throughput = window_len / max(1e-9, elapsed_total)
+
+	print("[voidstar] ===== summary =====")
+	print(f"[voidstar] output_file={out_path}")
+	print(f"[voidstar] trim_start={window_start:.6f}s trim_duration={window_len:.6f}s")
 	print(f"[voidstar] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
 
 
@@ -2553,11 +2793,14 @@ def main() -> None:
 	ap_highlights = sub.add_parser("highlights", help="Auto-sample and assemble highlight reels")
 	add_highlights_args(ap_highlights)
 
+	ap_trim = sub.add_parser("trim", help="Trim a single source window (no dividing), with optional audio start/end detection")
+	add_trim_args(ap_trim)
+
 	ap_groove = sub.add_parser("groove", help="Auto-detect engagement hook(s) using audio+video scoring")
 	add_groove_args(ap_groove)
 
 	argv = sys.argv[1:]
-	if argv and argv[0] not in {"split", "recombine", "highlights", "groove", "-h", "--help"}:
+	if argv and argv[0] not in {"split", "recombine", "highlights", "trim", "groove", "-h", "--help"}:
 		# Back-compat: legacy invocation defaults to split command.
 		argv = ["split", *argv]
 
@@ -2567,6 +2810,8 @@ def main() -> None:
 		run_recombine(args)
 	elif args.command == "highlights":
 		run_highlights(args)
+	elif args.command == "trim":
+		run_trim(args)
 	elif args.command == "groove":
 		run_groove(args)
 	else:

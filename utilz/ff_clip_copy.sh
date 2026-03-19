@@ -2,7 +2,7 @@
 
 # A simple FFmpeg script to copy a clip from a video file without re-encoding.
 # Usage:
-#   ff_clip_copy.sh <input.mp4> <start> <duration>
+#   ff_clip_copy.sh <input.mp4> <start> [duration]
 # E.g. to copy a 1-minute clip starting at 23:00:
 #   ff_clip_copy.sh input.mp4 00:23:00 60
 
@@ -12,16 +12,19 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ff_clip_copy.sh [--accurate|-a] <input.mp4> <start> <duration>
+  ff_clip_copy.sh [--accurate|-a] <input.mp4> <start> [duration]
 
 Where:
   <start>    = HH:MM:SS[.ms]  (e.g. 00:23:00 or 00:23:00.500)
-  <duration> = seconds OR HH:MM:SS[.ms] (e.g. 60 or 00:01:00)
+  [duration] = seconds OR HH:MM:SS[.ms] (e.g. 60 or 00:01:00)
+               omitted => copy from <start> to end-of-file
 
 Examples:
   ./ff_clip_copy.sh "in.mp4" 00:23:00 60
+  ./ff_clip_copy.sh "in.mp4" 00:23:00
   ./ff_clip_copy.sh "in.mp4" 00:23:00 00:01:00
   ./ff_clip_copy.sh --accurate "in.mp4" 00:23:00 00:01:00
+  ./ff_clip_copy.sh --accurate "in.mp4" 00:23:00
 
 Modes:
   default    stream-copy (fast, keyframe/GOP-bounded cut points)
@@ -55,14 +58,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ $# -lt 3 ]]; then
+if [[ $# -lt 2 || $# -gt 3 ]]; then
   usage
   exit 2
 fi
 
 IN="$1"
 START="$2"
-DUR="$3"
+DUR="${3:-}"
 
 if [[ ! -f "$IN" ]]; then
   echo "ERROR: input file not found: $IN" >&2
@@ -95,7 +98,11 @@ sanitize_ts() {
 }
 
 START_TAG="$(sanitize_ts "$START")"
-DUR_TAG="$(sanitize_ts "$DUR")"
+if [[ -n "$DUR" ]]; then
+  DUR_TAG="$(sanitize_ts "$DUR")"
+else
+  DUR_TAG="toend"
+fi
 
 DIR="$(dirname "$IN")"
 BASE="$(basename "$IN")"
@@ -111,28 +118,51 @@ OUT="${DIR}/${NAME}_s${START_TAG}_d${DUR_TAG}_${MODE_TAG}.${EXT}"
 
 echo "Input : $IN"
 echo "Start : $START"
-echo "Dur   : $DUR"
+if [[ -n "$DUR" ]]; then
+  echo "Dur   : $DUR"
+else
+  echo "Dur   : (to end)"
+fi
 echo "Mode  : $MODE_TAG"
 echo "Output: $OUT"
 echo
 
 if [[ "$ACCURATE" -eq 1 ]]; then
-  ffmpeg -hide_banner -y \
-    -ss "$START" -i "$IN" \
-    -t "$DUR" \
-    -map 0 -c copy \
-    -c:v libx264 -preset medium -crf 18 \
-    -fflags +genpts -avoid_negative_ts make_zero \
-    -movflags +faststart \
-    "$OUT"
+  if [[ -n "$DUR" ]]; then
+    ffmpeg -hide_banner -y \
+      -ss "$START" -i "$IN" \
+      -t "$DUR" \
+      -map 0 -c copy \
+      -c:v libx264 -preset medium -crf 18 \
+      -fflags +genpts -avoid_negative_ts make_zero \
+      -movflags +faststart \
+      "$OUT"
+  else
+    ffmpeg -hide_banner -y \
+      -ss "$START" -i "$IN" \
+      -map 0 -c copy \
+      -c:v libx264 -preset medium -crf 18 \
+      -fflags +genpts -avoid_negative_ts make_zero \
+      -movflags +faststart \
+      "$OUT"
+  fi
 else
-  ffmpeg -hide_banner -y \
-    -ss "$START" -i "$IN" \
-    -t "$DUR" \
-    -map 0 -c copy \
-    -fflags +genpts -avoid_negative_ts make_zero \
-    -movflags +faststart \
-    "$OUT"
+  if [[ -n "$DUR" ]]; then
+    ffmpeg -hide_banner -y \
+      -ss "$START" -i "$IN" \
+      -t "$DUR" \
+      -map 0 -c copy \
+      -fflags +genpts -avoid_negative_ts make_zero \
+      -movflags +faststart \
+      "$OUT"
+  else
+    ffmpeg -hide_banner -y \
+      -ss "$START" -i "$IN" \
+      -map 0 -c copy \
+      -fflags +genpts -avoid_negative_ts make_zero \
+      -movflags +faststart \
+      "$OUT"
+  fi
 fi
 
 echo
