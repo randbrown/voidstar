@@ -181,7 +181,7 @@ def run_segment_with_progress(
 				speed = done_now / max(1e-9, elapsed)
 				eta = (total_duration - done_now) / max(1e-9, speed)
 				print(
-					f"[voidstar] part={seg_i}/{seg_n} "
+					f"[divvy] part={seg_i}/{seg_n} "
 					f"overall={pct:.1f}% speed={speed:.3f}x eta={format_eta(eta)}"
 				)
 				last_log = now
@@ -234,7 +234,7 @@ def run_ffmpeg_with_progress(
 				speed = done_clamped / max(1e-9, elapsed)
 				eta = (total_duration - done_clamped) / max(1e-9, speed)
 				print(
-					f"[voidstar] {label} overall={pct:.1f}% "
+					f"[divvy] {label} overall={pct:.1f}% "
 					f"speed={speed:.3f}x eta={format_eta(eta)}"
 				)
 				last_log = now
@@ -541,9 +541,9 @@ def run_groove(args: argparse.Namespace) -> None:
 	if (analysis_end - analysis_start) < hook_seconds:
 		raise ValueError("Analysis window is shorter than --hook-seconds")
 
-	print(f"[voidstar] groove_input={input_path}")
-	print(f"[voidstar] duration={total_duration:.3f}s window={analysis_start:.3f}-{analysis_end:.3f}s")
-	print(f"[voidstar] hook_seconds={hook_seconds:.3f} bin_seconds={bin_seconds:.3f}")
+	print(f"[divvy] groove_input={input_path}")
+	print(f"[divvy] duration={total_duration:.3f}s window={analysis_start:.3f}-{analysis_end:.3f}s")
+	print(f"[divvy] hook_seconds={hook_seconds:.3f} bin_seconds={bin_seconds:.3f}")
 
 	if has_audio:
 		audio_rms, audio_flux = extract_audio_feature_bins(
@@ -592,11 +592,11 @@ def run_groove(args: argparse.Namespace) -> None:
 		first = anchor + (start_idx * step)
 		last = analysis_end - hook_seconds
 		candidate_starts = build_candidate_starts(first, last, step)
-		print(f"[voidstar] bpm_grid=on bpm={args.bpm:g} beat={beat_sec:.4f}s step={step:.4f}s")
+		print(f"[divvy] bpm_grid=on bpm={args.bpm:g} beat={beat_sec:.4f}s step={step:.4f}s")
 	else:
 		step = max(0.05, float(args.scan_step_seconds))
 		candidate_starts = build_candidate_starts(analysis_start, analysis_end - hook_seconds, step)
-		print(f"[voidstar] bpm_grid=off scan_step={step:.4f}s")
+		print(f"[divvy] bpm_grid=off scan_step={step:.4f}s")
 
 	if not candidate_starts:
 		raise RuntimeError("No candidate hook starts generated")
@@ -649,10 +649,10 @@ def run_groove(args: argparse.Namespace) -> None:
 		raise RuntimeError("Failed to select any groove hook candidates")
 
 	best = selected[0]
-	print("[voidstar] ===== groove hooks =====")
+	print("[divvy] ===== groove hooks =====")
 	for i, s in enumerate(selected, start=1):
 		print(
-			f"[voidstar] hook={i} start={s['start']:.3f}s end={s['end']:.3f}s "
+			f"[divvy] hook={i} start={s['start']:.3f}s end={s['end']:.3f}s "
 			f"dur={s['duration']:.3f}s score={s['score']:.6f} "
 			f"mean={s['mean']:.6f} peak={s['peak']:.6f} onset={s['onset']:.6f}"
 		)
@@ -670,7 +670,7 @@ def run_groove(args: argparse.Namespace) -> None:
 			"top": selected,
 		}
 		output_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-		print(f"[voidstar] groove_json={output_json}")
+		print(f"[divvy] groove_json={output_json}")
 
 	if args.invoke_video_hook:
 		script_path = resolve_video_hook_script()
@@ -699,7 +699,7 @@ def run_groove(args: argparse.Namespace) -> None:
 		if args.video_hook_no_start_transition:
 			cmd += ["--no-start-transition"]
 
-		print(f"[voidstar] invoke_video_hook=on mode={args.video_hook_mode}")
+		print(f"[divvy] invoke_video_hook=on mode={args.video_hook_mode}")
 		subprocess.run(cmd, check=True)
 
 
@@ -1591,24 +1591,24 @@ def run_split(args: argparse.Namespace) -> None:
 			f"bars/part={bars_per_part:.4f} (at {args.bpm:g} BPM)"
 		)
 
-	print(f"[voidstar] input={input_path}")
-	print(f"[voidstar] duration={total_duration:.6f}s target={args.target_seconds:.6f}s")
-	print(f"[voidstar] parts={parts} actual_part_len={actual_part_len:.6f}s{beat_info}")
+	print(f"[divvy] input={input_path}")
+	print(f"[divvy] duration={total_duration:.6f}s target={args.target_seconds:.6f}s")
+	print(f"[divvy] parts={parts} actual_part_len={actual_part_len:.6f}s{beat_info}")
 	if quant_enabled and args.bpm > 0:
 		print(
-			f"[voidstar] bpm_quantized=on beats/part={quant_beats_per_part:.6f} "
+			f"[divvy] bpm_quantized=on beats/part={quant_beats_per_part:.6f} "
 			f"bars/part={quant_bars_per_part:.6f}"
 		)
 	else:
-		print("[voidstar] bpm_quantized=off")
+		print("[divvy] bpm_quantized=off")
 
-	print(f"[voidstar] cut_accuracy={args.cut_accuracy}")
+	print(f"[divvy] cut_accuracy={args.cut_accuracy}")
 
 	enc = choose_video_encoder(args.video_encoder)
 	if args.cut_accuracy == "accurate":
-		print(f"[voidstar] accurate_encoder={enc} audio={args.audio_codec}@{args.audio_bitrate}")
+		print(f"[divvy] accurate_encoder={enc} audio={args.audio_codec}@{args.audio_bitrate}")
 	else:
-		print("[voidstar] mode=stream-copy (faster, but boundaries may drift from requested times)")
+		print("[divvy] mode=stream-copy (faster, but boundaries may drift from requested times)")
 
 	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
 
@@ -1693,7 +1693,7 @@ def run_split(args: argparse.Namespace) -> None:
 				]
 
 			print(
-				f"[voidstar] start part={idx}/{parts} "
+				f"[divvy] start part={idx}/{parts} "
 				f"start={start:.6f}s end={end:.6f}s out={out_path.name}"
 			)
 
@@ -1711,7 +1711,7 @@ def run_split(args: argparse.Namespace) -> None:
 			if not staged_out_path.exists():
 				raise RuntimeError(f"Staged split output missing: {staged_out_path}")
 
-			print(f"[voidstar] copy_to_final src={staged_out_path} dst={out_path}")
+			print(f"[divvy] copy_to_final src={staged_out_path} dst={out_path}")
 			shutil.copy2(staged_out_path, out_path)
 			created_files.append(out_path)
 
@@ -1721,30 +1721,30 @@ def run_split(args: argparse.Namespace) -> None:
 			eta = (total_duration - done) / max(1e-9, speed)
 			pct = 100.0 * done / max(1e-9, total_duration)
 			print(
-				f"[voidstar] done part={idx}/{parts} overall={pct:.1f}% "
+				f"[divvy] done part={idx}/{parts} overall={pct:.1f}% "
 				f"speed={speed:.3f}x eta={format_eta(eta)}"
 			)
 
 	elapsed_total = time.time() - started
 	throughput = total_duration / max(1e-9, elapsed_total)
 
-	print("[voidstar] ===== summary =====")
-	print(f"[voidstar] output_dir={out_dir}")
-	print(f"[voidstar] input_duration={total_duration:.6f}s")
-	print(f"[voidstar] parts={parts}")
-	print(f"[voidstar] part_duration={actual_part_len:.6f}s")
+	print("[divvy] ===== summary =====")
+	print(f"[divvy] output_dir={out_dir}")
+	print(f"[divvy] input_duration={total_duration:.6f}s")
+	print(f"[divvy] parts={parts}")
+	print(f"[divvy] part_duration={actual_part_len:.6f}s")
 	if quant_enabled and args.bpm > 0:
 		print(
-			f"[voidstar] quant_beats_per_part={quant_beats_per_part:.6f} "
+			f"[divvy] quant_beats_per_part={quant_beats_per_part:.6f} "
 			f"quant_bars_per_part={quant_bars_per_part:.6f}"
 		)
 	if args.bpm > 0:
 		beat_sec = 60.0 / args.bpm
 		beats_per_part = actual_part_len / beat_sec
 		bars_per_part = beats_per_part / max(1e-9, args.beats_per_bar)
-		print(f"[voidstar] bpm={args.bpm:g} beats_per_part={beats_per_part:.4f} bars_per_part={bars_per_part:.4f}")
-	print(f"[voidstar] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
-	print(f"[voidstar] files_written={len(created_files)}")
+		print(f"[divvy] bpm={args.bpm:g} beats_per_part={beats_per_part:.4f} bars_per_part={bars_per_part:.4f}")
+	print(f"[divvy] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
+	print(f"[divvy] files_written={len(created_files)}")
 
 
 def run_recombine(args: argparse.Namespace) -> None:
@@ -1770,7 +1770,7 @@ def run_recombine(args: argparse.Namespace) -> None:
 	if len(segment_files) < 1:
 		raise RuntimeError(f"No segment video files found in: {segment_dir}")
 	if len(segment_files) < 2 and args.glitch_seconds > 0:
-		print("[voidstar] only one segment found; disabling transitions")
+		print("[divvy] only one segment found; disabling transitions")
 
 	if args.reverse_order:
 		segment_files = list(reversed(segment_files))
@@ -1962,19 +1962,19 @@ def run_recombine(args: argparse.Namespace) -> None:
 
 	cmd += ["-movflags", "+faststart", *extra_args, str(out_path)]
 
-	print(f"[voidstar] recombine_input_dir={segment_dir}")
-	print(f"[voidstar] output={out_path}")
-	print(f"[voidstar] segment_count={len(segment_files)} reverse_order={'on' if args.reverse_order else 'off'}")
-	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.6f}")
-	print(f"[voidstar] intro_glitch_seconds={intro_glitch_dur:.6f}")
-	print(f"[voidstar] target_total_seconds={target_total:.6f} trim_each_start={trim_each:.6f}")
-	print(f"[voidstar] loop_perfect={'on' if loop_perfect else 'off'}")
-	print(f"[voidstar] encoder={enc} audio={'on' if has_audio_all else 'off'}")
+	print(f"[divvy] recombine_input_dir={segment_dir}")
+	print(f"[divvy] output={out_path}")
+	print(f"[divvy] segment_count={len(segment_files)} reverse_order={'on' if args.reverse_order else 'off'}")
+	print(f"[divvy] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.6f}")
+	print(f"[divvy] intro_glitch_seconds={intro_glitch_dur:.6f}")
+	print(f"[divvy] target_total_seconds={target_total:.6f} trim_each_start={trim_each:.6f}")
+	print(f"[divvy] loop_perfect={'on' if loop_perfect else 'off'}")
+	print(f"[divvy] encoder={enc} audio={'on' if has_audio_all else 'off'}")
 	if has_audio_all:
-		print("[voidstar] audio_stabilize=soxr+limiter+aresample_async1")
+		print("[divvy] audio_stabilize=soxr+limiter+aresample_async1")
 	if enc in {"h264_nvenc", "libx264"}:
-		print("[voidstar] video_compat=h264_yuv420p_high_4.1")
-	print(f"[voidstar] est_output_duration={est_output_duration:.6f}s")
+		print("[divvy] video_compat=h264_yuv420p_high_4.1")
+	print(f"[divvy] est_output_duration={est_output_duration:.6f}s")
 
 	started = time.time()
 	with tempfile.TemporaryDirectory(prefix="divvy_recombine_", dir="/tmp") as tmp_dir_str:
@@ -1993,18 +1993,18 @@ def run_recombine(args: argparse.Namespace) -> None:
 		if not staged_out_path.exists():
 			raise RuntimeError(f"Staged output missing after recombine: {staged_out_path}")
 
-		print(f"[voidstar] copy_to_final src={staged_out_path} dst={out_path}")
+		print(f"[divvy] copy_to_final src={staged_out_path} dst={out_path}")
 		shutil.copy2(staged_out_path, out_path)
 	elapsed_total = time.time() - started
 	throughput = est_output_duration / max(1e-9, elapsed_total)
 
-	print("[voidstar] ===== summary =====")
-	print(f"[voidstar] output_file={out_path}")
-	print(f"[voidstar] segment_count={len(segment_files)}")
-	print(f"[voidstar] reverse_order={'on' if args.reverse_order else 'off'}")
-	print(f"[voidstar] transitions={transition_count} style={args.glitch_style} duration={glitch_dur:.6f}s")
-	print(f"[voidstar] loop_perfect={'on' if loop_perfect else 'off'}")
-	print(f"[voidstar] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
+	print("[divvy] ===== summary =====")
+	print(f"[divvy] output_file={out_path}")
+	print(f"[divvy] segment_count={len(segment_files)}")
+	print(f"[divvy] reverse_order={'on' if args.reverse_order else 'off'}")
+	print(f"[divvy] transitions={transition_count} style={args.glitch_style} duration={glitch_dur:.6f}s")
+	print(f"[divvy] loop_perfect={'on' if loop_perfect else 'off'}")
+	print(f"[divvy] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
 
 
 def run_trim(args: argparse.Namespace) -> None:
@@ -2029,11 +2029,11 @@ def run_trim(args: argparse.Namespace) -> None:
 		detected_window = detect_audio_active_window(input_path, video_duration)
 		if detected_window is not None:
 			print(
-				f"[voidstar] detect_audio_start_end=on "
+				f"[divvy] detect_audio_start_end=on "
 				f"detected_start={detected_window[0]:.3f}s detected_end={detected_window[1]:.3f}s"
 			)
 		else:
-			print("[voidstar] detect_audio_start_end=on detection_failed -> using full video window")
+			print("[divvy] detect_audio_start_end=on detection_failed -> using full video window")
 
 	if args.start_seconds is None:
 		if detected_window is not None:
@@ -2061,14 +2061,14 @@ def run_trim(args: argparse.Namespace) -> None:
 	enc = choose_video_encoder(args.video_encoder)
 	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
 
-	print(f"[voidstar] trim_input={input_path}")
-	print(f"[voidstar] output={out_path}")
-	print(f"[voidstar] trim_start={window_start:.6f}s trim_duration={window_len:.6f}s")
-	print(f"[voidstar] cut_accuracy={args.cut_accuracy}")
+	print(f"[divvy] trim_input={input_path}")
+	print(f"[divvy] output={out_path}")
+	print(f"[divvy] trim_start={window_start:.6f}s trim_duration={window_len:.6f}s")
+	print(f"[divvy] cut_accuracy={args.cut_accuracy}")
 	if args.cut_accuracy == "accurate":
-		print(f"[voidstar] accurate_encoder={enc} audio={args.audio_codec}@{args.audio_bitrate}")
+		print(f"[divvy] accurate_encoder={enc} audio={args.audio_codec}@{args.audio_bitrate}")
 	else:
-		print("[voidstar] mode=stream-copy (faster, but boundaries may drift from requested times)")
+		print("[divvy] mode=stream-copy (faster, but boundaries may drift from requested times)")
 
 	if args.cut_accuracy == "copy":
 		cmd: list[str] = [
@@ -2147,10 +2147,10 @@ def run_trim(args: argparse.Namespace) -> None:
 	elapsed_total = time.time() - started
 	throughput = window_len / max(1e-9, elapsed_total)
 
-	print("[voidstar] ===== summary =====")
-	print(f"[voidstar] output_file={out_path}")
-	print(f"[voidstar] trim_start={window_start:.6f}s trim_duration={window_len:.6f}s")
-	print(f"[voidstar] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
+	print("[divvy] ===== summary =====")
+	print(f"[divvy] output_file={out_path}")
+	print(f"[divvy] trim_start={window_start:.6f}s trim_duration={window_len:.6f}s")
+	print(f"[divvy] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
 
 
 def run_highlights(args: argparse.Namespace) -> None:
@@ -2188,11 +2188,11 @@ def run_highlights(args: argparse.Namespace) -> None:
 		detected_window = detect_audio_active_window(input_path, video_duration)
 		if detected_window is not None:
 			print(
-				f"[voidstar] detect_audio_start_end=on "
+				f"[divvy] detect_audio_start_end=on "
 				f"detected_start={detected_window[0]:.3f}s detected_end={detected_window[1]:.3f}s"
 			)
 		else:
-			print("[voidstar] detect_audio_start_end=on detection_failed -> using full video window")
+			print("[divvy] detect_audio_start_end=on detection_failed -> using full video window")
 
 	if args.start_seconds is None:
 		if detected_window is not None:
@@ -2506,48 +2506,48 @@ def run_highlights(args: argparse.Namespace) -> None:
 	enc = choose_video_encoder(args.video_encoder)
 	extra_args = shlex.split(args.ffmpeg_extra) if args.ffmpeg_extra.strip() else []
 
-	print(f"[voidstar] highlights_input={input_path}")
-	print(f"[voidstar] output={out_path}")
-	print(f"[voidstar] mode={args.sampling_mode} start={window_start:.3f}s window={window_len:.3f}s")
-	print(f"[voidstar] target={args.target_length_seconds:.3f}s segments={len(selected)} sample_seconds={sample_len:.3f}")
-	print(f"[voidstar] truncate_to_full_clips={'on' if args.truncate_to_full_clips else 'off'}")
+	print(f"[divvy] highlights_input={input_path}")
+	print(f"[divvy] output={out_path}")
+	print(f"[divvy] mode={args.sampling_mode} start={window_start:.3f}s window={window_len:.3f}s")
+	print(f"[divvy] target={args.target_length_seconds:.3f}s segments={len(selected)} sample_seconds={sample_len:.3f}")
+	print(f"[divvy] truncate_to_full_clips={'on' if args.truncate_to_full_clips else 'off'}")
 	print(
-		f"[voidstar] selected_total_effective={total_selected_effective:.3f}s "
+		f"[divvy] selected_total_effective={total_selected_effective:.3f}s "
 		f"selected_total_raw={total_selected_raw:.3f}s estimated_output={total_selected_est_output:.3f}s encoder={enc} audio={'on' if has_audio else 'off'}"
 	)
 	if omitted_partial_clip:
-		print(f"[voidstar] omitted_partial_clip=on omitted_effective={omitted_partial_seconds:.3f}s")
-	print(f"[voidstar] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.3f}")
+		print(f"[divvy] omitted_partial_clip=on omitted_effective={omitted_partial_seconds:.3f}s")
+	print(f"[divvy] glitch_style={args.glitch_style} glitch_seconds={glitch_dur:.3f}")
 	if preroll_deficit_total > 0.001:
-		print(f"[voidstar] preroll_deficit_total={preroll_deficit_total:.3f}s (window start clamp)")
-	print(f"[voidstar] loop_seam_seconds={loop_seam_dur:.3f}")
+		print(f"[divvy] preroll_deficit_total={preroll_deficit_total:.3f}s (window start clamp)")
+	print(f"[divvy] loop_seam_seconds={loop_seam_dur:.3f}")
 	if loop_seam_dur > 0:
-		print("[voidstar] loop_seam_mode=outro")
-	print(f"[voidstar] transient_skew_seconds={transient_skew:.3f}")
-	print(f"[voidstar] sample_anchor={args.sample_anchor}")
+		print("[divvy] loop_seam_mode=outro")
+	print(f"[divvy] transient_skew_seconds={transient_skew:.3f}")
+	print(f"[divvy] sample_anchor={args.sample_anchor}")
 	if args.sampling_mode == "recursive-halves":
-		print(f"[voidstar] recursive_min_segment_seconds={args.recursive_min_segment_seconds:.3f}")
+		print(f"[divvy] recursive_min_segment_seconds={args.recursive_min_segment_seconds:.3f}")
 	if args.sampling_mode == "uniform-spread":
-		print(f"[voidstar] uniform_segment_count={segment_count} uniform_segment_seconds={segment_len:.3f}")
+		print(f"[divvy] uniform_segment_count={segment_count} uniform_segment_seconds={segment_len:.3f}")
 	if grid_step > 0:
-		print(f"[voidstar] tempo_grid=on cps={effective_cps:.6f} step={grid_step:.6f}s target_aligned={total_target:.3f}s requested_target={requested_target:.3f}s")
+		print(f"[divvy] tempo_grid=on cps={effective_cps:.6f} step={grid_step:.6f}s target_aligned={total_target:.3f}s requested_target={requested_target:.3f}s")
 	else:
-		print("[voidstar] tempo_grid=off")
+		print("[divvy] tempo_grid=off")
 	if glitch_dur > 0 and len(selected) >= 2:
-		print(f"[voidstar] transition_budget=on overlap_total={glitch_dur * max(0, len(selected) - 1):.3f}s")
+		print(f"[divvy] transition_budget=on overlap_total={glitch_dur * max(0, len(selected) - 1):.3f}s")
 	if ignore_ranges_abs:
-		print(f"[voidstar] ignore_ranges={len(ignore_ranges_abs)}")
+		print(f"[divvy] ignore_ranges={len(ignore_ranges_abs)}")
 	if deemph_ranges_abs:
-		print(f"[voidstar] deemphasize_ranges={len(deemph_ranges_abs)} factor={args.deemphasize_factor:.3f}")
+		print(f"[divvy] deemphasize_ranges={len(deemph_ranges_abs)} factor={args.deemphasize_factor:.3f}")
 	if glitch_dur > 0 and len(selected) >= 2:
-		print("[voidstar] pipeline=segment-then-glitch-xfade (low-memory)")
+		print("[divvy] pipeline=segment-then-glitch-xfade (low-memory)")
 	else:
-		print("[voidstar] pipeline=segment-then-concat (low-memory)")
+		print("[divvy] pipeline=segment-then-concat (low-memory)")
 
 	for i, (start, dur) in enumerate(selected, start=1):
 		raw_start, raw_dur = render_segments[i - 1]
 		print(
-			f"[voidstar] sample={i}/{len(selected)} start={start:.3f}s dur={dur:.3f}s "
+			f"[divvy] sample={i}/{len(selected)} start={start:.3f}s dur={dur:.3f}s "
 			f"raw_start={raw_start:.3f}s raw_dur={raw_dur:.3f}s"
 		)
 
@@ -2559,7 +2559,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 			transition_start = max(0.0, boundary - glitch_dur)
 			delta = boundary - transition_start
 			print(
-				f"[voidstar] transition={i}/{len(render_segments)-1} "
+				f"[divvy] transition={i}/{len(render_segments)-1} "
 				f"grid_boundary={boundary:.3f}s transition_start={transition_start:.3f}s "
 				f"delta={delta:.3f}s"
 			)
@@ -2765,19 +2765,19 @@ def run_highlights(args: argparse.Namespace) -> None:
 		if not staged_out_path.exists():
 			raise RuntimeError(f"Staged output missing after concat: {staged_out_path}")
 
-		print(f"[voidstar] copy_to_final src={staged_out_path} dst={out_path}")
+		print(f"[divvy] copy_to_final src={staged_out_path} dst={out_path}")
 		shutil.copy2(staged_out_path, out_path)
 	elapsed_total = time.time() - started
 	throughput = total_selected_est_output / max(1e-9, elapsed_total)
 
-	print("[voidstar] ===== summary =====")
-	print(f"[voidstar] output_file={out_path}")
-	print(f"[voidstar] mode={args.sampling_mode} segments={len(selected)}")
+	print("[divvy] ===== summary =====")
+	print(f"[divvy] output_file={out_path}")
+	print(f"[divvy] mode={args.sampling_mode} segments={len(selected)}")
 	print(
-		f"[voidstar] target={args.target_length_seconds:.3f}s "
+		f"[divvy] target={args.target_length_seconds:.3f}s "
 		f"actual_effective={total_selected_est_output:.3f}s requested_effective={total_selected_effective:.3f}s actual_raw={total_selected_raw:.3f}s"
 	)
-	print(f"[voidstar] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
+	print(f"[divvy] elapsed={elapsed_total:.2f}s throughput={throughput:.3f}x")
 
 
 def main() -> None:

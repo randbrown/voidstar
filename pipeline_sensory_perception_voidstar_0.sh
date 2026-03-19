@@ -173,6 +173,12 @@ DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY_DEFAULT="1.0"
 die() { echo "Error: $*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
 require_file() { local label="$1" path="$2"; [[ -f "$path" ]] || die "Missing $label file: $path"; }
+run_logged() {
+    printf '▶ ' >&2
+    printf '%q ' "$@" >&2
+    printf '\n' >&2
+    "$@"
+}
 
 GDRIVE_READY=0
 
@@ -458,7 +464,7 @@ build_base_reels_overlay() {
         echo "[reels] cache disabled: rebuilding base overlay"
     fi
 
-    python3 "$REELS_OVERLAY" "$source_video" \
+    run_logged python3 "$REELS_OVERLAY" "$source_video" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
@@ -494,7 +500,7 @@ run_optional_reels_overlay_on_clip() {
         echo "[reels per-target] cache disabled: rebuilding stage clip" >&2
     fi
 
-    python3 "$REELS_OVERLAY" "$input_clip" \
+    run_logged python3 "$REELS_OVERLAY" "$input_clip" \
         --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
         --smear true --smear-frames 17 --smear-decay 0.99 \
         --trail true --trail-alpha .999 --beat-sync true \
@@ -614,7 +620,7 @@ run_optional_pre_reels_glitchfield() {
         echo "[pre-reels glitchfield] cache disabled: rebuilding stage clip" >&2
     fi
 
-    python3 "$glitchfield_script" "$input_clip" \
+    run_logged python3 "$glitchfield_script" "$input_clip" \
         "${gf_args[@]}" \
         --seed "$PRE_REELS_GLITCHFIELD_SEED" \
         1>&2
@@ -740,7 +746,7 @@ run_optional_glitchfield_on_clip() {
         echo "[glitchfield] cache disabled: rebuilding glitchfield clip" >&2
     fi
 
-    python3 "$glitchfield_script" "$input_clip" \
+    run_logged python3 "$glitchfield_script" "$input_clip" \
         "${gf_args[@]}" \
         --seed "$GLITCHFIELD_SEED" \
         1>&2
@@ -783,7 +789,7 @@ run_optional_particle_sparks_on_clip() {
         echo "[particle-sparks] cache disabled: rebuilding stage clip" >&2
     fi
 
-    python3 "$PARTICLE_SPARKS" "$input_clip" \
+    run_logged python3 "$PARTICLE_SPARKS" "$input_clip" \
         --output "$target" \
         --start 0 --duration 0 \
         --max-points "$PARTICLE_SPARKS_MAX_POINTS" \
@@ -845,7 +851,7 @@ run_optional_title_hook_on_clip() {
         echo "[title-hook] cache disabled: rebuilding stage clip" >&2
     fi
 
-    python3 "$TITLE_HOOK_SCRIPT" "$input_clip" \
+    run_logged python3 "$TITLE_HOOK_SCRIPT" "$input_clip" \
         --output "$target" \
         --title "$resolved_title" \
         --secondary-text "$TITLE_HOOK_SECONDARY_TEXT" \
@@ -899,7 +905,7 @@ run_divvy_uniform_highlights() {
     while true; do
         local -a cmd
         cmd=(
-            python3 "$DIVVY" highlights "$BASE_REELS_OVERLAY"
+            run_logged python3 "$DIVVY" highlights "$BASE_REELS_OVERLAY"
             "${HIGHLIGHTS_TIME_ARGS[@]}" --target-length-seconds "$target_seconds"
             --video-encoder libx264 --preset medium --out-dir "$OUTDIR"
             --output "$output_path"
@@ -983,7 +989,7 @@ run_60s_start() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema --voidstar-energy 0 --voidstar-chroma 0 --voidstar-jitter 0 \
@@ -1038,7 +1044,7 @@ run_180s_start() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
@@ -1092,7 +1098,7 @@ run_full() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
@@ -1147,7 +1153,7 @@ run_60s_end() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
@@ -1203,7 +1209,7 @@ run_180s_end() {
     dvdlogo_sig="$(dvdlogo_cache_signature "$dvdlogo_profile" "$source_for_logo" "$logo")"
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
-        python3 "$DVDLOGO" "$source_for_logo" "$logo" \
+        run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
             --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \

@@ -22,7 +22,7 @@ import numpy as np
 
 
 def log(msg: str) -> None:
-    prefix = os.environ.get("VOIDSTAR_LOG_PREFIX", "voidstar")
+    prefix = os.environ.get("VOIDSTAR_LOG_PREFIX", "particle-sparks")
     print(f"[{prefix}] {msg}", flush=True)
 
 
@@ -985,7 +985,7 @@ def main() -> None:
         default=1.10,
         help="Abstract forms: new shape must be this much larger to evict contained smaller forms",
     )
-    ap.add_argument("--log-interval", type=float, default=1.0, help="Progress print interval")
+    ap.add_argument("--log-interval", type=float, default=1.5, help="Progress print interval")
 
     args = ap.parse_args()
 

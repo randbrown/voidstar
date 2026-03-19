@@ -21,6 +21,7 @@ Author: Voidstar Systems 😈
 """
 
 import argparse
+import sys
 import time
 import subprocess
 import tempfile
@@ -38,7 +39,7 @@ from tqdm import tqdm
 # ============================================================
 
 def log(msg: str) -> None:
-    print(f"[voidstar] {msg}", flush=True)
+    print(f"[glitchfield] {msg}", flush=True)
 
 
 def format_eta(start_time: float, progress: int, total: int) -> str:
@@ -52,6 +53,59 @@ def format_eta(start_time: float, progress: int, total: int) -> str:
         return "--:--"
     remaining = (total - progress) / rate
     return time.strftime("%M:%S", time.gmtime(max(0.0, remaining)))
+
+
+class ProgressLogger:
+    def __init__(
+        self,
+        total: int,
+        start_time: float,
+        interactive_interval: float = 0.75,
+        non_tty_interval: float = 10.0,
+    ):
+        self.total = max(1, int(total))
+        self.start_time = start_time
+        self.interactive_interval = max(0.1, float(interactive_interval))
+        self.non_tty_interval = max(0.1, float(non_tty_interval))
+        self.is_tty = sys.stderr.isatty()
+        self.last_emit = 0.0
+        self.last_len = 0
+
+    def update(self, progress: int, mode: str, e: float = None, extras: str = "", force: bool = False):
+        now = time.time()
+        interval = self.interactive_interval if self.is_tty else self.non_tty_interval
+        if not force and (now - self.last_emit) < interval and progress < self.total:
+            return
+
+        p = int(max(0, min(progress, self.total)))
+        pct = (100.0 * p) / float(self.total)
+        eta = format_eta(self.start_time, p, self.total)
+
+        parts = [f"[glitchfield] {p}/{self.total} ({pct:5.1f}%)", f"mode={mode}"]
+        if e is not None:
+            parts.append(f"e={e:.3f}")
+        if extras:
+            parts.append(extras)
+        parts.append(f"eta={eta}")
+        line = " ".join(parts)
+
+        if self.is_tty:
+            pad = ""
+            if len(line) < self.last_len:
+                pad = " " * (self.last_len - len(line))
+            sys.stderr.write("\r" + line + pad)
+            sys.stderr.flush()
+            self.last_len = len(line)
+        else:
+            log(line)
+
+        self.last_emit = now
+
+    def finish(self, progress: int, mode: str, e: float = None, extras: str = ""):
+        self.update(progress, mode, e=e, extras=extras, force=True)
+        if self.is_tty:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
 
 
 def run_ffmpeg(cmd):
@@ -536,6 +590,7 @@ def run_cpu(args):
 
     prev_gray = None
     t0 = time.time()
+    progress = ProgressLogger(frames_to_process, t0)
 
     font = cv2.FONT_HERSHEY_SIMPLEX
     base_cell = args.cell
@@ -549,7 +604,7 @@ def run_cpu(args):
     custom_colors = parse_colors_arg(args.colors)
     cached_input_palette = None
 
-    with tqdm(total=frames_to_process) as pbar:
+    with tqdm(total=frames_to_process, disable=True) as pbar:
         frame_idx = 0
         while frame_idx < frames_to_process:
             ret, frame = cap.read()
@@ -594,12 +649,11 @@ def run_cpu(args):
                 if flash_left > 0:
                     flash_left -= 1
 
-                if frame_idx % 10 == 0:
-                    eta = format_eta(t0, frame_idx, frames_to_process)
-                    if energy_curve is not None and frame_idx < len(energy_curve):
-                        log(f"frames={frame_idx}/{frames_to_process} e={e:.3f} mode=orig eta={eta}")
-                    else:
-                        log(f"frames={frame_idx}/{frames_to_process} mode=orig eta={eta}")
+                progress.update(
+                    frame_idx,
+                    "orig",
+                    e=e if energy_curve is not None and frame_idx < len(energy_curve) else None,
+                )
 
                 pbar.update(1)
                 continue
@@ -734,14 +788,16 @@ def run_cpu(args):
             frame_idx += 1
             if flash_left > 0:
                 flash_left -= 1
-            if frame_idx % 10 == 0:
-                eta = format_eta(t0, frame_idx, frames_to_process)
-                if energy_curve is not None and frame_idx < len(energy_curve):
-                    log(f"frames={frame_idx}/{frames_to_process} e={e:.3f} mode=glyph hold={hold_left} eta={eta}")
-                else:
-                    log(f"frames={frame_idx}/{frames_to_process} mode=glyph eta={eta}")
+            progress.update(
+                frame_idx,
+                "glyph",
+                e=e if energy_curve is not None and frame_idx < len(energy_curve) else None,
+                extras=f"hold={hold_left}",
+            )
 
             pbar.update(1)
+
+    progress.finish(frame_idx, "done")
 
     cap.release()
     writer.release()
@@ -800,6 +856,7 @@ def run_stutter_cpu(args):
     writer = cv2.VideoWriter(tmp_video, fourcc, fps, (width, height))
 
     t0 = time.time()
+    progress = ProgressLogger(frames_to_process, t0)
 
     max_back = max(1, args.stutter_max_back)
     min_back = max(1, min(args.stutter_min_back, max_back))
@@ -815,7 +872,7 @@ def run_stutter_cpu(args):
     freeze_left = 0
     freeze_frame = None
 
-    with tqdm(total=frames_to_process) as pbar:
+    with tqdm(total=frames_to_process, disable=True) as pbar:
         frame_idx = 0
         while frame_idx < frames_to_process:
             ret, frame = cap.read()
@@ -886,14 +943,16 @@ def run_stutter_cpu(args):
             writer.write(out)
 
             frame_idx += 1
-            if frame_idx % 10 == 0:
-                eta = format_eta(t0, frame_idx, frames_to_process)
-                if energy_curve is not None and frame_idx < len(energy_curve):
-                    log(f"frames={frame_idx}/{frames_to_process} e={e:.3f} mode={mode} hold={stutter_left} back={stutter_back} eta={eta}")
-                else:
-                    log(f"frames={frame_idx}/{frames_to_process} mode={mode} hold={stutter_left} back={stutter_back} eta={eta}")
+            progress.update(
+                frame_idx,
+                mode,
+                e=e if energy_curve is not None and frame_idx < len(energy_curve) else None,
+                extras=f"hold={stutter_left} back={stutter_back}",
+            )
 
             pbar.update(1)
+
+    progress.finish(frame_idx, "done")
 
     cap.release()
     writer.release()
@@ -952,6 +1011,7 @@ def run_combo_cpu(args):
     writer = cv2.VideoWriter(tmp_video, fourcc, fps, (width, height))
 
     t0 = time.time()
+    progress = ProgressLogger(frames_to_process, t0)
 
     hold_left = 0
     next_gate_frame = 0
@@ -973,7 +1033,7 @@ def run_combo_cpu(args):
     freeze_left = 0
     freeze_frame = None
 
-    with tqdm(total=frames_to_process) as pbar:
+    with tqdm(total=frames_to_process, disable=True) as pbar:
         frame_idx = 0
         while frame_idx < frames_to_process:
             ret, frame = cap.read()
@@ -1155,14 +1215,16 @@ def run_combo_cpu(args):
                 flash_left -= 1
 
             frame_idx += 1
-            if frame_idx % 10 == 0:
-                eta = format_eta(t0, frame_idx, frames_to_process)
-                if energy_curve is not None and frame_idx < len(energy_curve):
-                    log(f"frames={frame_idx}/{frames_to_process} e={e:.3f} mode={mode} hold={hold_left} eta={eta}")
-                else:
-                    log(f"frames={frame_idx}/{frames_to_process} mode={mode} hold={hold_left} eta={eta}")
+            progress.update(
+                frame_idx,
+                mode,
+                e=e if energy_curve is not None and frame_idx < len(energy_curve) else None,
+                extras=f"hold={hold_left}",
+            )
 
             pbar.update(1)
+
+    progress.finish(frame_idx, "done")
 
     cap.release()
     writer.release()

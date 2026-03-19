@@ -26,7 +26,7 @@ import numpy as np
 
 
 def log_prefix() -> str:
-    return os.environ.get("VOIDSTAR_LOG_PREFIX", "voidstar")
+    return os.environ.get("VOIDSTAR_LOG_PREFIX", "dvd-logo")
 
 
 def vlog(message: str) -> None:
@@ -525,7 +525,7 @@ def main() -> None:
     ap.add_argument("--codec", default="auto", help="Output video encoder (auto/libx264/libx265/mpeg4/libvpx-vp9/libsvtav1)")
     ap.add_argument("--preset", default="medium", help="Encoder preset")
     ap.add_argument("--crf", type=int, default=18, help="Quality CRF for CRF-based encoders")
-    ap.add_argument("--log-interval", type=float, default=1.0, help="Progress print interval in seconds")
+    ap.add_argument("--log-interval", type=float, default=1.5, help="Progress print interval in seconds")
 
     args = ap.parse_args()
 
