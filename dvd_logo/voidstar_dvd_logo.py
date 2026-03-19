@@ -353,36 +353,6 @@ def resize_logo_layers(
     return out, alpha_rs
 
 
-def defringe_logo_edges(
-    logo_bgr: np.ndarray,
-    logo_alpha: np.ndarray,
-    strength: float = 1.0,
-    alpha_floor: float = 0.5,
-) -> np.ndarray:
-    """Reduce dark fringes on semi-transparent pixels via controlled unpremultiply."""
-    # Allow larger user strength values while keeping blend weight bounded.
-    s = 1.0 - math.exp(-max(0.0, float(strength)))
-    if s <= 1e-6:
-        return logo_bgr
-
-    a = np.clip(logo_alpha.astype(np.float32), 0.0, 1.0)
-    src = logo_bgr.astype(np.float32)
-    unpm = src.copy()
-
-    # Target fringe-prone edge pixels (semi-transparent region), not the fully opaque core.
-    edge_max_alpha = float(np.clip(alpha_floor, 0.0, 1.0))
-    if edge_max_alpha <= 0.0:
-        mask = a > 1e-6
-    else:
-        mask = (a > 1e-6) & (a <= edge_max_alpha)
-    if np.any(mask):
-        safe_a = np.maximum(a[mask], 1e-6)
-        unpm[mask] = np.clip(src[mask] / safe_a[:, None], 0.0, 255.0)
-
-    out = (src * (1.0 - s)) + (unpm * s)
-    return np.clip(out, 0.0, 255.0).astype(np.uint8)
-
-
 def rotate_logo_layers(logo_bgr: np.ndarray, logo_alpha: np.ndarray, angle_deg: float) -> tuple[np.ndarray, np.ndarray]:
     h, w = logo_bgr.shape[:2]
     cx = w * 0.5
@@ -571,9 +541,6 @@ def main() -> None:
     ap.add_argument("--logo-width-px", type=int, default=0, help="Absolute logo width in pixels (overrides --logo-scale if >0)")
     ap.add_argument("--logo-rotate-speed", type=float, default=0.0, help="Continuous logo rotation speed in degrees/second (0 disables)")
     ap.add_argument("--logo-rotate-start-deg", type=float, default=0.0, help="Initial logo rotation angle in degrees")
-    ap.add_argument("--logo-defringe", type=bool_flag, default=True, help="Lift dark edge fringes in logo source before compositing.")
-    ap.add_argument("--logo-defringe-strength", type=float, default=1.0, help="Defringe intensity. Higher values increase correction (e.g. 0.5, 1, 2, 4, 10).")
-    ap.add_argument("--logo-defringe-alpha-floor", type=float, default=0.5, help="Apply defringe to semi-transparent pixels with alpha <= this threshold [0..1].")
     ap.add_argument("--edge-margin-px", type=float, default=0.0, help="Signed edge margin in pixels. Positive stays inside edge; negative allows overlap.")
     ap.add_argument("--trails", type=float, default=0.0, help="Ghost trail strength [0..1]. 0 disables, 1 is strongest.")
     ap.add_argument("--opacity", type=float, default=1.0, help="Main logo opacity [0..1]. 1.0 is fully opaque.")
@@ -771,13 +738,6 @@ def main() -> None:
 
     base_logo_bgr = logo_rgba[:, :, :3]
     base_logo_alpha = logo_rgba[:, :, 3].astype(np.float32) / 255.0
-    if args.logo_defringe:
-        base_logo_bgr = defringe_logo_edges(
-            base_logo_bgr,
-            base_logo_alpha,
-            strength=float(np.clip(args.logo_defringe_strength, 0.0, 1.0)),
-            alpha_floor=float(np.clip(args.logo_defringe_alpha_floor, 0.0, 1.0)),
-        )
     base_logo_bgr, base_logo_alpha = resize_logo_layers(
         base_logo_bgr,
         base_logo_alpha,
