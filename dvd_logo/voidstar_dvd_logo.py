@@ -25,6 +25,9 @@ import cv2
 import numpy as np
 
 
+OVERLAY_BLEND_MODE = "screen"
+
+
 def log_prefix() -> str:
     return os.environ.get("VOIDSTAR_LOG_PREFIX", "dvd-logo")
 
@@ -298,7 +301,13 @@ def overlay_rgba(
         aroi *= opacity
     aroi = aroi[..., None]
 
-    out = lroi * aroi + roi * (1.0 - aroi)
+    if OVERLAY_BLEND_MODE == "screen":
+        roi01 = roi / 255.0
+        lroi01 = lroi / 255.0
+        screen = (1.0 - (1.0 - roi01) * (1.0 - lroi01)) * 255.0
+        out = screen * aroi + roi * (1.0 - aroi)
+    else:
+        out = lroi * aroi + roi * (1.0 - aroi)
     frame[y0:y1, x0:x1] = out.astype(np.uint8)
 
 
@@ -319,8 +328,63 @@ def overlay_tinted_rgba(
     overlay_rgba(frame, tinted, logo_alpha, x, y, opacity)
 
 
-def rotate_logo_rgba(logo_rgba: np.ndarray, angle_deg: float) -> tuple[np.ndarray, np.ndarray]:
-    h, w = logo_rgba.shape[:2]
+def resize_logo_layers(
+    logo_bgr: np.ndarray,
+    logo_alpha: np.ndarray,
+    size: tuple[int, int],
+    interpolation: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Resize BGR+alpha using premultiplied alpha to avoid dark edge fringing."""
+    target_w, target_h = int(size[0]), int(size[1])
+    if target_w <= 0 or target_h <= 0:
+        return logo_bgr, logo_alpha
+
+    a = np.clip(logo_alpha.astype(np.float32), 0.0, 1.0)
+    premul = logo_bgr.astype(np.float32) * a[..., None]
+
+    premul_rs = cv2.resize(premul, (target_w, target_h), interpolation=interpolation)
+    alpha_rs = cv2.resize(a, (target_w, target_h), interpolation=interpolation).astype(np.float32)
+    alpha_rs = np.clip(alpha_rs, 0.0, 1.0)
+
+    out = np.zeros_like(premul_rs, dtype=np.float32)
+    denom = np.maximum(alpha_rs[..., None], 1e-6)
+    np.divide(premul_rs, denom, out=out, where=(alpha_rs[..., None] > 1e-6))
+    out = np.clip(out, 0.0, 255.0).astype(np.uint8)
+    return out, alpha_rs
+
+
+def defringe_logo_edges(
+    logo_bgr: np.ndarray,
+    logo_alpha: np.ndarray,
+    strength: float = 1.0,
+    alpha_floor: float = 0.5,
+) -> np.ndarray:
+    """Reduce dark fringes on semi-transparent pixels via controlled unpremultiply."""
+    # Allow larger user strength values while keeping blend weight bounded.
+    s = 1.0 - math.exp(-max(0.0, float(strength)))
+    if s <= 1e-6:
+        return logo_bgr
+
+    a = np.clip(logo_alpha.astype(np.float32), 0.0, 1.0)
+    src = logo_bgr.astype(np.float32)
+    unpm = src.copy()
+
+    # Target fringe-prone edge pixels (semi-transparent region), not the fully opaque core.
+    edge_max_alpha = float(np.clip(alpha_floor, 0.0, 1.0))
+    if edge_max_alpha <= 0.0:
+        mask = a > 1e-6
+    else:
+        mask = (a > 1e-6) & (a <= edge_max_alpha)
+    if np.any(mask):
+        safe_a = np.maximum(a[mask], 1e-6)
+        unpm[mask] = np.clip(src[mask] / safe_a[:, None], 0.0, 255.0)
+
+    out = (src * (1.0 - s)) + (unpm * s)
+    return np.clip(out, 0.0, 255.0).astype(np.uint8)
+
+
+def rotate_logo_layers(logo_bgr: np.ndarray, logo_alpha: np.ndarray, angle_deg: float) -> tuple[np.ndarray, np.ndarray]:
+    h, w = logo_bgr.shape[:2]
     cx = w * 0.5
     cy = h * 0.5
 
@@ -333,15 +397,32 @@ def rotate_logo_rgba(logo_rgba: np.ndarray, angle_deg: float) -> tuple[np.ndarra
     M[0, 2] += (new_w * 0.5) - cx
     M[1, 2] += (new_h * 0.5) - cy
 
-    rotated = cv2.warpAffine(
-        logo_rgba,
+    src_a = np.clip(logo_alpha.astype(np.float32), 0.0, 1.0)
+    src_premul = logo_bgr.astype(np.float32) * src_a[..., None]
+
+    rot_premul = cv2.warpAffine(
+        src_premul,
         M,
         (new_w, new_h),
         flags=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_CONSTANT,
-        borderValue=(0, 0, 0, 0),
+        borderValue=(0, 0, 0),
     )
-    return rotated[:, :, :3], rotated[:, :, 3].astype(np.float32) / 255.0
+    rot_a = cv2.warpAffine(
+        src_a,
+        M,
+        (new_w, new_h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0.0,
+    ).astype(np.float32)
+    rot_a = np.clip(rot_a, 0.0, 1.0)
+
+    out = np.zeros_like(rot_premul, dtype=np.float32)
+    denom = np.maximum(rot_a[..., None], 1e-6)
+    np.divide(rot_premul, denom, out=out, where=(rot_a[..., None] > 1e-6))
+    out = np.clip(out, 0.0, 255.0).astype(np.uint8)
+    return out, rot_a
 
 
 def stamp_rgba_into_layer(
@@ -376,13 +457,26 @@ def stamp_rgba_into_layer(
     dst_bgr = layer_bgr[y0:y1, x0:x1]
     dst_a = layer_alpha[y0:y1, x0:x1]
 
-    layer_bgr[y0:y1, x0:x1] = src_bgr * src_a3 + dst_bgr * (1.0 - src_a3)
+    if OVERLAY_BLEND_MODE == "screen":
+        dst01 = dst_bgr / 255.0
+        src01 = src_bgr / 255.0
+        screen = (1.0 - (1.0 - dst01) * (1.0 - src01)) * 255.0
+        layer_bgr[y0:y1, x0:x1] = screen * src_a3 + dst_bgr * (1.0 - src_a3)
+    else:
+        layer_bgr[y0:y1, x0:x1] = src_bgr * src_a3 + dst_bgr * (1.0 - src_a3)
     layer_alpha[y0:y1, x0:x1] = src_a + dst_a * (1.0 - src_a)
 
 
 def blend_layer_onto_frame(frame: np.ndarray, layer_bgr: np.ndarray, layer_alpha: np.ndarray) -> None:
     a3 = np.clip(layer_alpha, 0.0, 1.0)[..., None]
-    out = layer_bgr * a3 + frame.astype(np.float32) * (1.0 - a3)
+    frame_f = frame.astype(np.float32)
+    if OVERLAY_BLEND_MODE == "screen":
+        frame01 = frame_f / 255.0
+        layer01 = layer_bgr / 255.0
+        screen = (1.0 - (1.0 - frame01) * (1.0 - layer01)) * 255.0
+        out = screen * a3 + frame_f * (1.0 - a3)
+    else:
+        out = layer_bgr * a3 + frame_f * (1.0 - a3)
     frame[:, :, :] = np.clip(out, 0, 255).astype(np.uint8)
 
 
@@ -457,6 +551,8 @@ def draw_clamped_rect(
 
 
 def main() -> None:
+    global OVERLAY_BLEND_MODE
+
     ap = argparse.ArgumentParser(description="Overlay bouncing PNG logo on a source video.")
     ap.add_argument("input", help="Input video path (bare names resolve under /mnt/c/users/<user>/Videos; ./ and ../ resolve from cwd)")
     ap.add_argument("logo", help="Transparent PNG logo path (bare names resolve under /mnt/c/users/<user>/Videos; ./ and ../ resolve from cwd)")
@@ -475,9 +571,13 @@ def main() -> None:
     ap.add_argument("--logo-width-px", type=int, default=0, help="Absolute logo width in pixels (overrides --logo-scale if >0)")
     ap.add_argument("--logo-rotate-speed", type=float, default=0.0, help="Continuous logo rotation speed in degrees/second (0 disables)")
     ap.add_argument("--logo-rotate-start-deg", type=float, default=0.0, help="Initial logo rotation angle in degrees")
+    ap.add_argument("--logo-defringe", type=bool_flag, default=True, help="Lift dark edge fringes in logo source before compositing.")
+    ap.add_argument("--logo-defringe-strength", type=float, default=1.0, help="Defringe intensity. Higher values increase correction (e.g. 0.5, 1, 2, 4, 10).")
+    ap.add_argument("--logo-defringe-alpha-floor", type=float, default=0.5, help="Apply defringe to semi-transparent pixels with alpha <= this threshold [0..1].")
     ap.add_argument("--edge-margin-px", type=float, default=0.0, help="Signed edge margin in pixels. Positive stays inside edge; negative allows overlap.")
     ap.add_argument("--trails", type=float, default=0.0, help="Ghost trail strength [0..1]. 0 disables, 1 is strongest.")
     ap.add_argument("--opacity", type=float, default=1.0, help="Main logo opacity [0..1]. 1.0 is fully opaque.")
+    ap.add_argument("--logo-blend-mode", choices=["screen", "normal"], default="screen", help="How logo pixels blend onto video. screen avoids dark halos.")
     ap.add_argument("--audio-reactive-glow", type=float, default=0.0, help="Audio-reactive glow strength [0..2]. 0 disables.")
     ap.add_argument("--audio-reactive-scale", type=float, default=0.06, help="Subtle audio-reactive logo scale amount [0..0.5].")
     ap.add_argument("--audio-reactive-gain", type=float, default=2.0, help="Audio envelope gain for reactive glow.")
@@ -528,6 +628,7 @@ def main() -> None:
     ap.add_argument("--log-interval", type=float, default=1.5, help="Progress print interval in seconds")
 
     args = ap.parse_args()
+    OVERLAY_BLEND_MODE = str(args.logo_blend_mode)
 
     if args.angle_deg is None:
         args.angle_deg = random.uniform(0.0, 360.0)
@@ -668,9 +769,21 @@ def main() -> None:
     src_h, src_w = logo_rgba.shape[:2]
     logo_h = max(8, int(round(logo_w * (src_h / max(1, src_w)))))
 
-    logo_resized = cv2.resize(logo_rgba, (logo_w, logo_h), interpolation=cv2.INTER_AREA)
-    base_logo_bgr = logo_resized[:, :, :3]
-    base_logo_alpha = logo_resized[:, :, 3].astype(np.float32) / 255.0
+    base_logo_bgr = logo_rgba[:, :, :3]
+    base_logo_alpha = logo_rgba[:, :, 3].astype(np.float32) / 255.0
+    if args.logo_defringe:
+        base_logo_bgr = defringe_logo_edges(
+            base_logo_bgr,
+            base_logo_alpha,
+            strength=float(np.clip(args.logo_defringe_strength, 0.0, 1.0)),
+            alpha_floor=float(np.clip(args.logo_defringe_alpha_floor, 0.0, 1.0)),
+        )
+    base_logo_bgr, base_logo_alpha = resize_logo_layers(
+        base_logo_bgr,
+        base_logo_alpha,
+        (logo_w, logo_h),
+        interpolation=cv2.INTER_AREA,
+    )
 
     cx0 = clamp(args.start_x, 0.0, 1.0) * frame_w
     cy0 = clamp(args.start_y, 0.0, 1.0) * frame_h
@@ -695,6 +808,7 @@ def main() -> None:
     margin_px = float(args.edge_margin_px)
     trails_strength = clamp(float(args.trails), 0.0, 1.0)
     overlay_opacity = clamp(float(args.opacity), 0.0, 1.0)
+    layer_opacity_scale = overlay_opacity
     reactive_glow_strength = clamp(float(args.audio_reactive_glow), 0.0, 2.0)
     reactive_scale_strength = clamp(float(args.audio_reactive_scale), 0.0, 0.5)
     voidstar_energy = clamp(float(args.voidstar_energy), 0.0, 3.0)
@@ -722,7 +836,7 @@ def main() -> None:
     point_track_opacity = float(np.clip(args.local_point_track_opacity, 0.0, 1.0))
     point_track_decay = float(np.clip(args.local_point_track_decay, 0.0, 0.999))
     trail_decay = 0.80 + 0.18 * trails_strength
-    trail_opacity = 0.10 + 0.30 * trails_strength
+    trail_opacity = (0.10 + 0.30 * trails_strength) * layer_opacity_scale
     trail_bgr = None
     trail_alpha = None
     point_track_layer = np.zeros((frame_h, frame_w, 3), dtype=np.float32) if point_track_enabled else None
@@ -809,7 +923,7 @@ def main() -> None:
 
         if abs(args.logo_rotate_speed) > 1e-9 or abs(args.logo_rotate_start_deg) > 1e-9:
             angle = args.logo_rotate_start_deg + args.logo_rotate_speed * (phase_idx / max(1e-9, fps))
-            logo_bgr, logo_alpha = rotate_logo_rgba(logo_resized, angle)
+            logo_bgr, logo_alpha = rotate_logo_layers(base_logo_bgr, base_logo_alpha, angle)
         else:
             logo_bgr, logo_alpha = base_logo_bgr, base_logo_alpha
 
@@ -819,9 +933,12 @@ def main() -> None:
             if abs(scale_mult - 1.0) > 1e-5:
                 scaled_w = max(1, int(round(logo_bgr.shape[1] * scale_mult)))
                 scaled_h = max(1, int(round(logo_bgr.shape[0] * scale_mult)))
-                logo_bgr = cv2.resize(logo_bgr, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
-                logo_alpha = cv2.resize(logo_alpha, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
-                logo_alpha = np.clip(logo_alpha, 0.0, 1.0)
+                logo_bgr, logo_alpha = resize_logo_layers(
+                    logo_bgr,
+                    logo_alpha,
+                    (scaled_w, scaled_h),
+                    interpolation=cv2.INTER_LINEAR,
+                )
 
         cur_w = logo_bgr.shape[1]
         cur_h = logo_bgr.shape[0]
@@ -1003,7 +1120,7 @@ def main() -> None:
                     255,
                 )
                 frame[:, :, :] = np.clip(
-                    frame.astype(np.float32) + point_track_layer * point_track_opacity,
+                    frame.astype(np.float32) + point_track_layer * (point_track_opacity * layer_opacity_scale),
                     0,
                     255,
                 ).astype(np.uint8)
@@ -1018,7 +1135,7 @@ def main() -> None:
                 peak = float(np.max(glow_alpha))
                 if peak > 1e-8:
                     glow_alpha = glow_alpha / peak
-                    glow_alpha = np.clip(glow_alpha * (0.55 * reactive_glow_strength * level), 0.0, 1.0)
+                    glow_alpha = np.clip(glow_alpha * (0.55 * reactive_glow_strength * level * layer_opacity_scale), 0.0, 1.0)
                     overlay_rgba(frame, logo_bgr, glow_alpha, draw_x, draw_y, 1.0)
 
         if voidstar_energy > 0.0:
@@ -1043,7 +1160,7 @@ def main() -> None:
                         draw_x - chroma_px + jx,
                         draw_y + jy,
                         np.array([1.0, 0.40, 0.40], dtype=np.float32) * tint_a,
-                        opacity=min(1.0, 0.22 * eng),
+                        opacity=min(1.0, 0.22 * eng * layer_opacity_scale),
                     )
                     overlay_tinted_rgba(
                         frame,
@@ -1052,10 +1169,10 @@ def main() -> None:
                         draw_x + chroma_px + jx,
                         draw_y + jy,
                         np.array([0.40, 0.70, 1.0], dtype=np.float32) * tint_b,
-                        opacity=min(1.0, 0.22 * eng),
+                        opacity=min(1.0, 0.22 * eng * layer_opacity_scale),
                     )
                 else:
-                    neutral_opacity = min(1.0, 0.18 * eng)
+                    neutral_opacity = min(1.0, 0.18 * eng * layer_opacity_scale)
                     overlay_rgba(frame, logo_bgr, logo_alpha, draw_x - chroma_px + jx, draw_y + jy, neutral_opacity)
                     overlay_rgba(frame, logo_bgr, logo_alpha, draw_x + chroma_px + jx, draw_y + jy, neutral_opacity)
 
@@ -1068,7 +1185,7 @@ def main() -> None:
             peak = float(np.max(bloom_alpha))
             if peak > 1e-8:
                 bloom_alpha = np.clip(bloom_alpha / peak, 0.0, 1.0)
-                bloom_alpha = np.clip(bloom_alpha * (float(args.voidstar_bloom) * 0.30 * eng), 0.0, 1.0)
+                bloom_alpha = np.clip(bloom_alpha * (float(args.voidstar_bloom) * 0.30 * eng * layer_opacity_scale), 0.0, 1.0)
                 if voidstar_colorize:
                     overlay_tinted_rgba(frame, logo_bgr, bloom_alpha, draw_x + jx, draw_y + jy, tint_a, 1.0)
                 else:

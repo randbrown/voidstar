@@ -149,6 +149,7 @@ DVDLOGO_SCALE_DEFAULT="0.26"
 DVDLOGO_AUDIO_REACTIVE_SCALE_DEFAULT="0.05"
 DVDLOGO_LOCAL_POINT_TRACK_DEFAULT="true"
 DVDLOGO_OPACITY_DEFAULT="0.07"
+DVDLOGO_BLEND_MODE_DEFAULT="screen"
 DVDLOGO_TRAILS_DEFAULT="0.30"
 DVDLOGO_AUDIO_REACTIVE_GLOW_DEFAULT="0.22"
 DVDLOGO_LOCAL_POINT_TRACK_SCALE_DEFAULT="1.7"
@@ -159,7 +160,7 @@ DVDLOGO_LOCAL_POINT_TRACK_REFRESH_DEFAULT="1"
 DVDLOGO_LOCAL_POINT_TRACK_QUALITY_DEFAULT="0.005"
 DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS_DEFAULT="4"
 DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS_DEFAULT="1"
-DVDLOGO_LOCAL_POINT_TRACK_OPACITY_DEFAULT="0.30"
+DVDLOGO_LOCAL_POINT_TRACK_OPACITY_DEFAULT="0.33"
 DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY_DEFAULT="1.0"
 
 # Glitchfield preset examples (manual reference):
@@ -336,7 +337,7 @@ dvdlogo_cache_signature() {
     local profile="$1"
     local source_clip="$2"
     local logo_path="$3"
-    echo "dvdlogo|profile=${profile}|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${DVDLOGO}|script_fp=$(file_fingerprint "$DVDLOGO")|scale=${DVDLOGO_SCALE}|opacity=${DVDLOGO_OPACITY}|trails=${DVDLOGO_TRAILS}|audio_glow=${DVDLOGO_AUDIO_REACTIVE_GLOW}|audio_scale=${DVDLOGO_AUDIO_REACTIVE_SCALE}|track=${DVDLOGO_LOCAL_POINT_TRACK}|track_scale=${DVDLOGO_LOCAL_POINT_TRACK_SCALE}|track_max=${DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS}|track_quality=${DVDLOGO_LOCAL_POINT_TRACK_QUALITY}|track_min_dist=${DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE}|track_radius=${DVDLOGO_LOCAL_POINT_TRACK_RADIUS}|track_refresh=${DVDLOGO_LOCAL_POINT_TRACK_REFRESH}|track_neighbors=${DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS}|track_thickness=${DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS}|track_opacity=${DVDLOGO_LOCAL_POINT_TRACK_OPACITY}|track_link_opacity=${DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY}|start_x=${DVDLOGO_START_X}|start_y=${DVDLOGO_START_Y}"
+    echo "dvdlogo|profile=${profile}|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${DVDLOGO}|script_fp=$(file_fingerprint "$DVDLOGO")|scale=${DVDLOGO_SCALE}|opacity=${DVDLOGO_OPACITY}|blend_mode=${DVDLOGO_BLEND_MODE}|trails=${DVDLOGO_TRAILS}|audio_glow=${DVDLOGO_AUDIO_REACTIVE_GLOW}|audio_scale=${DVDLOGO_AUDIO_REACTIVE_SCALE}|track=${DVDLOGO_LOCAL_POINT_TRACK}|track_scale=${DVDLOGO_LOCAL_POINT_TRACK_SCALE}|track_max=${DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS}|track_quality=${DVDLOGO_LOCAL_POINT_TRACK_QUALITY}|track_min_dist=${DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE}|track_radius=${DVDLOGO_LOCAL_POINT_TRACK_RADIUS}|track_refresh=${DVDLOGO_LOCAL_POINT_TRACK_REFRESH}|track_neighbors=${DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS}|track_thickness=${DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS}|track_opacity=${DVDLOGO_LOCAL_POINT_TRACK_OPACITY}|track_link_opacity=${DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY}|start_x=${DVDLOGO_START_X}|start_y=${DVDLOGO_START_Y}"
 }
 
 titlehook_cache_signature() {
@@ -990,9 +991,9 @@ run_60s_start() {
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
+            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" --logo-blend-mode "$DVDLOGO_BLEND_MODE" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
-            --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema --voidstar-energy 0 --voidstar-chroma 0 --voidstar-jitter 0 \
+            --edge-margin-px -64 --reels-local-overlay false --voidstar-preset cinema --voidstar-energy 0 --voidstar-chroma 0 --voidstar-jitter 0 \
             --local-point-track "$DVDLOGO_LOCAL_POINT_TRACK" --local-point-track-scale "$DVDLOGO_LOCAL_POINT_TRACK_SCALE" --local-point-track-pad-px 0 \
             --local-point-track-max-points "$DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS" --local-point-track-quality "$DVDLOGO_LOCAL_POINT_TRACK_QUALITY" \
             --local-point-track-radius "$DVDLOGO_LOCAL_POINT_TRACK_RADIUS" --local-point-track-min-distance "$DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE" \
@@ -1045,7 +1046,7 @@ run_180s_start() {
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
+            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" --logo-blend-mode "$DVDLOGO_BLEND_MODE" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
             --local-point-track "$DVDLOGO_LOCAL_POINT_TRACK" --local-point-track-scale "$DVDLOGO_LOCAL_POINT_TRACK_SCALE" --local-point-track-pad-px 0 \
@@ -1099,7 +1100,7 @@ run_full() {
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
+            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" --logo-blend-mode "$DVDLOGO_BLEND_MODE" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
             --local-point-track "$DVDLOGO_LOCAL_POINT_TRACK" --local-point-track-scale "$DVDLOGO_LOCAL_POINT_TRACK_SCALE" --local-point-track-pad-px 0 \
@@ -1154,7 +1155,7 @@ run_60s_end() {
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
+            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" --logo-blend-mode "$DVDLOGO_BLEND_MODE" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
             --local-point-track "$DVDLOGO_LOCAL_POINT_TRACK" --local-point-track-scale "$DVDLOGO_LOCAL_POINT_TRACK_SCALE" --local-point-track-pad-px 0 \
@@ -1210,7 +1211,7 @@ run_180s_end() {
 
     if should_rebuild "$logo_stage" --dep "$source_for_logo" --dep "$logo" --dep "$DVDLOGO" --sig "$dvdlogo_sig"; then
         run_logged python3 "$DVDLOGO" "$source_for_logo" "$logo" \
-            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" \
+            --speed 0 --logo-scale "$DVDLOGO_SCALE" --logo-rotate-speed 0 --trails "$DVDLOGO_TRAILS" --opacity "$DVDLOGO_OPACITY" --logo-blend-mode "$DVDLOGO_BLEND_MODE" \
             --audio-reactive-glow "$DVDLOGO_AUDIO_REACTIVE_GLOW" --audio-reactive-scale "$DVDLOGO_AUDIO_REACTIVE_SCALE" --audio-reactive-gain 1.0 \
             --edge-margin-px 0 --reels-local-overlay false --voidstar-preset cinema \
             --local-point-track "$DVDLOGO_LOCAL_POINT_TRACK" --local-point-track-scale "$DVDLOGO_LOCAL_POINT_TRACK_SCALE" --local-point-track-pad-px 0 \
@@ -1248,6 +1249,7 @@ main() {
     LOGO_END="$LOGO_END_DEFAULT"
     DVDLOGO_SCALE="$DVDLOGO_SCALE_DEFAULT"
     DVDLOGO_OPACITY="$DVDLOGO_OPACITY_DEFAULT"
+    DVDLOGO_BLEND_MODE="$DVDLOGO_BLEND_MODE_DEFAULT"
     DVDLOGO_TRAILS="$DVDLOGO_TRAILS_DEFAULT"
     DVDLOGO_AUDIO_REACTIVE_GLOW="$DVDLOGO_AUDIO_REACTIVE_GLOW_DEFAULT"
     DVDLOGO_AUDIO_REACTIVE_SCALE="$DVDLOGO_AUDIO_REACTIVE_SCALE_DEFAULT"
