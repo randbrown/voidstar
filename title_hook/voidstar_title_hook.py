@@ -1003,6 +1003,8 @@ def main() -> None:
     parser.add_argument("--logo-x-ratio", type=float, default=None, help="Logo center X position [0..1] (default keeps current center behavior)")
     parser.add_argument("--logo-y-ratio", type=float, default=None, help="Logo center Y position [0..1] (default keeps current title-hook placement)")
     parser.add_argument("--logo-opacity", type=float, default=0.82, help="Base logo opacity")
+    parser.add_argument("--logo-rgb-shift-opacity", type=float, default=0.22, help="Opacity for chromatic red-channel logo offset [0..1]")
+    parser.add_argument("--logo-glow-white", action="store_true", help="Use neutral white glow for logo instead of channel-weighted tint")
     parser.add_argument("--logo-alpha-threshold", type=float, default=0.18, help="Alpha cutoff [0..1] for logo content bounds (higher trims faint edges)")
     parser.add_argument("--logo-intensity", type=float, default=1.35, help="Logo effect intensity")
     parser.add_argument("--logo-idle-wiggle", type=float, default=0.012, help="Constant non-audio logo pulse amount (set 0 to disable)")
@@ -1250,17 +1252,24 @@ def main() -> None:
 
                 if logo_scaled is not None:
                     glow = logo_scaled.copy()
-                    glow[:, :, 0] = np.clip(glow[:, :, 0].astype(np.float32) * (1.05 + 0.35 * audio_level), 0, 255).astype(np.uint8)
-                    glow[:, :, 1] = np.clip(glow[:, :, 1].astype(np.float32) * (1.08 + 0.45 * audio_level), 0, 255).astype(np.uint8)
-                    glow[:, :, 2] = np.clip(glow[:, :, 2].astype(np.float32) * (1.08 + 0.52 * audio_level), 0, 255).astype(np.uint8)
+                    if args.logo_glow_white:
+                        white_level = int(round(np.clip(185.0 + (55.0 * clamp01(audio_level)), 0.0, 255.0)))
+                        glow[:, :, 0] = white_level
+                        glow[:, :, 1] = white_level
+                        glow[:, :, 2] = white_level
+                    else:
+                        glow[:, :, 0] = np.clip(glow[:, :, 0].astype(np.float32) * (1.05 + 0.35 * audio_level), 0, 255).astype(np.uint8)
+                        glow[:, :, 1] = np.clip(glow[:, :, 1].astype(np.float32) * (1.08 + 0.45 * audio_level), 0, 255).astype(np.uint8)
+                        glow[:, :, 2] = np.clip(glow[:, :, 2].astype(np.float32) * (1.08 + 0.52 * audio_level), 0, 255).astype(np.uint8)
                     overlay_rgba(frame, glow, logo_x, logo_y, opacity=float(min(1.0, args.logo_opacity * hook_alpha * (0.70 + 0.45 * audio_level))))
 
                     ch_x = int(2 + 4 * min(2.0, audio_level) * args.logo_intensity)
-                    if ch_x > 0:
+                    rgb_shift_opacity = float(np.clip(args.logo_rgb_shift_opacity, 0.0, 1.0))
+                    if ch_x > 0 and rgb_shift_opacity > 1e-6:
                         shifted = np.roll(logo_scaled, ch_x, axis=1)
                         shifted[:, :, 1] = 0
                         shifted[:, :, 0] = 0
-                        overlay_rgba(frame, shifted, logo_x - ch_x, logo_y, opacity=float(0.22 * hook_alpha))
+                        overlay_rgba(frame, shifted, logo_x - ch_x, logo_y, opacity=float(rgb_shift_opacity * hook_alpha))
 
                     overlay_rgba(frame, logo_scaled, logo_x, logo_y, opacity=float(args.logo_opacity * hook_alpha))
                     pulse = float(np.clip(audio_level, 0.0, 1.0))
