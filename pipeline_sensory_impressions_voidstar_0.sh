@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pipeline_sensory_perception_voidstar_0.sh
+# pipeline_sensory_impressions_voidstar_0.sh
 #
 # Performance optimizations:
 # - Reels CV overlay is expensive: run it ONCE on the full input video to create a cached
@@ -46,8 +46,8 @@ RUN_180S_END=0
 RUN_FULL=1
 
 # Input/output defaults.
-INPUT_VIDEO_DEFAULT="~/WinVideos/sensory_perceptions_voidstar_0.mp4"
-OUTDIR_DEFAULT="~/WinVideos/sensory_perceptions_voidstar"
+INPUT_VIDEO_DEFAULT="~/WinVideos/sensory_impressions_voidstar_0.mp4"
+OUTDIR_DEFAULT="~/WinVideos/sensory_impressions_voidstar"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
 START_SECONDS_DEFAULT="3.7"
@@ -104,7 +104,7 @@ USE_TITLE_HOOK_CACHE_DEFAULT=1
 TITLE_HOOK_DURATION_DEFAULT=4.0
 TITLE_HOOK_DURATION_600_DEFAULT=8.0
 TITLE_HOOK_FADE_OUT_DURATION_DEFAULT=1.3
-TITLE_HOOK_TITLE_DEFAULT='// sensory_perception (hi60t)\n// voidstar'
+TITLE_HOOK_TITLE_DEFAULT='// sensory_impressions (hi60t)\n// voidstar'
 TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#livecoding\n#pedalsteel\n#improvisedmusic\n#opencvpython\n#vibecoding'
 TITLE_HOOK_LOGO_DEFAULT='~/code/voidstar/art/logos_alpha/voidstar_logo_0.png'
 TITLE_HOOK_LOGO_ALPHA_THRESHOLD_DEFAULT=0.98
@@ -138,7 +138,7 @@ FORCE_DEFAULT=0
 
 # Optional copy of final rendered outputs to Google Drive (WSL path style).
 ENABLE_GDRIVE_COPY_DEFAULT=1
-GDRIVE_OUTDIR_DEFAULT="~/GoogleDrive/Music/voidstar/sensory_perception"   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos mapped via symlink
+GDRIVE_OUTDIR_DEFAULT="~/GoogleDrive/Music/voidstar/sensory_impressions"   # e.g. /mnt/c/Users/<you>/Google Drive/My Drive/Videos mapped via symlink
 
 # Logo assignment by target direction.
 LOGO_START_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_logo_cosmos_atom_0.png"
@@ -1388,7 +1388,7 @@ main() {
         if [[ -n "$OUTDIR_DEFAULT" ]]; then
             OUTDIR=$(eval echo "$OUTDIR_DEFAULT")
         else
-            OUTDIR=$(eval echo "~/WinVideos/sensory_perceptions_voidstar")
+            OUTDIR=$(eval echo "~/WinVideos/sensory_impressions_voidstar")
         fi
     else
         OUTDIR=$(eval echo "$OUTDIR")
