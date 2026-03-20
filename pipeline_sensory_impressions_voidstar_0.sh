@@ -143,9 +143,9 @@ GDRIVE_OUTDIR_DEFAULT="~/GoogleDrive/Music/voidstar/sensory_impressions"   # e.g
 # Logo assignment by target direction.
 LOGO_START_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_logo_cosmos_atom_0.png"
 LOGO_END_DEFAULT="~/code/voidstar/art/logos_alpha/voidstar_logo_cosmos_atom_0.png"
-DVDLOGO_START_X_DEFAULT="0.06"
-DVDLOGO_START_Y_DEFAULT="0.94"
-DVDLOGO_SCALE_DEFAULT="0.26"
+DVDLOGO_START_X_DEFAULT="0.1"
+DVDLOGO_START_Y_DEFAULT="0.8"
+DVDLOGO_SCALE_DEFAULT="0.33"
 DVDLOGO_AUDIO_REACTIVE_SCALE_DEFAULT="0.05"
 DVDLOGO_LOCAL_POINT_TRACK_DEFAULT="true"
 DVDLOGO_OPACITY_DEFAULT="0.3"
