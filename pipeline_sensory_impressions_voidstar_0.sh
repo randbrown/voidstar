@@ -50,8 +50,8 @@ INPUT_VIDEO_DEFAULT="~/WinVideos/sensory_impressions_voidstar_0.mp4"
 OUTDIR_DEFAULT="~/WinVideos/sensory_impressions_voidstar"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
-START_SECONDS_DEFAULT="3.7"
-YOUTUBE_FULL_SECONDS_DEFAULT="1294"
+START_SECONDS_DEFAULT="4.2"
+YOUTUBE_FULL_SECONDS_DEFAULT=""
 DETECT_AUDIO_START_END_DEFAULT=0
 
 # Timing/style defaults.
