@@ -577,6 +577,12 @@ def main() -> None:
     ap.add_argument("--local-point-track-radius", type=float, default=80.0, help="Connection radius for constellation links.")
     ap.add_argument("--local-point-track-link-neighbors", type=int, default=3, help="Max nearest neighbors to connect per point.")
     ap.add_argument("--local-point-track-link-logo", type=bool_flag, default=False, help="Also connect tracked points to nearest visible logo boundary pixel.")
+    ap.add_argument(
+        "--local-point-track-link-logo-mode",
+        choices=["all", "group-nearest"],
+        default="all",
+        help="When linking points to logo: all=every tracked point, group-nearest=only the closest point from each neighbor group.",
+    )
     ap.add_argument("--local-point-track-link-thickness", type=int, default=1, help="Line thickness for point connections.")
     ap.add_argument("--local-point-track-link-opacity", type=float, default=1.0, help="Extra multiplier for connection intensity [0..2].")
     ap.add_argument("--local-point-track-opacity", type=float, default=0.72, help="Overlay opacity for local point-track effect [0..1].")
@@ -793,6 +799,7 @@ def main() -> None:
     point_track_radius = float(np.clip(args.local_point_track_radius, 8.0, 500.0))
     point_track_link_neighbors = max(1, int(args.local_point_track_link_neighbors))
     point_track_link_logo = bool(args.local_point_track_link_logo)
+    point_track_link_logo_mode = str(args.local_point_track_link_logo_mode)
     point_track_link_thickness = max(1, int(args.local_point_track_link_thickness))
     point_track_link_opacity = float(np.clip(args.local_point_track_link_opacity, 0.0, 2.0))
     point_track_opacity = float(np.clip(args.local_point_track_opacity, 0.0, 1.0))
@@ -1059,6 +1066,7 @@ def main() -> None:
 
                 n = tracked.shape[0]
                 r2 = point_track_radius * point_track_radius
+                group_members_by_i: dict[int, np.ndarray] = {}
                 if n >= 2:
                     dx = tracked[:, 0][:, None] - tracked[:, 0][None, :]
                     dy = tracked[:, 1][:, None] - tracked[:, 1][None, :]
@@ -1067,6 +1075,7 @@ def main() -> None:
                         nbrs = np.where((d2[i] > 0) & (d2[i] <= r2))[0]
                         if nbrs.size:
                             nbrs = nbrs[np.argsort(d2[i, nbrs])[:point_track_link_neighbors]]
+                            group_members_by_i[i] = nbrs
                             x0, y0 = int(round(tracked[i, 0])), int(round(tracked[i, 1]))
                             for j in nbrs:
                                 if j <= i:
@@ -1100,7 +1109,21 @@ def main() -> None:
 
                             if edge_fx.size > 0:
                                 anchors = np.column_stack((edge_fx, edge_fy))
-                                for p in tracked:
+                                if point_track_link_logo_mode == "group-nearest" and group_members_by_i:
+                                    selected = set()
+                                    for i, nbrs in group_members_by_i.items():
+                                        members = np.concatenate(([i], nbrs.astype(np.int32, copy=False)))
+                                        pts = tracked[members]
+                                        diff_x = pts[:, 0][:, None] - anchors[:, 0][None, :]
+                                        diff_y = pts[:, 1][:, None] - anchors[:, 1][None, :]
+                                        min_d2_per_member = np.min((diff_x * diff_x) + (diff_y * diff_y), axis=1)
+                                        selected_member = int(members[int(np.argmin(min_d2_per_member))])
+                                        selected.add(selected_member)
+                                    logo_link_points = tracked[sorted(selected)] if selected else tracked
+                                else:
+                                    logo_link_points = tracked
+
+                                for p in logo_link_points:
                                     dx = anchors[:, 0] - p[0]
                                     dy = anchors[:, 1] - p[1]
                                     nearest_i = int(np.argmin((dx * dx) + (dy * dy)))
