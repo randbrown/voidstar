@@ -159,6 +159,7 @@ DVDLOGO_LOCAL_POINT_TRACK_RADIUS_DEFAULT="128"
 DVDLOGO_LOCAL_POINT_TRACK_REFRESH_DEFAULT="1"
 DVDLOGO_LOCAL_POINT_TRACK_QUALITY_DEFAULT="0.005"
 DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS_DEFAULT="4"
+DVDLOGO_LOCAL_POINT_TRACK_LINK_LOGO_DEFAULT="true"
 DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS_DEFAULT="1"
 DVDLOGO_LOCAL_POINT_TRACK_OPACITY_DEFAULT="1.0"
 DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY_DEFAULT="1.0"
@@ -337,7 +338,7 @@ dvdlogo_cache_signature() {
     local profile="$1"
     local source_clip="$2"
     local logo_path="$3"
-    echo "dvdlogo|profile=${profile}|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${DVDLOGO}|script_fp=$(file_fingerprint "$DVDLOGO")|scale=${DVDLOGO_SCALE}|opacity=${DVDLOGO_OPACITY}|blend_mode=${DVDLOGO_BLEND_MODE}|trails=${DVDLOGO_TRAILS}|audio_glow=${DVDLOGO_AUDIO_REACTIVE_GLOW}|audio_scale=${DVDLOGO_AUDIO_REACTIVE_SCALE}|track=${DVDLOGO_LOCAL_POINT_TRACK}|track_scale=${DVDLOGO_LOCAL_POINT_TRACK_SCALE}|track_max=${DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS}|track_quality=${DVDLOGO_LOCAL_POINT_TRACK_QUALITY}|track_min_dist=${DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE}|track_radius=${DVDLOGO_LOCAL_POINT_TRACK_RADIUS}|track_refresh=${DVDLOGO_LOCAL_POINT_TRACK_REFRESH}|track_neighbors=${DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS}|track_thickness=${DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS}|track_opacity=${DVDLOGO_LOCAL_POINT_TRACK_OPACITY}|track_link_opacity=${DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY}|start_x=${DVDLOGO_START_X}|start_y=${DVDLOGO_START_Y}"
+    echo "dvdlogo|profile=${profile}|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|logo=${logo_path}|logo_fp=$(file_fingerprint "$logo_path")|script=${DVDLOGO}|script_fp=$(file_fingerprint "$DVDLOGO")|scale=${DVDLOGO_SCALE}|opacity=${DVDLOGO_OPACITY}|blend_mode=${DVDLOGO_BLEND_MODE}|trails=${DVDLOGO_TRAILS}|audio_glow=${DVDLOGO_AUDIO_REACTIVE_GLOW}|audio_scale=${DVDLOGO_AUDIO_REACTIVE_SCALE}|track=${DVDLOGO_LOCAL_POINT_TRACK}|track_scale=${DVDLOGO_LOCAL_POINT_TRACK_SCALE}|track_max=${DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS}|track_quality=${DVDLOGO_LOCAL_POINT_TRACK_QUALITY}|track_min_dist=${DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE}|track_radius=${DVDLOGO_LOCAL_POINT_TRACK_RADIUS}|track_refresh=${DVDLOGO_LOCAL_POINT_TRACK_REFRESH}|track_neighbors=${DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS}|track_link_logo=${DVDLOGO_LOCAL_POINT_TRACK_LINK_LOGO}|track_thickness=${DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS}|track_opacity=${DVDLOGO_LOCAL_POINT_TRACK_OPACITY}|track_link_opacity=${DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY}|start_x=${DVDLOGO_START_X}|start_y=${DVDLOGO_START_Y}"
 }
 
 titlehook_cache_signature() {
@@ -968,7 +969,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 10 6 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 ""
 
     local logo tag target
     logo="$LOGO_START"
@@ -998,7 +999,7 @@ run_60s_start() {
             --local-point-track-max-points "$DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS" --local-point-track-quality "$DVDLOGO_LOCAL_POINT_TRACK_QUALITY" \
             --local-point-track-radius "$DVDLOGO_LOCAL_POINT_TRACK_RADIUS" --local-point-track-min-distance "$DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE" \
             --local-point-track-refresh "$DVDLOGO_LOCAL_POINT_TRACK_REFRESH" --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.33 \
-            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
+            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-logo "$DVDLOGO_LOCAL_POINT_TRACK_LINK_LOGO" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
             --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize false --start-x "$DVDLOGO_START_X" --start-y "$DVDLOGO_START_Y" \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
@@ -1052,7 +1053,7 @@ run_180s_start() {
             --local-point-track "$DVDLOGO_LOCAL_POINT_TRACK" --local-point-track-scale "$DVDLOGO_LOCAL_POINT_TRACK_SCALE" --local-point-track-pad-px 0 \
             --local-point-track-max-points "$DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS" --local-point-track-quality "$DVDLOGO_LOCAL_POINT_TRACK_QUALITY" --local-point-track-radius "$DVDLOGO_LOCAL_POINT_TRACK_RADIUS" --local-point-track-min-distance "$DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE" \
             --local-point-track-refresh "$DVDLOGO_LOCAL_POINT_TRACK_REFRESH" --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.33 \
-            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
+            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-logo "$DVDLOGO_LOCAL_POINT_TRACK_LINK_LOGO" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
             --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize true --start-x "$DVDLOGO_START_X" --start-y "$DVDLOGO_START_Y"  \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
@@ -1106,7 +1107,7 @@ run_full() {
             --local-point-track "$DVDLOGO_LOCAL_POINT_TRACK" --local-point-track-scale "$DVDLOGO_LOCAL_POINT_TRACK_SCALE" --local-point-track-pad-px 0 \
             --local-point-track-max-points "$DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS" --local-point-track-quality "$DVDLOGO_LOCAL_POINT_TRACK_QUALITY" --local-point-track-radius "$DVDLOGO_LOCAL_POINT_TRACK_RADIUS" --local-point-track-min-distance "$DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE" \
             --local-point-track-refresh "$DVDLOGO_LOCAL_POINT_TRACK_REFRESH" --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.33 \
-            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
+            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-logo "$DVDLOGO_LOCAL_POINT_TRACK_LINK_LOGO" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
             --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize true --start-x "$DVDLOGO_START_X" --start-y "$DVDLOGO_START_Y" \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
@@ -1161,7 +1162,7 @@ run_60s_end() {
             --local-point-track "$DVDLOGO_LOCAL_POINT_TRACK" --local-point-track-scale "$DVDLOGO_LOCAL_POINT_TRACK_SCALE" --local-point-track-pad-px 0 \
             --local-point-track-max-points "$DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS" --local-point-track-quality "$DVDLOGO_LOCAL_POINT_TRACK_QUALITY" --local-point-track-radius "$DVDLOGO_LOCAL_POINT_TRACK_RADIUS" --local-point-track-min-distance "$DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE" \
             --local-point-track-refresh "$DVDLOGO_LOCAL_POINT_TRACK_REFRESH" --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.33 \
-            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
+            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-logo "$DVDLOGO_LOCAL_POINT_TRACK_LINK_LOGO" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
             --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize true --start-x "$DVDLOGO_START_X" --start-y "$DVDLOGO_START_Y" \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
@@ -1217,7 +1218,7 @@ run_180s_end() {
             --local-point-track "$DVDLOGO_LOCAL_POINT_TRACK" --local-point-track-scale "$DVDLOGO_LOCAL_POINT_TRACK_SCALE" --local-point-track-pad-px 0 \
             --local-point-track-max-points "$DVDLOGO_LOCAL_POINT_TRACK_MAX_POINTS" --local-point-track-quality "$DVDLOGO_LOCAL_POINT_TRACK_QUALITY" --local-point-track-radius "$DVDLOGO_LOCAL_POINT_TRACK_RADIUS" --local-point-track-min-distance "$DVDLOGO_LOCAL_POINT_TRACK_MIN_DISTANCE" \
             --local-point-track-refresh "$DVDLOGO_LOCAL_POINT_TRACK_REFRESH" --local-point-track-opacity "$DVDLOGO_LOCAL_POINT_TRACK_OPACITY" --local-point-track-decay 0.33 \
-            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
+            --local-point-track-link-neighbors "$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS" --local-point-track-link-logo "$DVDLOGO_LOCAL_POINT_TRACK_LINK_LOGO" --local-point-track-link-thickness "$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS" \
             --local-point-track-link-opacity "$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY" --voidstar-colorize true --start-x "$DVDLOGO_START_X" --start-y "$DVDLOGO_START_Y" \
             --content-bbox-for-local false --voidstar-debug-bounds true --voidstar-debug-bounds-mode hit-glitch \
             --voidstar-debug-bounds-hit-threshold 0.8 --voidstar-debug-bounds-hit-prob 0.1 \
@@ -1261,6 +1262,7 @@ main() {
     DVDLOGO_LOCAL_POINT_TRACK_RADIUS="$DVDLOGO_LOCAL_POINT_TRACK_RADIUS_DEFAULT"
     DVDLOGO_LOCAL_POINT_TRACK_REFRESH="$DVDLOGO_LOCAL_POINT_TRACK_REFRESH_DEFAULT"
     DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS="$DVDLOGO_LOCAL_POINT_TRACK_LINK_NEIGHBORS_DEFAULT"
+    DVDLOGO_LOCAL_POINT_TRACK_LINK_LOGO="$DVDLOGO_LOCAL_POINT_TRACK_LINK_LOGO_DEFAULT"
     DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS="$DVDLOGO_LOCAL_POINT_TRACK_LINK_THICKNESS_DEFAULT"
     DVDLOGO_LOCAL_POINT_TRACK_OPACITY="$DVDLOGO_LOCAL_POINT_TRACK_OPACITY_DEFAULT"
     DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY="$DVDLOGO_LOCAL_POINT_TRACK_LINK_OPACITY_DEFAULT"

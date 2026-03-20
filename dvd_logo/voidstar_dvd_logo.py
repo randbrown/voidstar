@@ -576,6 +576,7 @@ def main() -> None:
     ap.add_argument("--local-point-track-refresh", type=int, default=6, help="Frames between local feature reseeding.")
     ap.add_argument("--local-point-track-radius", type=float, default=80.0, help="Connection radius for constellation links.")
     ap.add_argument("--local-point-track-link-neighbors", type=int, default=3, help="Max nearest neighbors to connect per point.")
+    ap.add_argument("--local-point-track-link-logo", type=bool_flag, default=False, help="Also connect tracked points to nearest visible logo boundary pixel.")
     ap.add_argument("--local-point-track-link-thickness", type=int, default=1, help="Line thickness for point connections.")
     ap.add_argument("--local-point-track-link-opacity", type=float, default=1.0, help="Extra multiplier for connection intensity [0..2].")
     ap.add_argument("--local-point-track-opacity", type=float, default=0.72, help="Overlay opacity for local point-track effect [0..1].")
@@ -791,6 +792,7 @@ def main() -> None:
     point_track_refresh = max(1, int(args.local_point_track_refresh))
     point_track_radius = float(np.clip(args.local_point_track_radius, 8.0, 500.0))
     point_track_link_neighbors = max(1, int(args.local_point_track_link_neighbors))
+    point_track_link_logo = bool(args.local_point_track_link_logo)
     point_track_link_thickness = max(1, int(args.local_point_track_link_thickness))
     point_track_link_opacity = float(np.clip(args.local_point_track_link_opacity, 0.0, 2.0))
     point_track_opacity = float(np.clip(args.local_point_track_opacity, 0.0, 1.0))
@@ -800,6 +802,7 @@ def main() -> None:
     trail_bgr = None
     trail_alpha = None
     point_track_layer = np.zeros((frame_h, frame_w, 3), dtype=np.float32) if point_track_enabled else None
+    point_track_edge_kernel = np.ones((3, 3), dtype=np.uint8) if point_track_enabled else None
     track_prev_gray = None
     track_points = np.empty((0, 1, 2), dtype=np.float32)
 
@@ -1070,6 +1073,41 @@ def main() -> None:
                                     continue
                                 x1, y1 = int(round(tracked[j, 0])), int(round(tracked[j, 1]))
                                 cv2.line(canvas, (x0, y0), (x1, y1), color, point_track_link_thickness, cv2.LINE_AA)
+
+                if point_track_link_logo:
+                    logo_visible = (logo_alpha > content_bbox_alpha_threshold)
+                    if np.any(logo_visible):
+                        edge_mask = logo_visible
+                        if point_track_edge_kernel is not None:
+                            eroded = cv2.erode(logo_visible.astype(np.uint8), point_track_edge_kernel, iterations=1)
+                            edge_mask = logo_visible & (eroded == 0)
+
+                        edge_y, edge_x = np.where(edge_mask)
+                        if edge_x.size == 0:
+                            edge_y, edge_x = np.where(logo_visible)
+
+                        if edge_x.size > 0:
+                            edge_fx = edge_x.astype(np.float32) + float(draw_x)
+                            edge_fy = edge_y.astype(np.float32) + float(draw_y)
+                            in_frame = (
+                                (edge_fx >= 0.0)
+                                & (edge_fx < float(frame_w))
+                                & (edge_fy >= 0.0)
+                                & (edge_fy < float(frame_h))
+                            )
+                            edge_fx = edge_fx[in_frame]
+                            edge_fy = edge_fy[in_frame]
+
+                            if edge_fx.size > 0:
+                                anchors = np.column_stack((edge_fx, edge_fy))
+                                for p in tracked:
+                                    dx = anchors[:, 0] - p[0]
+                                    dy = anchors[:, 1] - p[1]
+                                    nearest_i = int(np.argmin((dx * dx) + (dy * dy)))
+                                    x0, y0 = int(round(p[0])), int(round(p[1]))
+                                    x1 = int(round(float(anchors[nearest_i, 0])))
+                                    y1 = int(round(float(anchors[nearest_i, 1])))
+                                    cv2.line(canvas, (x0, y0), (x1, y1), color, point_track_link_thickness, cv2.LINE_AA)
 
                 for p in tracked:
                     cv2.circle(canvas, (int(round(p[0])), int(round(p[1]))), 2, color, -1, cv2.LINE_AA)
