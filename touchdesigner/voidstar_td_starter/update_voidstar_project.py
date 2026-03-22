@@ -27,20 +27,26 @@ LIVE_PATH = "/project1/voidstar_live"
 # ── TOGGLE UPDATE SECTIONS ──────────────────────────────────────────
 # Set True for the sections you want to apply on this run.
 
-UPDATE_AUDIO_SCALING     = False   # overwrite audio-reactivity multipliers
 UPDATE_CAM_ROTATION      = False   # change cam_rotate angle (Flip TOP)
 UPDATE_TITLE_TEXT        = False   # change title_hook text content
 UPDATE_LOGO_PATH         = False   # change dvdlogo_png file path
 ADD_COLOUR_CORRECT       = False   # insert a Colour TOP after level_drive
 FIX_OVER_TOPS            = False   # fix logo_over / title_over compositing (switch to Composite TOP)
+ADD_AUDIO_REACTIVITY     = True    # bind audio_env to visual parameters
+PROBE_PARAMS             = False   # print all parameter names for key nodes (diagnostic)
 
 
 # ── UPDATE PARAMETERS ───────────────────────────────────────────────
 # Only relevant when the matching UPDATE_* flag is True.
 
-AUDIO_GAMMA_MULT   = 300.0      # gamma  = 1.0 + min(2.5,  env * THIS)
-AUDIO_DISPLACE_MULT = 1200.0    # weight = 0.01 + min(0.8, env * THIS)
-AUDIO_BLUR_MULT    = 12000.0    # blur   = 1.0 + min(120,  env * THIS)
+# Audio reactivity multipliers (tweak these to taste).
+# The envelope from audio_env is typically 0.0 – 0.01 range,
+# so large multipliers are needed for visible effect.
+AUDIO_GAMMA_MULT    = 300.0     # gamma   = 1.0  + min(2.5,  env * THIS)
+AUDIO_DISPLACE_MULT = 1200.0    # weight  = 0.01 + min(0.8,  env * THIS)
+AUDIO_BLUR_MULT     = 12000.0   # blur    = 1.0  + min(120,  env * THIS)
+AUDIO_NOISE_TX_MULT = 50.0      # noise translate X = env * THIS  (scrolls noise with beats)
+AUDIO_NOISE_TY_MULT = 50.0      # noise translate Y = env * THIS
 
 CAM_ROTATION_INDEX = 3          # Flip TOP menu: 0=0°  1=90°  2=180°  3=270°
 
@@ -178,40 +184,85 @@ def _insert_after(parent, existing_name, new_type_names, new_name):
 
 # ── UPDATE SECTIONS ─────────────────────────────────────────────────
 
-def _update_audio_scaling(live):
-    """Overwrite audio-reactivity expression multipliers."""
-    env_expr = "abs(op('audio_env')[0])"
-    gamma_expr   = "1.0 + min(2.5, ("  + env_expr + " * " + str(AUDIO_GAMMA_MULT)   + "))"
-    displace_expr = "0.01 + min(0.8, (" + env_expr + " * " + str(AUDIO_DISPLACE_MULT) + "))"
-    blur_expr    = "1.0 + min(120.0, (" + env_expr + " * " + str(AUDIO_BLUR_MULT)    + "))"
+def _add_audio_reactivity(live):
+    """Bind audio_env expressions to visual parameters for audio-reactive visuals.
+
+    Targets known parameter names from the user's TD build.
+    Safe to re-run: overwrites expressions but not static values.
+    """
+    env = "abs(op('audio_env')[0])"
+    gamma_expr    = "1.0 + min(2.5, ("  + env + " * " + str(AUDIO_GAMMA_MULT)    + "))"
+    displace_expr = "0.01 + min(0.8, (" + env + " * " + str(AUDIO_DISPLACE_MULT) + "))"
+    blur_expr     = "1.0 + min(120.0, (" + env + " * " + str(AUDIO_BLUR_MULT)    + "))"
+    noise_tx_expr = env + " * " + str(AUDIO_NOISE_TX_MULT)
+    noise_ty_expr = env + " * " + str(AUDIO_NOISE_TY_MULT)
 
     results = {}
 
+    # Gamma on level_drive
     level = live.op("level_drive")
     if level:
-        results["gamma"] = _safe_set_expr_any(level, ["Gamma", "Gamma1", "gamma", "gamma1"], gamma_expr)
+        r = _safe_set_expr_any(level,
+            ["gamma1", "Gamma1", "gamma", "Gamma"],
+            gamma_expr)
+        results["gamma"] = r or "NO MATCHING PAR"
 
+    # Displacement weight (user's build uses displaceweightx)
     displace = live.op("displace1")
     if displace:
-        results["displace"] = _safe_set_expr_any(
-            displace,
-            ["Displaceweight", "Displaceweight1", "displaceweight", "displaceweight1"],
-            displace_expr,
-        )
-        _safe_set_expr(displace, "Displaceweight2", displace_expr)
-        _safe_set_expr(displace, "Displaceweight3", displace_expr)
-        _safe_set_expr(displace, "displaceweight2", displace_expr)
-        _safe_set_expr(displace, "displaceweight3", displace_expr)
+        r = _safe_set_expr_any(displace,
+            ["displaceweightx", "Displaceweightx",
+             "displaceweight", "Displaceweight",
+             "displaceweight1", "Displaceweight1"],
+            displace_expr)
+        results["displace"] = r or "NO MATCHING PAR"
+        # Also try Y/Z displacement channels
+        _safe_set_expr(displace, "displaceweighty", displace_expr)
+        _safe_set_expr(displace, "displaceweightz", displace_expr)
+        _safe_set_expr(displace, "Displaceweighty", displace_expr)
+        _safe_set_expr(displace, "Displaceweightz", displace_expr)
 
+    # Blur filter size
     blur = live.op("blur1")
     if blur:
-        results["blur"] = _safe_set_expr_any(
-            blur,
-            ["Filtersize", "Filterwidth", "filtersize", "filterwidth"],
-            blur_expr,
-        )
+        r = _safe_set_expr_any(blur,
+            ["filtersize", "Filtersize",
+             "filterwidth", "Filterwidth",
+             "size", "Size"],
+            blur_expr)
+        results["blur"] = r or "NO MATCHING PAR"
+
+    # Noise translate (makes noise scroll with beats → animated displacement)
+    noise = live.op("noise1")
+    if noise:
+        rx = _safe_set_expr_any(noise,
+            ["tx", "Tx", "t1", "T1", "translatex", "Translatex"],
+            noise_tx_expr)
+        ry = _safe_set_expr_any(noise,
+            ["ty", "Ty", "t2", "T2", "translatey", "Translatey"],
+            noise_ty_expr)
+        results["noise_tx"] = rx or "NO MATCHING PAR"
+        results["noise_ty"] = ry or "NO MATCHING PAR"
 
     return results
+
+
+def _probe_params(live):
+    """Print all parameter names for key visual/audio nodes. Diagnostic only."""
+    targets = ["level_drive", "displace1", "blur1", "noise1", "edge1",
+               "logo_over", "title_over", "audio_env"]
+    lines = []
+    for name in targets:
+        node = live.op(name)
+        if node is None:
+            lines.append(name + ": NOT FOUND")
+            continue
+        par_names = [p.name for p in node.pars()]
+        lines.append(name + " (" + node.OPType + ") params:")
+        lines.append("  " + ", ".join(par_names))
+    report = "\n".join(lines)
+    print(report)
+    return report
 
 
 def _update_cam_rotation(live):
@@ -319,11 +370,6 @@ def update():
     any_enabled = False
 
     try:
-        if UPDATE_AUDIO_SCALING:
-            any_enabled = True
-            r = _update_audio_scaling(live)
-            log_lines.append("Audio scaling: " + str(r))
-
         if UPDATE_CAM_ROTATION:
             any_enabled = True
             r = _update_cam_rotation(live)
@@ -348,6 +394,16 @@ def update():
             any_enabled = True
             r = _fix_over_tops(live)
             log_lines.append("Over TOPs: " + str(r))
+
+        if ADD_AUDIO_REACTIVITY:
+            any_enabled = True
+            r = _add_audio_reactivity(live)
+            log_lines.append("Audio reactivity: " + str(r))
+
+        if PROBE_PARAMS:
+            any_enabled = True
+            r = _probe_params(live)
+            log_lines.append("Param probe:\n" + r)
 
         if not any_enabled:
             log_lines.append("No update sections enabled. Set UPDATE_* flags to True.")
