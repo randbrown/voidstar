@@ -278,10 +278,10 @@ def _build_live(parent_comp):
     displace = _create_or_get_any(base, ["displaceTOP"], "displace1")
 
     logo = _create_or_get_any(base, ["moviefileinTOP"], "dvdlogo_png")
-    logo_over = _create_or_get_any(base, ["overTOP"], "logo_over")
+    logo_over = _create_or_get_any(base, ["compositeTOP"], "logo_over")
 
     title = _create_or_get_any(base, ["textTOP"], "title_hook")
-    final_over = _create_or_get_any(base, ["overTOP"], "title_over")
+    final_over = _create_or_get_any(base, ["compositeTOP"], "title_over")
     out_null = _create_or_get_any(base, ["nullTOP"], "out1")
 
     level_drive.inputConnectors[0].connect(src_null)
@@ -291,12 +291,18 @@ def _build_live(parent_comp):
     displace.inputConnectors[0].connect(level_drive)
     displace.inputConnectors[1].connect(noise)
 
+    # Composite TOP: Input 0 = background, Input 1 = overlay.
     logo_over.inputConnectors[0].connect(displace)
     logo_over.inputConnectors[1].connect(logo)
 
     final_over.inputConnectors[0].connect(logo_over)
     final_over.inputConnectors[1].connect(title)
     out_null.inputConnectors[0].connect(final_over)
+
+    # Composite TOP: set operation to "Over" for alpha-based compositing.
+    for comp_top in [logo_over, final_over]:
+        _safe_set_menu_any(comp_top, ["Operand", "operand", "Operation", "operation"], ["over"])
+        _safe_set_par_any(comp_top, ["Operand", "operand", "Operation", "operation"], 0)
 
     # Deterministic layout so Home (h) consistently frames the full network.
     _set_node_pos(cam_in, -1100, 200)

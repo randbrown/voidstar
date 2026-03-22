@@ -32,6 +32,7 @@ UPDATE_CAM_ROTATION      = False   # change cam_rotate angle (Flip TOP)
 UPDATE_TITLE_TEXT        = False   # change title_hook text content
 UPDATE_LOGO_PATH         = False   # change dvdlogo_png file path
 ADD_COLOUR_CORRECT       = False   # insert a Colour TOP after level_drive
+FIX_OVER_TOPS            = False   # fix logo_over / title_over compositing (switch to Composite TOP)
 
 
 # ── UPDATE PARAMETERS ───────────────────────────────────────────────
@@ -250,6 +251,54 @@ def _add_colour_correct(live):
     return "already exists (untouched)"
 
 
+def _fix_over_tops(live):
+    """Replace Over TOPs with Composite TOPs for reliable compositing.
+
+    Destroys old Over TOPs and creates Composite TOPs in their place,
+    preserving the same wiring.
+    """
+    results = []
+    replacements = [
+        # (name, upstream_input0, upstream_input1)
+        ("logo_over", "displace1", "dvdlogo_png"),
+        ("title_over", "logo_over", "title_hook"),
+    ]
+    for name, in0_name, in1_name in replacements:
+        old = live.op(name)
+        if old is not None:
+            # Gather downstream connections before destroying.
+            downstream = []
+            try:
+                for conn in list(old.outputConnectors[0].connections):
+                    downstream.append((conn.owner, conn.index))
+            except Exception:
+                pass
+            try:
+                old.destroy()
+            except Exception:
+                results.append(name + ": could not destroy old Over TOP")
+                continue
+
+        new_node = _create_or_get_any(live, ["compositeTOP"], name)
+        in0 = live.op(in0_name)
+        in1 = live.op(in1_name)
+        if in0:
+            new_node.inputConnectors[0].connect(in0)
+        if in1:
+            new_node.inputConnectors[1].connect(in1)
+        # Re-wire downstream.
+        if old is not None:
+            for target_op, idx in downstream:
+                try:
+                    target_op.inputConnectors[idx].connect(new_node)
+                except Exception:
+                    pass
+        _safe_set_menu_any(new_node, ["Operand", "operand", "Operation", "operation"], ["over"])
+        _safe_set_par_any(new_node, ["Operand", "operand", "Operation", "operation"], 0)
+        results.append(name + ": replaced with Composite TOP")
+    return ", ".join(results)
+
+
 # ── MAIN ────────────────────────────────────────────────────────────
 
 def update():
@@ -294,6 +343,11 @@ def update():
             any_enabled = True
             r = _add_colour_correct(live)
             log_lines.append("Colour correct: " + str(r))
+
+        if FIX_OVER_TOPS:
+            any_enabled = True
+            r = _fix_over_tops(live)
+            log_lines.append("Over TOPs: " + str(r))
 
         if not any_enabled:
             log_lines.append("No update sections enabled. Set UPDATE_* flags to True.")
