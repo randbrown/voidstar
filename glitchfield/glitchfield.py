@@ -425,6 +425,49 @@ def build_output_name(args) -> str:
     return str(out_dir / filename)
 
 
+_EDGE_COLORS = {
+    "cyan":  (255, 255, 0),    # BGR
+    "white": (255, 255, 255),
+    "green": (0, 255, 0),
+    "red":   (0, 0, 255),
+}
+
+
+def _apply_edge_overlay(out: np.ndarray, edges: np.ndarray, source_frame: np.ndarray,
+                        args, energy: float) -> np.ndarray:
+    """Composite Canny edges over the output frame.
+
+    Audio-reactive: edge opacity scales with energy when audio-reactive is enabled.
+    """
+    strength = args.edge_overlay_strength
+    if args.audio_reactive:
+        # Boost opacity on beats, dim during silence
+        strength = np.clip(strength * (0.3 + 1.4 * energy), 0.0, 1.0)
+
+    if strength < 0.01:
+        return out
+
+    mask = edges > 0
+
+    if args.edge_overlay_color == "source":
+        # Tint edges with the original source frame colors
+        edge_colored = source_frame.copy()
+        edge_colored[~mask] = 0
+    else:
+        color = _EDGE_COLORS.get(args.edge_overlay_color, (255, 255, 0))
+        edge_colored = np.zeros_like(out)
+        edge_colored[mask] = color
+
+    # Additive blend for glitchy look (clamped)
+    result = out.copy()
+    blended = np.clip(
+        out.astype(np.float32) + edge_colored.astype(np.float32) * strength,
+        0, 255,
+    ).astype(np.uint8)
+    result[mask] = blended[mask]
+    return result
+
+
 def mux_original_audio(args, tmp_video: str, out_path: str) -> None:
     log("video render complete — starting audio mux")
 
@@ -783,6 +826,10 @@ def run_cpu(args):
 
             out = apply_optional_post_fx(out, rng, args, e, trail_history)
 
+            # Edge overlay: composite Canny edges over output
+            if args.edge_overlay and edges is not None:
+                out = _apply_edge_overlay(out, edges, frame, args, e)
+
             writer.write(out)
 
             frame_idx += 1
@@ -939,6 +986,12 @@ def run_stutter_cpu(args):
 
             if mode != "orig":
                 out = apply_optional_post_fx(out, rng, args, e, trail_history)
+
+            # Edge overlay (stutter mode): use edges from current frame if available
+            if args.edge_overlay:
+                gray_s = cv2.cvtColor(out, cv2.COLOR_BGR2GRAY)
+                edges_s = cv2.Canny(gray_s, 60, 120)
+                out = _apply_edge_overlay(out, edges_s, out, args, e)
 
             writer.write(out)
 
@@ -1207,6 +1260,10 @@ def run_combo_cpu(args):
             if mode != "orig":
                 out = apply_optional_post_fx(out, rng, args, e, trail_history)
 
+            # Edge overlay (combo mode)
+            if args.edge_overlay and edges is not None:
+                out = _apply_edge_overlay(out, edges, frame, args, e)
+
             writer.write(out)
 
             if hold_left > 0:
@@ -1280,6 +1337,13 @@ def parse_args():
 
     ap.add_argument("--motion-weight", type=float, default=1.6)
     ap.add_argument("--edge-weight", type=float, default=1.2)
+    ap.add_argument("--edge-overlay", action="store_true", default=False,
+                    help="composite Canny edges over output for glitchy look")
+    ap.add_argument("--edge-overlay-strength", type=float, default=0.45,
+                    help="edge overlay opacity 0..1 (audio-reactive when --audio-reactive)")
+    ap.add_argument("--edge-overlay-color", default="cyan",
+                    choices=["cyan", "white", "green", "red", "source"],
+                    help="edge tint color (source = original frame colors)")
     ap.add_argument("--luma-weight", type=float, default=0.8)
 
     # Color system
