@@ -3,6 +3,7 @@ import os
 import subprocess
 import shutil
 import tempfile
+import urllib.request
 import wave
 from collections import deque
 from pathlib import Path
@@ -23,6 +24,8 @@ DEFAULT_FPS = 30.0
 DEFAULT_MODEL_COMPLEXITY = 2
 DEFAULT_MIN_DET_CONF = 0.5
 DEFAULT_MIN_TRK_CONF = 0.5
+DEFAULT_MEDIAPIPE_RUNTIME = "auto"
+DEFAULT_MEDIAPIPE_MODEL_CACHE_DIR = str(Path.home() / ".cache" / "voidstar" / "mediapipe")
 
 DEFAULT_TRAIL = True
 DEFAULT_TRAIL_ALPHA = 0.9
@@ -71,6 +74,21 @@ DEFAULT_GLITCH_RGB_SPLIT = 8
 DEFAULT_GLITCH_SCAN_JITTER = 14
 DEFAULT_GLITCH_DROPOUT = 0.02  # occasional band dropout probability
 
+POSE_LANDMARKER_MODEL_SPECS = {
+    0: (
+        "pose_landmarker_lite.task",
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+    ),
+    1: (
+        "pose_landmarker_full.task",
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task",
+    ),
+    2: (
+        "pose_landmarker_heavy.task",
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task",
+    ),
+}
+
 
 # =========================
 # UTILS
@@ -110,6 +128,147 @@ def require_ffmpeg(tool: str) -> str:
     if not p:
         raise RuntimeError(f"{tool} not found. Install ffmpeg package.")
     return p
+
+
+def resolve_pose_landmarker_model_path(args) -> Path:
+    if args.mediapipe_model_path:
+        model_path = Path(args.mediapipe_model_path).expanduser()
+        if not model_path.exists():
+            raise FileNotFoundError(
+                f"MediaPipe pose model not found: {model_path}\n"
+                "Pass --mediapipe-model-path to an existing .task file or allow auto-download."
+            )
+        return model_path
+
+    model_name, model_url = POSE_LANDMARKER_MODEL_SPECS[int(args.model_complexity)]
+    cache_dir = Path(args.mediapipe_model_cache_dir).expanduser()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    model_path = cache_dir / model_name
+    if model_path.exists():
+        return model_path
+
+    tmp_path = model_path.with_suffix(model_path.suffix + ".download")
+    print(f"   Downloading MediaPipe pose model: {model_name}")
+    print(f"   Source: {model_url}")
+    try:
+        with urllib.request.urlopen(model_url, timeout=120) as response, open(tmp_path, "wb") as fh:
+            shutil.copyfileobj(response, fh)
+        tmp_path.replace(model_path)
+    except Exception as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise RuntimeError(
+            "Unable to download MediaPipe pose task model automatically. "
+            f"Download it manually or pass --mediapipe-model-path. Root cause: {exc}"
+        ) from exc
+    return model_path
+
+
+def iter_pose_connections(connections):
+    for connection in connections:
+        if hasattr(connection, "start") and hasattr(connection, "end"):
+            yield int(connection.start), int(connection.end)
+        else:
+            yield int(connection[0]), int(connection[1])
+
+
+class _PoseLandmarkListAdapter:
+    def __init__(self, landmarks):
+        self.landmark = landmarks
+
+
+class _PoseProcessResultAdapter:
+    def __init__(self, result):
+        if result.pose_landmarks:
+            self.pose_landmarks = _PoseLandmarkListAdapter(result.pose_landmarks[0])
+        else:
+            self.pose_landmarks = None
+
+
+class LegacyPoseRuntime:
+    def __init__(self, args):
+        self.args = args
+        self.pose_connections = None
+        self.runtime_name = "legacy-solutions"
+        self._pose = None
+
+    def __enter__(self):
+        mp_pose = mp.solutions.pose
+        self.pose_connections = mp_pose.POSE_CONNECTIONS
+        self._pose = mp_pose.Pose(
+            static_image_mode=False,
+            model_complexity=self.args.model_complexity,
+            enable_segmentation=False,
+            min_detection_confidence=self.args.min_det_conf,
+            min_tracking_confidence=self.args.min_trk_conf,
+        )
+        return self
+
+    def process(self, rgb_frame, timestamp_ms):
+        del timestamp_ms
+        return self._pose.process(rgb_frame)
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._pose is not None:
+            self._pose.close()
+        return False
+
+
+class TasksPoseRuntime:
+    def __init__(self, args):
+        self.args = args
+        self.pose_connections = None
+        self.runtime_name = "tasks"
+        self.model_path = None
+        self._landmarker = None
+
+    def __enter__(self):
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision as mp_vision
+
+        self.model_path = resolve_pose_landmarker_model_path(self.args)
+        base_options = mp_python.BaseOptions(model_asset_path=str(self.model_path))
+        options = mp_vision.PoseLandmarkerOptions(
+            base_options=base_options,
+            running_mode=mp_vision.RunningMode.VIDEO,
+            num_poses=1,
+            min_pose_detection_confidence=self.args.min_det_conf,
+            min_pose_presence_confidence=self.args.min_det_conf,
+            min_tracking_confidence=self.args.min_trk_conf,
+            output_segmentation_masks=False,
+        )
+        self._landmarker = mp_vision.PoseLandmarker.create_from_options(options)
+        self.pose_connections = mp_vision.PoseLandmarksConnections.POSE_LANDMARKS
+        self.runtime_name = f"tasks:{self.model_path.name}"
+        return self
+
+    def process(self, rgb_frame, timestamp_ms):
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        result = self._landmarker.detect_for_video(mp_image, int(timestamp_ms))
+        return _PoseProcessResultAdapter(result)
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._landmarker is not None:
+            self._landmarker.close()
+        return False
+
+
+def build_pose_runtime(args):
+    runtime = str(args.mediapipe_runtime).lower()
+    has_legacy = hasattr(mp, "solutions") and hasattr(mp.solutions, "pose")
+
+    if runtime == "legacy":
+        if not has_legacy:
+            raise RuntimeError(
+                "--mediapipe-runtime legacy was requested, but this mediapipe build has no mp.solutions.pose."
+            )
+        return LegacyPoseRuntime(args)
+
+    if runtime == "tasks":
+        return TasksPoseRuntime(args)
+
+    if has_legacy:
+        return LegacyPoseRuntime(args)
+    return TasksPoseRuntime(args)
 
 
 # =========================
@@ -899,6 +1058,22 @@ def main():
     ap.add_argument("--model-complexity", type=int, choices=[0, 1, 2], default=DEFAULT_MODEL_COMPLEXITY)
     ap.add_argument("--min-det-conf", type=float, default=DEFAULT_MIN_DET_CONF)
     ap.add_argument("--min-trk-conf", type=float, default=DEFAULT_MIN_TRK_CONF)
+    ap.add_argument(
+        "--mediapipe-runtime",
+        choices=["auto", "legacy", "tasks"],
+        default=DEFAULT_MEDIAPIPE_RUNTIME,
+        help="Select MediaPipe pose backend. auto prefers legacy when available, otherwise Tasks.",
+    )
+    ap.add_argument(
+        "--mediapipe-model-path",
+        default=None,
+        help="Optional path to a MediaPipe Pose Landmarker .task model for the Tasks runtime.",
+    )
+    ap.add_argument(
+        "--mediapipe-model-cache-dir",
+        default=DEFAULT_MEDIAPIPE_MODEL_CACHE_DIR,
+        help="Cache directory used for auto-downloaded MediaPipe Pose Landmarker models.",
+    )
 
     ap.add_argument("--trail", type=bool_flag, default=DEFAULT_TRAIL)
     ap.add_argument("--trail-alpha", type=float, default=DEFAULT_TRAIL_ALPHA)
@@ -991,6 +1166,7 @@ def main():
     print(f"   Resolution: {args.width}x{args.height} @ {args.fps} fps")
     print(f"   Start: {args.start}s, Duration: {args.duration if args.duration else 'full'}")
     print(f"   Model complexity: {args.model_complexity}")
+    print(f"   MediaPipe runtime: {args.mediapipe_runtime}")
     print(f"   Trail: {args.trail}, Scanlines: {args.scanlines}")
     if args.code_overlay:
         print(f"   Code overlay: ON ({args.code_overlay_order})")
@@ -1143,26 +1319,6 @@ def main():
     # --- Temporal buffers (optional) ---
     smear_buf = deque(maxlen=max(0, int(args.smear_frames))) if args.smear else None
 
-    # Handle MediaPipe Pose
-    try:
-        # Try legacy API (MediaPipe < 0.10)
-        mp_pose = mp.solutions.pose
-        use_new_mediapipe_api = False
-        pose_context = None
-    except (AttributeError, ImportError):
-        # New API detected but not easily usable in this script
-        # The new API requires downloading model files and has a different interface
-        print("\n❌ MediaPipe API Compatibility Issue:")
-        print("   This script was designed for MediaPipe with the legacy 'solutions' API.")
-        print("   Your system has a newer MediaPipe version without that API.")
-        print("\n   Options:")
-        print("   1. Reinstall older MediaPipe: pip install 'mediapipe<0.10'")
-        print("      (May not have pre-built wheels for your system)")
-        print("   2. Use Docker/WSL with a compatible version")
-        print("\n   Sorry for the inconvenience - the new MediaPipe API requires")
-        print("   significant refactoring of the pose detection code.")
-        raise RuntimeError("Incompatible MediaPipe version. Legacy solutions API not available.")
-    
     trail_buf = None
     prev_landmarks = None
     frame_idx = 0
@@ -1177,16 +1333,13 @@ def main():
     print("STEP 3: Processing Frames with Pose Detection")
     print(f"{'='*60}")
     print(f"🤖 Initializing MediaPipe Pose...")
-    
-    # Use legacy context manager
-    with mp_pose.Pose(
-        static_image_mode=False,
-        model_complexity=args.model_complexity,
-        enable_segmentation=False,
-        min_detection_confidence=args.min_det_conf,
-        min_tracking_confidence=args.min_trk_conf
-    ) as pose:
+
+    pose_runtime = build_pose_runtime(args)
+    with pose_runtime as pose:
         print("✓ Pose estimator initialized")
+        print(f"   Runtime: {pose.runtime_name}")
+        if getattr(pose, "model_path", None) is not None:
+            print(f"   Model: {pose.model_path}")
         print(f"\n🎞️  Processing frames...")
         
         last_progress = -1
@@ -1235,7 +1388,8 @@ def main():
 
             # Color conversion is expensive; reuse a pre-allocated RGB buffer.
             cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=rgb_frame)
-            res = pose.process(rgb_frame)
+            timestamp_ms = int(round(frame_idx * fps_inv * 1000.0))
+            res = pose.process(rgb_frame, timestamp_ms=timestamp_ms)
 
             # Trails buffer
             if args.trail:
@@ -1288,7 +1442,7 @@ def main():
                     color_mult = 1.0
 
                 # connections
-                for a, b in mp_pose.POSE_CONNECTIONS:
+                for a, b in iter_pose_connections(pose.pose_connections):
                     xa, ya = curr_landmarks[a]
                     xb, yb = curr_landmarks[b]
                     if args.velocity_color:

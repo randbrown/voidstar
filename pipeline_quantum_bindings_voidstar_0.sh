@@ -60,6 +60,29 @@ CPS_DEFAULT=0.5
 GLITCH_SECONDS_DEFAULT=2
 LOOP_SEAM_SECONDS_DEFAULT="2"
 
+# Divvy highlight defaults.
+DIVVY_SAMPLING_MODE_DEFAULT="groove"   # groove | uniform-spread | recursive-halves | minute-averages | n-averages
+DIVVY_VIDEO_ENCODER_DEFAULT="libx264"
+DIVVY_PRESET_DEFAULT="medium"
+DIVVY_GLITCH_STYLE_DEFAULT="vuwind"
+DIVVY_BPM_DEFAULT="0"
+DIVVY_GRID_BEATS_STEP_DEFAULT="1"
+DIVVY_TRANSIENT_SKEW_SECONDS_DEFAULT="0"
+DIVVY_TRUNCATE_TO_FULL_CLIPS_DEFAULT=0
+# Per-target clip sizing. Sample anchor is retained so switching away from groove stays easy.
+DIVVY_60S_SAMPLE_SECONDS_DEFAULT="14"
+DIVVY_60S_N_SEGMENTS_DEFAULT="4"
+DIVVY_60S_SAMPLE_ANCHOR_DEFAULT="start"
+DIVVY_180S_SAMPLE_SECONDS_DEFAULT="28"
+DIVVY_180S_N_SEGMENTS_DEFAULT="6"
+DIVVY_180S_SAMPLE_ANCHOR_DEFAULT="start"
+DIVVY_60T_SAMPLE_SECONDS_DEFAULT="14"
+DIVVY_60T_N_SEGMENTS_DEFAULT="4"
+DIVVY_60T_SAMPLE_ANCHOR_DEFAULT="end"
+DIVVY_180T_SAMPLE_SECONDS_DEFAULT="20"
+DIVVY_180T_N_SEGMENTS_DEFAULT="9"
+DIVVY_180T_SAMPLE_ANCHOR_DEFAULT="end"
+
 # Reels overlay stage controls.
 # Disabled by default here because reels_cv_overlay.py still expects the legacy
 # MediaPipe solutions API, while the active TouchDesigner/voidstar env has 0.10+.
@@ -124,8 +147,9 @@ TITLE_HOOK_LOGO_MOTION_TRACK_LINK_OPACITY_DEFAULT=0.72
 TITLE_HOOK_LOGO_MOTION_TRACK_REFRESH_DEFAULT=3
 TITLE_HOOK_LOGO_MOTION_TRACK_DECAY_DEFAULT=0.5
 TITLE_HOOK_LOGO_OPACITY_DEFAULT=0.2
-TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY_DEFAULT=0.28
+TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY_DEFAULT=0.06
 TITLE_HOOK_LOGO_GLOW_WHITE_DEFAULT=0
+TITLE_HOOK_LOGO_GLOW_COLOR_DEFAULT="7CFF41"
 TITLE_HOOK_BACKGROUND_DIM_DEFAULT=0.25
 TITLE_HOOK_TITLE_LAYER_DIM_DEFAULT=0.0
 TITLE_HOOK_TEXT_ALIGN_DEFAULT="left"
@@ -842,7 +866,7 @@ run_optional_title_hook_on_clip() {
     local args_sig
     local resolved_title
     resolved_title="${TITLE_HOOK_TITLE//hi60t/${title_token}}"
-    args_sig="duration=${hook_duration}|fade=${TITLE_HOOK_FADE_OUT_DURATION}|title=${resolved_title}|secondary=${TITLE_HOOK_SECONDARY_TEXT}|logo_alpha_threshold=${TITLE_HOOK_LOGO_ALPHA_THRESHOLD}|logo_intensity=${TITLE_HOOK_LOGO_INTENSITY}|logo_idle_wiggle=${TITLE_HOOK_LOGO_IDLE_WIGGLE}|logo_x=${TITLE_HOOK_LOGO_X_RATIO}|logo_y=${TITLE_HOOK_LOGO_Y_RATIO}|track_scale=${TITLE_HOOK_LOGO_MOTION_TRACK_SCALE}|track_radius=${TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS}|track_neighbors=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS}|track_min_distance=${TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE}|track_pad_px=${TITLE_HOOK_LOGO_MOTION_TRACK_PAD_PX}|track_link_opacity=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_OPACITY}|track_refresh=${TITLE_HOOK_LOGO_MOTION_TRACK_REFRESH}|track_decay=${TITLE_HOOK_LOGO_MOTION_TRACK_DECAY}|logo_opacity=${TITLE_HOOK_LOGO_OPACITY}|logo_rgb_shift_opacity=${TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY}|logo_glow_white=${TITLE_HOOK_LOGO_GLOW_WHITE}|background_dim=${TITLE_HOOK_BACKGROUND_DIM}|title_layer_dim=${TITLE_HOOK_TITLE_LAYER_DIM}|text_align=${TITLE_HOOK_TEXT_ALIGN}|title_jitter_audio_multiplier=${TITLE_HOOK_TITLE_JITTER_AUDIO_MULTIPLIER}|sparks=${TITLE_HOOK_SPARKS}|sparks_rate=${TITLE_HOOK_SPARKS_RATE}|sparks_motion_threshold=${TITLE_HOOK_SPARKS_MOTION_THRESHOLD}|sparks_opacity=${TITLE_HOOK_SPARKS_OPACITY}|token=${title_token}"
+    args_sig="duration=${hook_duration}|fade=${TITLE_HOOK_FADE_OUT_DURATION}|title=${resolved_title}|secondary=${TITLE_HOOK_SECONDARY_TEXT}|logo_alpha_threshold=${TITLE_HOOK_LOGO_ALPHA_THRESHOLD}|logo_intensity=${TITLE_HOOK_LOGO_INTENSITY}|logo_idle_wiggle=${TITLE_HOOK_LOGO_IDLE_WIGGLE}|logo_x=${TITLE_HOOK_LOGO_X_RATIO}|logo_y=${TITLE_HOOK_LOGO_Y_RATIO}|track_scale=${TITLE_HOOK_LOGO_MOTION_TRACK_SCALE}|track_radius=${TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS}|track_neighbors=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS}|track_min_distance=${TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE}|track_pad_px=${TITLE_HOOK_LOGO_MOTION_TRACK_PAD_PX}|track_link_opacity=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_OPACITY}|track_refresh=${TITLE_HOOK_LOGO_MOTION_TRACK_REFRESH}|track_decay=${TITLE_HOOK_LOGO_MOTION_TRACK_DECAY}|logo_opacity=${TITLE_HOOK_LOGO_OPACITY}|logo_rgb_shift_opacity=${TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY}|logo_glow_white=${TITLE_HOOK_LOGO_GLOW_WHITE}|logo_glow_color=${TITLE_HOOK_LOGO_GLOW_COLOR}|background_dim=${TITLE_HOOK_BACKGROUND_DIM}|title_layer_dim=${TITLE_HOOK_TITLE_LAYER_DIM}|text_align=${TITLE_HOOK_TEXT_ALIGN}|title_jitter_audio_multiplier=${TITLE_HOOK_TITLE_JITTER_AUDIO_MULTIPLIER}|sparks=${TITLE_HOOK_SPARKS}|sparks_rate=${TITLE_HOOK_SPARKS_RATE}|sparks_motion_threshold=${TITLE_HOOK_SPARKS_MOTION_THRESHOLD}|sparks_opacity=${TITLE_HOOK_SPARKS_OPACITY}|token=${title_token}"
 
     local titlehook_sig
     titlehook_sig="$(titlehook_cache_signature "$input_clip" "$TITLE_HOOK_LOGO" "$args_sig")"
@@ -879,6 +903,7 @@ run_optional_title_hook_on_clip() {
         --logo-motion-track-decay "$TITLE_HOOK_LOGO_MOTION_TRACK_DECAY" \
         --logo-opacity "$TITLE_HOOK_LOGO_OPACITY" \
         --logo-rgb-shift-opacity "$TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY" \
+        $( [[ -n "$TITLE_HOOK_LOGO_GLOW_COLOR" ]] && printf -- '--logo-glow-color %q ' "$TITLE_HOOK_LOGO_GLOW_COLOR" ) \
         --background-dim "$TITLE_HOOK_BACKGROUND_DIM" \
         --title-layer-dim "$TITLE_HOOK_TITLE_LAYER_DIM" \
         --text-align "$TITLE_HOOK_TEXT_ALIGN" \
@@ -897,7 +922,7 @@ run_optional_title_hook_on_clip() {
     echo "$target"
 }
 
-run_divvy_uniform_highlights() {
+run_divvy_highlights() {
     local output_path="$1"
     local target_seconds="$2"
     local sample_seconds="$3"
@@ -913,17 +938,29 @@ run_divvy_uniform_highlights() {
         cmd=(
             run_logged python3 "$DIVVY" highlights "$BASE_REELS_OVERLAY"
             "${HIGHLIGHTS_TIME_ARGS[@]}" --target-length-seconds "$target_seconds"
-            --video-encoder libx264 --preset medium --out-dir "$OUTDIR"
+            --video-encoder "$DIVVY_VIDEO_ENCODER" --preset "$DIVVY_PRESET" --out-dir "$OUTDIR"
             --output "$output_path"
-            --glitch-seconds "$glitch_try" --glitch-style vuwind --cps "$CPS" --loop-seam-seconds "$LOOP_SEAM_SECONDS"
-            --sampling-mode uniform-spread --sample-seconds "$sample_seconds" #--truncate-to-full-clips
+            --glitch-seconds "$glitch_try" --glitch-style "$DIVVY_GLITCH_STYLE" --cps "$CPS" --loop-seam-seconds "$LOOP_SEAM_SECONDS"
+            --sampling-mode "$DIVVY_SAMPLING_MODE"
         )
 
+        if [[ -n "$sample_seconds" ]]; then
+            cmd+=(--sample-seconds "$sample_seconds")
+        fi
         if [[ -n "$n_segments" ]]; then
             cmd+=(--n-segments "$n_segments")
         fi
         if [[ -n "$sample_anchor" ]]; then
             cmd+=(--sample-anchor "$sample_anchor")
+        fi
+        if [[ -n "$DIVVY_BPM" && "$DIVVY_BPM" != "0" && "$DIVVY_BPM" != "0.0" ]]; then
+            cmd+=(--bpm "$DIVVY_BPM" --grid-beats-step "$DIVVY_GRID_BEATS_STEP")
+        fi
+        if [[ -n "$DIVVY_TRANSIENT_SKEW_SECONDS" && "$DIVVY_TRANSIENT_SKEW_SECONDS" != "0" && "$DIVVY_TRANSIENT_SKEW_SECONDS" != "0.0" ]]; then
+            cmd+=(--transient-skew-seconds "$DIVVY_TRANSIENT_SKEW_SECONDS")
+        fi
+        if [[ "$DIVVY_TRUNCATE_TO_FULL_CLIPS" -eq 1 ]]; then
+            cmd+=(--truncate-to-full-clips)
         fi
 
         local err_file
@@ -973,7 +1010,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 ""
+    run_divvy_highlights "$divvy_dst" 60 "$DIVVY_60S_SAMPLE_SECONDS" "$DIVVY_60S_N_SEGMENTS" "$DIVVY_60S_SAMPLE_ANCHOR"
 
     local logo tag target
     logo="$LOGO_START"
@@ -1028,7 +1065,7 @@ run_180s_start() {
     echo "--- 180s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 20 9 ""
+    run_divvy_highlights "$divvy_dst" 180 "$DIVVY_180S_SAMPLE_SECONDS" "$DIVVY_180S_N_SEGMENTS" "$DIVVY_180S_SAMPLE_ANCHOR"
 
     local logo tag target
     logo="$LOGO_START"
@@ -1137,7 +1174,7 @@ run_60s_end() {
     echo "--- 60s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 10 6 "end"
+    run_divvy_highlights "$divvy_dst" 60 "$DIVVY_60T_SAMPLE_SECONDS" "$DIVVY_60T_N_SEGMENTS" "$DIVVY_60T_SAMPLE_ANCHOR"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1193,7 +1230,7 @@ run_180s_end() {
     echo "--- 180s highlight (END) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_180t_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 180 20 9 "end"
+    run_divvy_highlights "$divvy_dst" 180 "$DIVVY_180T_SAMPLE_SECONDS" "$DIVVY_180T_N_SEGMENTS" "$DIVVY_180T_SAMPLE_ANCHOR"
 
     local logo tag target
     logo="$LOGO_END"
@@ -1250,6 +1287,26 @@ main() {
     FORCE="$FORCE_DEFAULT"
     INPUT_VIDEO=""; OUTDIR=""
     START_SECONDS="$START_SECONDS_DEFAULT"; YOUTUBE_FULL_SECONDS="$YOUTUBE_FULL_SECONDS_DEFAULT"; DETECT_AUDIO_START_END="$DETECT_AUDIO_START_END_DEFAULT"; CPS="$CPS_DEFAULT"; GLITCH_SECONDS="$GLITCH_SECONDS_DEFAULT"; LOOP_SEAM_SECONDS="$LOOP_SEAM_SECONDS_DEFAULT"
+    DIVVY_SAMPLING_MODE="$DIVVY_SAMPLING_MODE_DEFAULT"
+    DIVVY_VIDEO_ENCODER="$DIVVY_VIDEO_ENCODER_DEFAULT"
+    DIVVY_PRESET="$DIVVY_PRESET_DEFAULT"
+    DIVVY_GLITCH_STYLE="$DIVVY_GLITCH_STYLE_DEFAULT"
+    DIVVY_BPM="$DIVVY_BPM_DEFAULT"
+    DIVVY_GRID_BEATS_STEP="$DIVVY_GRID_BEATS_STEP_DEFAULT"
+    DIVVY_TRANSIENT_SKEW_SECONDS="$DIVVY_TRANSIENT_SKEW_SECONDS_DEFAULT"
+    DIVVY_TRUNCATE_TO_FULL_CLIPS="$DIVVY_TRUNCATE_TO_FULL_CLIPS_DEFAULT"
+    DIVVY_60S_SAMPLE_SECONDS="$DIVVY_60S_SAMPLE_SECONDS_DEFAULT"
+    DIVVY_60S_N_SEGMENTS="$DIVVY_60S_N_SEGMENTS_DEFAULT"
+    DIVVY_60S_SAMPLE_ANCHOR="$DIVVY_60S_SAMPLE_ANCHOR_DEFAULT"
+    DIVVY_180S_SAMPLE_SECONDS="$DIVVY_180S_SAMPLE_SECONDS_DEFAULT"
+    DIVVY_180S_N_SEGMENTS="$DIVVY_180S_N_SEGMENTS_DEFAULT"
+    DIVVY_180S_SAMPLE_ANCHOR="$DIVVY_180S_SAMPLE_ANCHOR_DEFAULT"
+    DIVVY_60T_SAMPLE_SECONDS="$DIVVY_60T_SAMPLE_SECONDS_DEFAULT"
+    DIVVY_60T_N_SEGMENTS="$DIVVY_60T_N_SEGMENTS_DEFAULT"
+    DIVVY_60T_SAMPLE_ANCHOR="$DIVVY_60T_SAMPLE_ANCHOR_DEFAULT"
+    DIVVY_180T_SAMPLE_SECONDS="$DIVVY_180T_SAMPLE_SECONDS_DEFAULT"
+    DIVVY_180T_N_SEGMENTS="$DIVVY_180T_N_SEGMENTS_DEFAULT"
+    DIVVY_180T_SAMPLE_ANCHOR="$DIVVY_180T_SAMPLE_ANCHOR_DEFAULT"
     LOGO_START="$LOGO_START_DEFAULT"
     LOGO_END="$LOGO_END_DEFAULT"
     DVDLOGO_SCALE="$DVDLOGO_SCALE_DEFAULT"
@@ -1315,6 +1372,7 @@ main() {
     TITLE_HOOK_LOGO_OPACITY="$TITLE_HOOK_LOGO_OPACITY_DEFAULT"
     TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY="$TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY_DEFAULT"
     TITLE_HOOK_LOGO_GLOW_WHITE="$TITLE_HOOK_LOGO_GLOW_WHITE_DEFAULT"
+    TITLE_HOOK_LOGO_GLOW_COLOR="$TITLE_HOOK_LOGO_GLOW_COLOR_DEFAULT"
     TITLE_HOOK_BACKGROUND_DIM="$TITLE_HOOK_BACKGROUND_DIM_DEFAULT"
     TITLE_HOOK_TITLE_LAYER_DIM="$TITLE_HOOK_TITLE_LAYER_DIM_DEFAULT"
     TITLE_HOOK_TEXT_ALIGN="$TITLE_HOOK_TEXT_ALIGN_DEFAULT"
@@ -1437,6 +1495,7 @@ main() {
     echo "Out:   $OUTDIR"
     echo "Dur:   ${INPUT_DURATION_SECONDS}s"
     echo "Args:  start=${start_dbg}s full=${full_dbg}s detect_audio=${detect_dbg} cps=${CPS} glitch=${GLITCH_SECONDS}s loop_seam=${LOOP_SEAM_SECONDS}s"
+    echo "Divvy: mode=${DIVVY_SAMPLING_MODE} encoder=${DIVVY_VIDEO_ENCODER}/${DIVVY_PRESET} glitch_style=${DIVVY_GLITCH_STYLE} bpm=${DIVVY_BPM} grid_beats_step=${DIVVY_GRID_BEATS_STEP} transient_skew=${DIVVY_TRANSIENT_SKEW_SECONDS}s truncate_full=${DIVVY_TRUNCATE_TO_FULL_CLIPS}"
     echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} title_hook=${ENABLE_TITLE_HOOK_STAGE} title_hook_cache=${USE_TITLE_HOOK_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} jobs=${JOBS}"
     echo "Sync:  gdrive_copy=${ENABLE_GDRIVE_COPY} gdrive_outdir=${GDRIVE_OUTDIR:-unset}"
 

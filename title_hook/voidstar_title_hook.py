@@ -99,6 +99,13 @@ def clamp01(value: float) -> float:
     return float(max(0.0, min(1.0, value)))
 
 
+def parse_rgb_hex(value: str) -> tuple[int, int, int]:
+    text = value.strip().lstrip("#")
+    if len(text) != 6 or any(ch not in "0123456789abcdefABCDEF" for ch in text):
+        raise ValueError(f"Expected RRGGBB hex color, got: {value!r}")
+    return (int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16))
+
+
 def choose_encoder(src_codec: str) -> str:
     mapping = {
         "h264": "libx264",
@@ -1005,6 +1012,7 @@ def main() -> None:
     parser.add_argument("--logo-opacity", type=float, default=0.82, help="Base logo opacity")
     parser.add_argument("--logo-rgb-shift-opacity", type=float, default=0.22, help="Opacity for chromatic red-channel logo offset [0..1]")
     parser.add_argument("--logo-glow-white", action="store_true", help="Use neutral white glow for logo instead of channel-weighted tint")
+    parser.add_argument("--logo-glow-color", default="", help="Optional RRGGBB color for logo glow, overrides white/channel-weighted glow")
     parser.add_argument("--logo-alpha-threshold", type=float, default=0.18, help="Alpha cutoff [0..1] for logo content bounds (higher trims faint edges)")
     parser.add_argument("--logo-intensity", type=float, default=1.35, help="Logo effect intensity")
     parser.add_argument("--logo-idle-wiggle", type=float, default=0.012, help="Constant non-audio logo pulse amount (set 0 to disable)")
@@ -1162,6 +1170,12 @@ def main() -> None:
     title_max_height_ratio = float(np.clip(args.title_max_height_ratio, 0.08, 0.40))
     secondary_max_height_ratio = float(np.clip(args.secondary_max_height_ratio, 0.06, 0.45))
     logo_alpha_threshold = float(np.clip(args.logo_alpha_threshold, 0.0, 1.0))
+    logo_glow_color: tuple[int, int, int] | None = None
+    if args.logo_glow_color.strip():
+        try:
+            logo_glow_color = parse_rgb_hex(args.logo_glow_color)
+        except ValueError as exc:
+            die(str(exc))
 
     hook_sparks_prev_gray = None
     hook_sparks_prev_points = np.empty((0, 1, 2), dtype=np.float32)
@@ -1252,7 +1266,11 @@ def main() -> None:
 
                 if logo_scaled is not None:
                     glow = logo_scaled.copy()
-                    if args.logo_glow_white:
+                    if logo_glow_color is not None:
+                        glow[:, :, 0] = int(round(np.clip(logo_glow_color[2] * (0.86 + 0.34 * clamp01(audio_level)), 0.0, 255.0)))
+                        glow[:, :, 1] = int(round(np.clip(logo_glow_color[1] * (0.86 + 0.34 * clamp01(audio_level)), 0.0, 255.0)))
+                        glow[:, :, 2] = int(round(np.clip(logo_glow_color[0] * (0.86 + 0.34 * clamp01(audio_level)), 0.0, 255.0)))
+                    elif args.logo_glow_white:
                         white_level = int(round(np.clip(185.0 + (55.0 * clamp01(audio_level)), 0.0, 255.0)))
                         glow[:, :, 0] = white_level
                         glow[:, :, 1] = white_level
