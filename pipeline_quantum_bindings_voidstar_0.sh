@@ -61,7 +61,9 @@ GLITCH_SECONDS_DEFAULT=2
 LOOP_SEAM_SECONDS_DEFAULT="2"
 
 # Reels overlay stage controls.
-ENABLE_REELS_OVERLAY_STEP=1      # set 0 to bypass reels overlay completely
+# Disabled by default here because reels_cv_overlay.py still expects the legacy
+# MediaPipe solutions API, while the active TouchDesigner/voidstar env has 0.10+.
+ENABLE_REELS_OVERLAY_STEP=0      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
 REELS_CACHE_MODE_DEFAULT="base"  # base | per-target
 

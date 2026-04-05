@@ -61,14 +61,14 @@ GLITCH_SECONDS_DEFAULT=2
 LOOP_SEAM_SECONDS_DEFAULT="2"
 
 # Reels overlay stage controls.
-ENABLE_REELS_OVERLAY_STEP=0      # set 0 to bypass reels overlay completely
+ENABLE_REELS_OVERLAY_STEP=1      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
 REELS_CACHE_MODE_DEFAULT="base"  # base | per-target
 
 # Optional glitchfield stage that runs BEFORE reels overlay.
 ENABLE_PRE_REELS_GLITCHFIELD_STAGE=1
 USE_PRE_REELS_GLITCHFIELD_CACHE_DEFAULT=1
-PRE_REELS_GLITCHFIELD_PRESET="minimalist"   # minimalist | clean | gritty | chaos | custom
+PRE_REELS_GLITCHFIELD_PRESET="gritty"   # minimalist | clean | gritty | chaos | custom
 PRE_REELS_GLITCHFIELD_SEED=1337
 PRE_REELS_GLITCHFIELD_MIN_GATE_PERIOD=10
 PRE_REELS_GLITCHFIELD_CUSTOM_ARGS=""
@@ -76,9 +76,9 @@ PRE_REELS_GLITCHFIELD_CUSTOM_ARGS=""
 # Optional glitchfield stage (runs after divvy highlights, before dvdlogo).
 ENABLE_GLITCHFIELD_STAGE=0       # set 1 to enable
 USE_GLITCHFIELD_CACHE_DEFAULT=1  # if 1, reuse cached glitchfield base when up-to-date
-GLITCHFIELD_PRESET="minimalist"      # minimalist | clean | gritty | chaos | custom
+GLITCHFIELD_PRESET="gritty"      # minimalist | clean | gritty | chaos | custom
 GLITCHFIELD_SEED=1337
-GLITCHFIELD_MIN_GATE_PERIOD=11
+GLITCHFIELD_MIN_GATE_PERIOD=10
 GLITCHFIELD_CUSTOM_ARGS=""      # used when preset=custom
 
 # Optional particle sparks stage (runs after divvy highlights, before dvdlogo).
@@ -971,7 +971,7 @@ run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
 
-    run_divvy_uniform_highlights "$divvy_dst" 60 15 4 ""
+    run_divvy_uniform_highlights "$divvy_dst" 60 20 3 ""
 
     local logo tag target
     logo="$LOGO_START"
