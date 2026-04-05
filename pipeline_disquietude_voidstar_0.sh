@@ -84,7 +84,7 @@ DIVVY_180T_N_SEGMENTS_DEFAULT="9"
 DIVVY_180T_SAMPLE_ANCHOR_DEFAULT="end"
 
 # Reels overlay stage controls.
-ENABLE_REELS_OVERLAY_STEP=1      # set 0 to bypass reels overlay completely
+ENABLE_REELS_OVERLAY_STEP=0      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
 REELS_CACHE_MODE_DEFAULT="base"  # base | per-target
 

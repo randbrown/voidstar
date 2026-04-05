@@ -21,9 +21,15 @@ DEFAULT_OUT_W = None
 DEFAULT_OUT_H = None
 DEFAULT_FPS = 30.0
 
-DEFAULT_MODEL_COMPLEXITY = 2
+DEFAULT_MODEL_COMPLEXITY = 1
 DEFAULT_MIN_DET_CONF = 0.5
 DEFAULT_MIN_TRK_CONF = 0.5
+DEFAULT_POSE_INPUT_SCALE = 0.0
+DEFAULT_POSE_NUM_POSES = 1
+DEFAULT_POSE_SELECTION = "first"
+DEFAULT_POSE_MIN_AREA_RATIO = 0.0
+DEFAULT_POSE_REFRESH_FRAMES = 1
+DEFAULT_POSE_LANDMARK_SMOOTH = 0.0
 DEFAULT_MEDIAPIPE_RUNTIME = "auto"
 DEFAULT_MEDIAPIPE_MODEL_CACHE_DIR = str(Path.home() / ".cache" / "voidstar" / "mediapipe")
 
@@ -176,10 +182,73 @@ class _PoseLandmarkListAdapter:
         self.landmark = landmarks
 
 
+def pose_landmark_bbox_metrics(landmarks):
+    xs = [float(lm.x) for lm in landmarks]
+    ys = [float(lm.y) for lm in landmarks]
+    if not xs or not ys:
+        return None
+    min_x = max(0.0, min(xs))
+    max_x = min(1.0, max(xs))
+    min_y = max(0.0, min(ys))
+    max_y = min(1.0, max(ys))
+    width = max(0.0, max_x - min_x)
+    height = max(0.0, max_y - min_y)
+    area_ratio = width * height
+    center_x = (min_x + max_x) * 0.5
+    center_y = (min_y + max_y) * 0.5
+    center_dist_sq = ((center_x - 0.5) ** 2) + ((center_y - 0.5) ** 2)
+    return {
+        "area_ratio": area_ratio,
+        "center_dist_sq": center_dist_sq,
+    }
+
+
+def select_pose_landmarks(pose_landmarks, selection_mode: str, min_area_ratio: float):
+    if not pose_landmarks:
+        return None
+
+    selection_mode = (selection_mode or "first").lower()
+    min_area_ratio = max(0.0, float(min_area_ratio))
+    candidates = []
+
+    for idx, landmarks in enumerate(pose_landmarks):
+        metrics = pose_landmark_bbox_metrics(landmarks)
+        if metrics is None:
+            continue
+        if metrics["area_ratio"] < min_area_ratio:
+            continue
+        candidates.append((idx, landmarks, metrics))
+
+    if not candidates:
+        for idx, landmarks in enumerate(pose_landmarks):
+            metrics = pose_landmark_bbox_metrics(landmarks)
+            if metrics is not None:
+                candidates.append((idx, landmarks, metrics))
+
+    if not candidates:
+        return None
+
+    if selection_mode == "largest":
+        candidates.sort(key=lambda item: item[2]["area_ratio"], reverse=True)
+    elif selection_mode == "center":
+        candidates.sort(key=lambda item: item[2]["center_dist_sq"])
+    elif selection_mode == "largest-center":
+        candidates.sort(key=lambda item: (-item[2]["area_ratio"], item[2]["center_dist_sq"]))
+    else:
+        candidates.sort(key=lambda item: item[0])
+
+    return candidates[0][1]
+
+
 class _PoseProcessResultAdapter:
-    def __init__(self, result):
-        if result.pose_landmarks:
-            self.pose_landmarks = _PoseLandmarkListAdapter(result.pose_landmarks[0])
+    def __init__(self, result, selection_mode="first", min_area_ratio=0.0):
+        selected_landmarks = select_pose_landmarks(
+            result.pose_landmarks,
+            selection_mode=selection_mode,
+            min_area_ratio=min_area_ratio,
+        ) if getattr(result, "pose_landmarks", None) else None
+        if selected_landmarks:
+            self.pose_landmarks = _PoseLandmarkListAdapter(selected_landmarks)
         else:
             self.pose_landmarks = None
 
@@ -230,7 +299,7 @@ class TasksPoseRuntime:
         options = mp_vision.PoseLandmarkerOptions(
             base_options=base_options,
             running_mode=mp_vision.RunningMode.VIDEO,
-            num_poses=1,
+            num_poses=max(1, int(self.args.pose_num_poses)),
             min_pose_detection_confidence=self.args.min_det_conf,
             min_pose_presence_confidence=self.args.min_det_conf,
             min_tracking_confidence=self.args.min_trk_conf,
@@ -244,7 +313,11 @@ class TasksPoseRuntime:
     def process(self, rgb_frame, timestamp_ms):
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
         result = self._landmarker.detect_for_video(mp_image, int(timestamp_ms))
-        return _PoseProcessResultAdapter(result)
+        return _PoseProcessResultAdapter(
+            result,
+            selection_mode=self.args.pose_selection,
+            min_area_ratio=self.args.pose_min_area_ratio,
+        )
 
     def __exit__(self, exc_type, exc, tb):
         if self._landmarker is not None:
@@ -269,6 +342,28 @@ def build_pose_runtime(args):
     if has_legacy:
         return LegacyPoseRuntime(args)
     return TasksPoseRuntime(args)
+
+
+def resolve_pose_input_scale(args, pose_runtime_name: str) -> float:
+    requested = float(args.pose_input_scale)
+    if requested > 0.0:
+        return float(np.clip(requested, 0.1, 1.0))
+    if pose_runtime_name.startswith("tasks"):
+        return 0.33
+    return 1.0
+
+
+def smooth_landmarks(prev_landmarks, curr_landmarks, smooth_amount: float):
+    smooth = float(np.clip(smooth_amount, 0.0, 0.999))
+    if smooth <= 0.0 or prev_landmarks is None or len(prev_landmarks) != len(curr_landmarks):
+        return [(float(x), float(y)) for x, y in curr_landmarks]
+
+    keep = smooth
+    incoming = 1.0 - keep
+    smoothed = []
+    for (px, py), (cx, cy) in zip(prev_landmarks, curr_landmarks):
+        smoothed.append(((px * keep) + (cx * incoming), (py * keep) + (cy * incoming)))
+    return smoothed
 
 
 # =========================
@@ -405,6 +500,18 @@ def build_output_name(src: Path, args) -> Path:
     parts.append(f"mc{args.model_complexity}")
     parts.append(f"det{fmt_float(args.min_det_conf)}")
     parts.append(f"trk{fmt_float(args.min_trk_conf)}")
+    if args.pose_num_poses and int(args.pose_num_poses) > 1:
+        parts.append(f"np{int(args.pose_num_poses)}")
+    if args.pose_selection and args.pose_selection != "first":
+        parts.append(f"ps{args.pose_selection.replace('-', '')}")
+    if args.pose_min_area_ratio and float(args.pose_min_area_ratio) > 0:
+        parts.append(f"pma{fmt_float(args.pose_min_area_ratio)}")
+    if args.pose_input_scale and args.pose_input_scale > 0:
+        parts.append(f"pis{fmt_float(args.pose_input_scale)}")
+    if args.pose_refresh_frames and int(args.pose_refresh_frames) > 1:
+        parts.append(f"prf{int(args.pose_refresh_frames)}")
+    if args.pose_landmark_smooth and float(args.pose_landmark_smooth) > 0:
+        parts.append(f"pls{fmt_float(args.pose_landmark_smooth)}")
 
     # visuals
     parts.append(f"trail{int(args.trail)}")
@@ -1058,6 +1165,31 @@ def main():
     ap.add_argument("--model-complexity", type=int, choices=[0, 1, 2], default=DEFAULT_MODEL_COMPLEXITY)
     ap.add_argument("--min-det-conf", type=float, default=DEFAULT_MIN_DET_CONF)
     ap.add_argument("--min-trk-conf", type=float, default=DEFAULT_MIN_TRK_CONF)
+    ap.add_argument("--pose-num-poses", type=int, default=DEFAULT_POSE_NUM_POSES,
+                    help="Maximum number of poses to request from the Tasks runtime.")
+    ap.add_argument("--pose-selection", choices=["first", "largest", "center", "largest-center"],
+                    default=DEFAULT_POSE_SELECTION,
+                    help="How to choose a pose when multiple poses are detected.")
+    ap.add_argument("--pose-min-area-ratio", type=float, default=DEFAULT_POSE_MIN_AREA_RATIO,
+                    help="Ignore detected poses smaller than this normalized bounding-box area ratio when selecting a pose.")
+    ap.add_argument(
+        "--pose-input-scale",
+        type=float,
+        default=DEFAULT_POSE_INPUT_SCALE,
+        help="Downscale factor for pose inference only. 0 means auto: 0.33 for Tasks runtime, 1.0 for legacy.",
+    )
+    ap.add_argument(
+        "--pose-refresh-frames",
+        type=int,
+        default=DEFAULT_POSE_REFRESH_FRAMES,
+        help="Only run pose inference every N frames and reuse the last result between refreshes.",
+    )
+    ap.add_argument(
+        "--pose-landmark-smooth",
+        type=float,
+        default=DEFAULT_POSE_LANDMARK_SMOOTH,
+        help="Exponential smoothing for drawn landmark positions. 0 disables smoothing; higher values reduce jitter.",
+    )
     ap.add_argument(
         "--mediapipe-runtime",
         choices=["auto", "legacy", "tasks"],
@@ -1167,6 +1299,12 @@ def main():
     print(f"   Start: {args.start}s, Duration: {args.duration if args.duration else 'full'}")
     print(f"   Model complexity: {args.model_complexity}")
     print(f"   MediaPipe runtime: {args.mediapipe_runtime}")
+    print(f"   Pose num poses: {args.pose_num_poses}")
+    print(f"   Pose selection: {args.pose_selection}")
+    print(f"   Pose min area ratio: {args.pose_min_area_ratio}")
+    print(f"   Pose input scale: {args.pose_input_scale if args.pose_input_scale > 0 else 'auto'}")
+    print(f"   Pose refresh frames: {args.pose_refresh_frames}")
+    print(f"   Pose landmark smooth: {args.pose_landmark_smooth}")
     print(f"   Trail: {args.trail}, Scanlines: {args.scanlines}")
     if args.code_overlay:
         print(f"   Code overlay: ON ({args.code_overlay_order})")
@@ -1239,7 +1377,6 @@ def main():
         raise RuntimeError("Could not read source frame dimensions from CFR intermediate.")
 
     crop_x, crop_y, crop_w, crop_h = compute_reels_crop(src_w, src_h, args.width, args.height)
-    rgb_frame = np.empty((args.height, args.width, 3), dtype=np.uint8)
     
     print(f"✓ Video opened successfully")
     print(f"   Total frames to process: {frame_count}")
@@ -1320,7 +1457,9 @@ def main():
     smear_buf = deque(maxlen=max(0, int(args.smear_frames))) if args.smear else None
 
     trail_buf = None
-    prev_landmarks = None
+    prev_raw_landmarks = None
+    prev_smoothed_landmarks = None
+    last_pose_result = None
     frame_idx = 0
     start_time_full = float(args.start)
     
@@ -1336,10 +1475,18 @@ def main():
 
     pose_runtime = build_pose_runtime(args)
     with pose_runtime as pose:
+        pose_input_scale = resolve_pose_input_scale(args, pose.runtime_name)
+        pose_input_w = max(1, int(round(args.width * pose_input_scale)))
+        pose_input_h = max(1, int(round(args.height * pose_input_scale)))
+        pose_frame_bgr = None
+        if pose_input_w != args.width or pose_input_h != args.height:
+            pose_frame_bgr = np.empty((pose_input_h, pose_input_w, 3), dtype=np.uint8)
+        rgb_frame = np.empty((pose_input_h, pose_input_w, 3), dtype=np.uint8)
         print("✓ Pose estimator initialized")
         print(f"   Runtime: {pose.runtime_name}")
         if getattr(pose, "model_path", None) is not None:
             print(f"   Model: {pose.model_path}")
+        print(f"   Pose inference size: {pose_input_w}x{pose_input_h}")
         print(f"\n🎞️  Processing frames...")
         
         last_progress = -1
@@ -1348,6 +1495,9 @@ def main():
         beat_pulse_threshold = float(args.beat_pulse_threshold) if args.beat_sync else 0.0
         full_duration_inv = 1.0 / full_duration if full_duration > 0 else 0.0
         fps_inv = 1.0 / fps
+
+        pose_refresh_frames = max(1, int(args.pose_refresh_frames))
+        pose_landmark_smooth = float(np.clip(args.pose_landmark_smooth, 0.0, 0.999))
 
         while True:
             ret, frame = cap.read()
@@ -1386,10 +1536,18 @@ def main():
                 code_alpha_eff = float(args.code_alpha) * (1.0 + 0.15 * pulse)
                 frame = overlay_code(frame, code_img, yoff, alpha=code_alpha_eff)
 
-            # Color conversion is expensive; reuse a pre-allocated RGB buffer.
-            cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=rgb_frame)
-            timestamp_ms = int(round(frame_idx * fps_inv * 1000.0))
-            res = pose.process(rgb_frame, timestamp_ms=timestamp_ms)
+            if pose_frame_bgr is not None:
+                cv2.resize(frame, (pose_input_w, pose_input_h), dst=pose_frame_bgr, interpolation=cv2.INTER_AREA)
+            else:
+                pose_frame_bgr = frame
+
+            should_refresh_pose = last_pose_result is None or (frame_idx % pose_refresh_frames == 0)
+            if should_refresh_pose:
+                # Color conversion is expensive; reuse a pre-allocated RGB buffer.
+                cv2.cvtColor(pose_frame_bgr, cv2.COLOR_BGR2RGB, dst=rgb_frame)
+                timestamp_ms = int(round(frame_idx * fps_inv * 1000.0))
+                last_pose_result = pose.process(rgb_frame, timestamp_ms=timestamp_ms)
+            res = last_pose_result
 
             # Trails buffer
             if args.trail:
@@ -1417,11 +1575,14 @@ def main():
                 for i, lm in enumerate(res.pose_landmarks.landmark):
                     x, y = int(lm.x * w), int(lm.y * h)
                     curr_landmarks.append((x, y))
-                    if prev_landmarks:
-                        px, py = prev_landmarks[i]
+                    if prev_raw_landmarks:
+                        px, py = prev_raw_landmarks[i]
                         velocities[i] = ((x - px) ** 2 + (y - py) ** 2) ** 0.5 * fps
                     else:
                         velocities[i] = 0.0
+
+                smoothed_landmarks = smooth_landmarks(prev_smoothed_landmarks, curr_landmarks, pose_landmark_smooth)
+                draw_landmarks = [(int(round(x)), int(round(y))) for x, y in smoothed_landmarks]
 
                 # Choose draw targets
                 # Lines go to trail buffer (if enabled) else to frame
@@ -1443,8 +1604,8 @@ def main():
 
                 # connections
                 for a, b in iter_pose_connections(pose.pose_connections):
-                    xa, ya = curr_landmarks[a]
-                    xb, yb = curr_landmarks[b]
+                    xa, ya = draw_landmarks[a]
+                    xb, yb = draw_landmarks[b]
                     if args.velocity_color:
                         color = velocity_to_color(max(velocities[a], velocities[b]), color_mult=color_mult)
                     else:
@@ -1457,7 +1618,7 @@ def main():
 
                 # joints when not lines-only
                 if not args.trail_lines_only:
-                    for i, (x, y) in enumerate(curr_landmarks):
+                    for i, (x, y) in enumerate(draw_landmarks):
                         if args.velocity_color:
                             color = velocity_to_color(velocities[i], color_mult=color_mult)
                         else:
@@ -1468,14 +1629,18 @@ def main():
 
                 # ids on the main frame (not on trail buffer)
                 if args.draw_ids:
-                    for i, (x, y) in enumerate(curr_landmarks):
+                    for i, (x, y) in enumerate(draw_landmarks):
                         if args.velocity_color:
                             color = velocity_to_color(velocities[i], color_mult=color_mult)
                         else:
                             color = args.overlay_color
                         draw_landmark_id(frame, x, y, i, color)
 
-                prev_landmarks = curr_landmarks
+                prev_raw_landmarks = curr_landmarks
+                prev_smoothed_landmarks = smoothed_landmarks
+            else:
+                prev_raw_landmarks = None
+                prev_smoothed_landmarks = None
 
             # Composite trail (optionally through pose-only smear)
             if args.trail and trail_buf is not None:
