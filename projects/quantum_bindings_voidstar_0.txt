@@ -1,0 +1,19 @@
+// original unprocessed recording
+// "quantum_bindings" @by voidstar(randbrown)
+quantum_bindings_voidstar_0.mp4
+#livecoding #pedalsteel #strudel #touchdesigner #opencvpython 
+
+// hi60s
+// "quantum_bindings (hi60s)" @by voidstar(randbrown)
+quantum_bindings_voidstar_0_hi60s.mp4
+#livecoding #pedalsteel #strudel #touchdesigner #opencvpython 
+
+// hi180s
+// "quantum_bindings (hi180s)" @by voidstar(randbrown)
+quantum_bindings_voidstar_0_hi180s.mp4
+#livecoding #pedalsteel #strudel #touchdesigner #opencvpython 
+
+// full
+// "quantum_bindings (full)" @by voidstar(randbrown)
+quantum_bindings_voidstar_0_full.mp4
+#livecoding #pedalsteel #strudel #touchdesigner #opencvpython
