@@ -51,7 +51,7 @@ OUTDIR_DEFAULT="~/WinVideos/quantum_bindings_voidstar_0"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
 # Quantum bindings shorter divvy targets sample from 8 seconds onward.
-START_SECONDS_DEFAULT="8"
+START_SECONDS_DEFAULT="17"
 YOUTUBE_FULL_SECONDS_DEFAULT=""
 DETECT_AUDIO_START_END_DEFAULT=0
 
@@ -61,7 +61,7 @@ GLITCH_SECONDS_DEFAULT=2
 LOOP_SEAM_SECONDS_DEFAULT="2"
 
 # Divvy highlight defaults.
-DIVVY_SAMPLING_MODE_DEFAULT="groove"   # groove | uniform-spread | recursive-halves | minute-averages | n-averages
+DIVVY_SAMPLING_MODE_DEFAULT="uniform-spread"   # groove | uniform-spread | recursive-halves | minute-averages | n-averages
 DIVVY_VIDEO_ENCODER_DEFAULT="libx264"
 DIVVY_PRESET_DEFAULT="medium"
 DIVVY_GLITCH_STYLE_DEFAULT="vuwind"
@@ -84,11 +84,24 @@ DIVVY_180T_N_SEGMENTS_DEFAULT="9"
 DIVVY_180T_SAMPLE_ANCHOR_DEFAULT="end"
 
 # Reels overlay stage controls.
-# Disabled by default here because reels_cv_overlay.py still expects the legacy
-# MediaPipe solutions API, while the active TouchDesigner/voidstar env has 0.10+.
 ENABLE_REELS_OVERLAY_STEP=0      # set 0 to bypass reels overlay completely
 USE_REELS_CACHE_DEFAULT=1        # if 1, reuse cached base overlay when up-to-date
 REELS_CACHE_MODE_DEFAULT="base"  # base | per-target
+REELS_MIN_DET_CONF_DEFAULT="0.05"
+REELS_MIN_TRK_CONF_DEFAULT="0.05"
+REELS_MODEL_COMPLEXITY_DEFAULT="1"
+REELS_POSE_INPUT_SCALE_DEFAULT="0"
+REELS_POSE_REFRESH_FRAMES_DEFAULT="1"
+REELS_POSE_LANDMARK_SMOOTH_DEFAULT="0.0"
+REELS_DRAW_IDS_DEFAULT=0
+REELS_SMEAR_DEFAULT=0
+REELS_SMEAR_FRAMES_DEFAULT="17"
+REELS_SMEAR_DECAY_DEFAULT="0.99"
+REELS_TRAIL_DEFAULT=0
+REELS_TRAIL_ALPHA_DEFAULT=".999"
+REELS_BEAT_SYNC_DEFAULT=1
+REELS_VELOCITY_COLOR_DEFAULT=0
+REELS_VELOCITY_COLOR_MULT_DEFAULT="10"
 
 # Optional glitchfield stage that runs BEFORE reels overlay.
 ENABLE_PRE_REELS_GLITCHFIELD_STAGE=1
@@ -464,6 +477,41 @@ build_highlights_time_args() {
     fi
 }
 
+bool_to_python() {
+    local value="$1"
+    if [[ "$value" -eq 1 ]]; then
+        echo true
+    else
+        echo false
+    fi
+}
+
+build_reels_cli_args() {
+    REELS_CLI_ARGS=(
+        --min-det-conf "$REELS_MIN_DET_CONF"
+        --min-trk-conf "$REELS_MIN_TRK_CONF"
+        --model-complexity "$REELS_MODEL_COMPLEXITY"
+        --pose-input-scale "$REELS_POSE_INPUT_SCALE"
+        --pose-refresh-frames "$REELS_POSE_REFRESH_FRAMES"
+        --pose-landmark-smooth "$REELS_POSE_LANDMARK_SMOOTH"
+        --draw-ids "$(bool_to_python "$REELS_DRAW_IDS")"
+        --smear "$(bool_to_python "$REELS_SMEAR")"
+        --smear-frames "$REELS_SMEAR_FRAMES"
+        --smear-decay "$REELS_SMEAR_DECAY"
+        --trail "$(bool_to_python "$REELS_TRAIL")"
+        --trail-alpha "$REELS_TRAIL_ALPHA"
+        --beat-sync "$(bool_to_python "$REELS_BEAT_SYNC")"
+        --velocity-color "$(bool_to_python "$REELS_VELOCITY_COLOR")"
+        --velocity-color-mult "$REELS_VELOCITY_COLOR_MULT"
+    )
+}
+
+reels_cache_signature() {
+    local cache_prefix="$1"
+    local input_clip="$2"
+    echo "${cache_prefix}|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${REELS_OVERLAY}|script_fp=$(file_fingerprint "$REELS_OVERLAY")|min_det=${REELS_MIN_DET_CONF}|min_trk=${REELS_MIN_TRK_CONF}|model_complexity=${REELS_MODEL_COMPLEXITY}|pose_input_scale=${REELS_POSE_INPUT_SCALE}|pose_refresh_frames=${REELS_POSE_REFRESH_FRAMES}|pose_landmark_smooth=${REELS_POSE_LANDMARK_SMOOTH}|draw_ids=${REELS_DRAW_IDS}|smear=${REELS_SMEAR}|smear_frames=${REELS_SMEAR_FRAMES}|smear_decay=${REELS_SMEAR_DECAY}|trail=${REELS_TRAIL}|trail_alpha=${REELS_TRAIL_ALPHA}|beat_sync=${REELS_BEAT_SYNC}|velocity_color=${REELS_VELOCITY_COLOR}|velocity_color_mult=${REELS_VELOCITY_COLOR_MULT}"
+}
+
 # ----------------------------
 # Parallel job control (optional)
 # ----------------------------
@@ -487,7 +535,8 @@ build_base_reels_overlay() {
     local target="$BASE_REELS_OVERLAY"
     local reels_cache_sig
     local source_video="${REELS_INPUT_VIDEO:-$INPUT_VIDEO}"
-    reels_cache_sig="reels|input=${source_video}|input_fp=$(file_fingerprint "$source_video")|script=${REELS_OVERLAY}|script_fp=$(file_fingerprint "$REELS_OVERLAY")|min_det=0.05|min_trk=0.05|draw_ids=true|smear=true|smear_frames=17|smear_decay=0.99|trail=true|trail_alpha=.999|beat_sync=true|velocity_color=true|velocity_color_mult=10"
+    build_reels_cli_args
+    reels_cache_sig="$(reels_cache_signature reels "$source_video")"
     if [[ "$USE_REELS_CACHE" -eq 1 ]]; then
         should_rebuild "$target" --dep "$source_video" --dep "$REELS_OVERLAY" --sig "$reels_cache_sig" || return 0
     else
@@ -495,10 +544,7 @@ build_base_reels_overlay() {
     fi
 
     run_logged python3 "$REELS_OVERLAY" "$source_video" \
-        --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
-        --smear true --smear-frames 17 --smear-decay 0.99 \
-        --trail true --trail-alpha .999 --beat-sync true \
-        --velocity-color true --velocity-color-mult 10 \
+        "${REELS_CLI_ARGS[@]}" \
         --output "$target"
 
     write_cache_signature "$target" "$reels_cache_sig"
@@ -518,7 +564,8 @@ run_optional_reels_overlay_on_clip() {
     echo "--- Optional per-target reels overlay cache on ${stage_label} ---" >&2
 
     local reels_cache_sig
-    reels_cache_sig="reels_per_target|input=${input_clip}|input_fp=$(file_fingerprint "$input_clip")|script=${REELS_OVERLAY}|script_fp=$(file_fingerprint "$REELS_OVERLAY")|min_det=0.05|min_trk=0.05|draw_ids=true|smear=true|smear_frames=17|smear_decay=0.99|trail=true|trail_alpha=.999|beat_sync=true|velocity_color=true|velocity_color_mult=10"
+    build_reels_cli_args
+    reels_cache_sig="$(reels_cache_signature reels_per_target "$input_clip")"
 
     if [[ "$USE_REELS_CACHE" -eq 1 ]]; then
         should_rebuild "$target" --dep "$input_clip" --dep "$REELS_OVERLAY" --sig "$reels_cache_sig" || {
@@ -531,10 +578,7 @@ run_optional_reels_overlay_on_clip() {
     fi
 
     run_logged python3 "$REELS_OVERLAY" "$input_clip" \
-        --min-det-conf 0.05 --min-trk-conf 0.05 --draw-ids true \
-        --smear true --smear-frames 17 --smear-decay 0.99 \
-        --trail true --trail-alpha .999 --beat-sync true \
-        --velocity-color true --velocity-color-mult 10 \
+        "${REELS_CLI_ARGS[@]}" \
         --output "$target" \
         1>&2
 
@@ -1332,6 +1376,21 @@ main() {
     DVDLOGO_START_Y="$DVDLOGO_START_Y_DEFAULT"
     USE_REELS_CACHE="$USE_REELS_CACHE_DEFAULT"
     REELS_CACHE_MODE="$REELS_CACHE_MODE_DEFAULT"
+    REELS_MIN_DET_CONF="$REELS_MIN_DET_CONF_DEFAULT"
+    REELS_MIN_TRK_CONF="$REELS_MIN_TRK_CONF_DEFAULT"
+    REELS_MODEL_COMPLEXITY="$REELS_MODEL_COMPLEXITY_DEFAULT"
+    REELS_POSE_INPUT_SCALE="$REELS_POSE_INPUT_SCALE_DEFAULT"
+    REELS_POSE_REFRESH_FRAMES="$REELS_POSE_REFRESH_FRAMES_DEFAULT"
+    REELS_POSE_LANDMARK_SMOOTH="$REELS_POSE_LANDMARK_SMOOTH_DEFAULT"
+    REELS_DRAW_IDS="$REELS_DRAW_IDS_DEFAULT"
+    REELS_SMEAR="$REELS_SMEAR_DEFAULT"
+    REELS_SMEAR_FRAMES="$REELS_SMEAR_FRAMES_DEFAULT"
+    REELS_SMEAR_DECAY="$REELS_SMEAR_DECAY_DEFAULT"
+    REELS_TRAIL="$REELS_TRAIL_DEFAULT"
+    REELS_TRAIL_ALPHA="$REELS_TRAIL_ALPHA_DEFAULT"
+    REELS_BEAT_SYNC="$REELS_BEAT_SYNC_DEFAULT"
+    REELS_VELOCITY_COLOR="$REELS_VELOCITY_COLOR_DEFAULT"
+    REELS_VELOCITY_COLOR_MULT="$REELS_VELOCITY_COLOR_MULT_DEFAULT"
     USE_PRE_REELS_GLITCHFIELD_CACHE="$USE_PRE_REELS_GLITCHFIELD_CACHE_DEFAULT"
     USE_GLITCHFIELD_CACHE="$USE_GLITCHFIELD_CACHE_DEFAULT"
     USE_PARTICLE_SPARKS_CACHE="$USE_PARTICLE_SPARKS_CACHE_DEFAULT"
@@ -1400,6 +1459,10 @@ main() {
             --skip-reels-overlay) ENABLE_REELS_OVERLAY_STEP=0; shift ;;
             --use-reels-overlay) ENABLE_REELS_OVERLAY_STEP=1; shift ;;
             --reels-cache-mode) REELS_CACHE_MODE="$2"; shift 2 ;;
+            --reels-model-complexity) REELS_MODEL_COMPLEXITY="$2"; shift 2 ;;
+            --reels-pose-input-scale) REELS_POSE_INPUT_SCALE="$2"; shift 2 ;;
+            --reels-pose-refresh-frames) REELS_POSE_REFRESH_FRAMES="$2"; shift 2 ;;
+            --reels-pose-landmark-smooth) REELS_POSE_LANDMARK_SMOOTH="$2"; shift 2 ;;
             --no-pre-reels-glitchfield) ENABLE_PRE_REELS_GLITCHFIELD_STAGE=0; shift ;;
             --pre-reels-glitchfield-preset) PRE_REELS_GLITCHFIELD_PRESET="$2"; shift 2 ;;
             --pre-reels-glitchfield-seed) PRE_REELS_GLITCHFIELD_SEED="$2"; shift 2 ;;
@@ -1496,7 +1559,7 @@ main() {
     echo "Dur:   ${INPUT_DURATION_SECONDS}s"
     echo "Args:  start=${start_dbg}s full=${full_dbg}s detect_audio=${detect_dbg} cps=${CPS} glitch=${GLITCH_SECONDS}s loop_seam=${LOOP_SEAM_SECONDS}s"
     echo "Divvy: mode=${DIVVY_SAMPLING_MODE} encoder=${DIVVY_VIDEO_ENCODER}/${DIVVY_PRESET} glitch_style=${DIVVY_GLITCH_STYLE} bpm=${DIVVY_BPM} grid_beats_step=${DIVVY_GRID_BEATS_STEP} transient_skew=${DIVVY_TRANSIENT_SKEW_SECONDS}s truncate_full=${DIVVY_TRUNCATE_TO_FULL_CLIPS}"
-    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} title_hook=${ENABLE_TITLE_HOOK_STAGE} title_hook_cache=${USE_TITLE_HOOK_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} jobs=${JOBS}"
+    echo "Perf:  pre_reels_glitchfield=${ENABLE_PRE_REELS_GLITCHFIELD_STAGE} pre_reels_glitchfield_cache=${USE_PRE_REELS_GLITCHFIELD_CACHE} reels_overlay=${ENABLE_REELS_OVERLAY_STEP} reels_cache=${USE_REELS_CACHE} reels_cache_mode=${REELS_CACHE_MODE} reels_mc=${REELS_MODEL_COMPLEXITY} reels_pose_scale=${REELS_POSE_INPUT_SCALE} reels_refresh=${REELS_POSE_REFRESH_FRAMES} reels_smooth=${REELS_POSE_LANDMARK_SMOOTH} reels_draw_ids=${REELS_DRAW_IDS} reels_smear=${REELS_SMEAR} reels_trail=${REELS_TRAIL} particle_sparks=${ENABLE_PARTICLE_SPARKS_STAGE} particle_sparks_cache=${USE_PARTICLE_SPARKS_CACHE} particle_sparks_color_mode=${PARTICLE_SPARKS_COLOR_MODE} title_hook=${ENABLE_TITLE_HOOK_STAGE} title_hook_cache=${USE_TITLE_HOOK_CACHE} glitchfield=${ENABLE_GLITCHFIELD_STAGE} glitchfield_cache=${USE_GLITCHFIELD_CACHE} jobs=${JOBS}"
     echo "Sync:  gdrive_copy=${ENABLE_GDRIVE_COPY} gdrive_outdir=${GDRIVE_OUTDIR:-unset}"
 
     PROJECT_ROOT="/home/$USER/code/voidstar"
