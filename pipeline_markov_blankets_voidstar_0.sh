@@ -39,10 +39,10 @@ set -euo pipefail
 PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
-RUN_60S_START=1
+RUN_60S_START=0
 RUN_180S_START=0
 RUN_60S_END=1
-RUN_180S_END=0
+RUN_180S_END=1
 RUN_FULL=1
 
 # Input/output defaults.
