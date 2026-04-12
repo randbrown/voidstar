@@ -263,10 +263,11 @@ initialize_gdrive_mount_once() {
         fi
     fi
 
-    # If mounted but stale/bad, lazy-unmount it (requires sudo).
-    if mountpoint -q "$mnt" && ! ls "$mnt" >/dev/null 2>&1; then
-        sudo umount -l "$mnt" || true
-    fi
+    # Always attempt a lazy-unmount of any stale/dead entry before remounting.
+    # With a dead drvfs mount, mountpoint -q returns non-zero so the old
+    # "mountpoint -q && ! ls" guard never fired — causing mount to fail with
+    # "already mounted". Unconditional umount -l (with || true) is safe.
+    sudo umount -l "$mnt" 2>/dev/null || true
 
     # Mount if not currently mounted.
     if ! mountpoint -q "$mnt"; then
