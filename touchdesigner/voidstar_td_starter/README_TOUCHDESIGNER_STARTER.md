@@ -5,6 +5,7 @@ This folder gives you a practical starting point to combine your Voidstar script
 ## What is included
 
 - `build_voidstar_project.py`: TouchDesigner Text DAT script that generates a starter network in `/project1`.
+- `build_blackhole_project.py`: TouchDesigner Text DAT script that generates an audio-reactive 3D black hole simulation network in `/project1/blackhole_live`.
 - `voidstar_post_bridge.py`: Offline post-process bridge that wraps your existing scripts:
   - `dvd_logo/voidstar_dvd_logo.py`
   - `glitchfield/glitchfield.py`
@@ -44,6 +45,38 @@ Workflow:
 5. Save project as `voidstar_starter.toe`.
 
 If build fails, open `/project1/voidstar_build_log` and copy the full traceback text directly from that DAT.
+
+## Black hole simulation
+
+`build_blackhole_project.py` creates `/project1/blackhole_live`, a self-contained 3D scene:
+
+| Operator | Role |
+|---|---|
+| `geo_event_horizon` | Black sphere — radius pulses with audio amplitude |
+| `geo_disc` | Torus SOP with animated noise turbulence — colour brightens orange→white-hot |
+| `geo_particles` | Circle SOP ring (240 pts) with spiral noise — rendered as point sprites |
+| `cam` | Elevated angled camera (Ty 7, Tz 14, Rx −26) |
+| `light_key` | Warm key light (off-axis upper right) |
+| `light_fill` | Cool fill light (opposite side, low intensity) |
+| `render1` | 1920×1080 render, black background |
+| `feedback1` + `comp_fb` | Trail accumulation loop — decay rate driven by audio |
+| `displace_lens` | Gravitational lensing warp via animated `noise_warp` |
+| `blur_glow` | Bloom corona — radius driven by audio |
+| `out1` | Final output |
+
+**Audio routing** (same switch pattern as the starter):
+
+```
+audio_loopback  ─┐
+                  ├→ audio_live_merge → audio_src_switch[0]
+audio_instrument ─┘                                        │
+                                                           ├→ analyze → math → filter → audio_env
+audio_file ─────────────────────────→ audio_src_switch[1] ─┘
+```
+
+Set `audio_src_switch.par.Index = 0` for live, `1` for file.  Run `audio_diag` DAT to verify levels.
+
+**Kinect / hand interaction** — not wired by default.  Add a `kinectCHOP` and route hand position channels into `cam.par.Tx.expr` / `cam.par.Ty.expr` to move the viewpoint with your hand.
 
 ## Audio reactivity architecture (robust for your goals)
 

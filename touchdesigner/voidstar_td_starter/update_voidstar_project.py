@@ -1,71 +1,50 @@
-"""
-TouchDesigner INCREMENTAL updater for Voidstar network.
+﻿"""
+TouchDesigner project creator — Voidstar Black Hole Simulation.
 
-Unlike build_voidstar_project.py (full clean rebuild), this script
-adds or updates specific elements without destroying manually
-customised nodes or parameters.
+Audio-reactive 3D black hole with:
+  - Event horizon   : pulsing black sphere (radius driven by audio)
+  - Accretion disc  : torus SOP with animated noise displacement + emissive material
+  - Infalling matter: circle SOP ring with spiral noise — rendered as point particles
+  - Camera + lights + renderTOP 3D pipeline
+  - Feedback trail accumulation (slower decay on louder audio = more vivid trails)
+  - Gravitational lensing warp (Displace TOP driven by animated noise)
+  - Bloom / glow (Blur TOP — radius driven by audio)
+  - Audio input chain: live (loopback + instrument) OR audio file, switchable at runtime
 
-How to use inside TouchDesigner:
-1) Create (or reuse) a Text DAT in /project1 — e.g. "voidstar_updater".
-2) Point its File parameter at this script (or paste it in).
-3) Toggle the UPDATE_* flags below to choose what to apply.
-4) Click Run Script.
+Usage inside TouchDesigner
+--------------------------
+1. Create a Text DAT in /project1.
+2. Paste or load this file into it.
+3. Right-click the DAT → Run Script  (or click the Run button).
+4. Save project as a .toe.
 
-Design principles:
-- Nodes that already exist are reused, never destroyed.
-- Parameters are only overwritten when the update section *explicitly*
-  asks for it — your manual tweaks survive by default.
-- New nodes are created and wired into the chain at the right place.
-- Each update section is an independent function you can enable/disable.
+Audio switch
+------------
+  audio_src_switch  Index = 0  → live inputs  (loopback + instrument merged)
+  audio_src_switch  Index = 1  → audio_file   (set the File param on that CHOP)
+
+Audio interfaces
+----------------
+  audio_loopback   : software / system audio bus (default 2-channel)
+  audio_instrument : external interface / instrument input
+
+Kinect
+------
+  Not wired by default.  To add hand-position control, append a kinectCHOP and
+  route its x/y channels into cam.Tx / cam.Ty expressions.
+
+Clean rebuild
+-------------
+  Set CLEAN_REBUILD = True (below) to destroy and recreate the network on each run.
+  Set to False to preserve any manual edits you added inside blackhole_live.
 """
 
 import traceback
 
-# ── LIVE COMP PATH ──────────────────────────────────────────────────
-LIVE_PATH = "/project1/voidstar_live"
-
-# ── TOGGLE UPDATE SECTIONS ──────────────────────────────────────────
-# Set True for the sections you want to apply on this run.
-
-UPDATE_CAM_ROTATION      = False   # change cam_rotate angle (Flip TOP)
-UPDATE_TITLE_TEXT        = False   # change title_hook text content
-UPDATE_LOGO_PATH         = False   # change dvdlogo_png file path
-ADD_COLOUR_CORRECT       = False   # insert a Colour TOP after level_drive
-FIX_OVER_TOPS            = False   # fix logo_over / title_over compositing (switch to Composite TOP)
-ADD_AUDIO_REACTIVITY     = False   # bind audio_env to visual parameters (already applied)
-ADD_EDGE_OVERLAY         = True    # audio-reactive edge overlay (glitchy flash)
-ADD_LOGO_PULSE           = True    # audio-reactive logo scale pulsing
-ADD_POSE_OVERLAY         = False   # MediaPipe pose skeleton overlay (Script TOP)
-ADD_POINT_TRACK          = False   # optical-flow constellation overlay (Script TOP)
-PROBE_PARAMS             = False   # print all parameter names for key nodes (diagnostic)
+CLEAN_REBUILD = True
 
 
-# ── UPDATE PARAMETERS ───────────────────────────────────────────────
-# Only relevant when the matching UPDATE_* flag is True.
-
-# Audio reactivity multipliers (tweak these to taste).
-# The envelope from audio_env is typically 0.0 – 0.01 range,
-# so large multipliers are needed for visible effect.
-AUDIO_GAMMA_MULT    = 300.0     # gamma   = 1.0  + min(2.5,  env * THIS)
-AUDIO_DISPLACE_MULT = 1200.0    # weight  = 0.01 + min(0.8,  env * THIS)
-AUDIO_BLUR_MULT     = 12000.0   # blur    = 1.0  + min(120,  env * THIS)
-AUDIO_NOISE_TX_MULT = 50.0      # noise translate X = env * THIS  (scrolls noise with beats)
-AUDIO_NOISE_TY_MULT = 50.0      # noise translate Y = env * THIS
-
-# Edge overlay
-AUDIO_EDGE_OPACITY_MULT = 800.0   # edge opacity = min(0.85, env * THIS)
-
-# Logo pulse
-LOGO_BASE_SCALE   = 0.24           # must match your transform1 sx/sy
-LOGO_PULSE_MULT   = 120.0          # logo scale += min(0.08, env * THIS)
-
-CAM_ROTATION_INDEX = 3          # Flip TOP menu: 0=0°  1=90°  2=180°  3=270°
-
-TITLE_TEXT         = "VOIDSTAR LIVE"
-LOGO_FILE          = "../dvd_logo/voidstar_logo_0.png"
-
-
-# ── HELPERS (same as build script) ──────────────────────────────────
+# ─── helpers (shared pattern with build_voidstar_project.py) ──────────────────
 
 def _safe_set_par(op_obj, par_name, value):
     p = getattr(op_obj.par, par_name, None)
@@ -106,7 +85,7 @@ def _safe_set_menu_any(op_obj, par_names, token_candidates):
         if p is None:
             continue
         try:
-            names = [str(x).lower() for x in getattr(p, "menuNames", [])]
+            names  = [str(x).lower() for x in getattr(p, "menuNames",  [])]
             labels = [str(x).lower() for x in getattr(p, "menuLabels", [])]
             for token in token_candidates:
                 t = str(token).lower()
@@ -138,7 +117,11 @@ def _create_or_get_any(parent, type_names, name):
             return parent.create(n, name)
         except Exception:
             pass
-    raise RuntimeError("Could not create '" + name + "' from: " + ", ".join(type_names))
+    raise RuntimeError(
+        "Could not create operator '{}' from types: {}".format(
+            name, ", ".join(type_names)
+        )
+    )
 
 
 def _set_node_pos(op_obj, x, y):
@@ -149,689 +132,562 @@ def _set_node_pos(op_obj, x, y):
         pass
 
 
-def _require(parent, name):
-    """Return an existing child or raise so the update section can bail out cleanly."""
-    node = parent.op(name)
-    if node is None:
-        raise RuntimeError("Node '" + name + "' not found in " + parent.path)
-    return node
-
-
-def _insert_after(parent, existing_name, new_type_names, new_name):
-    """Insert a new node after an existing one, splicing into the chain.
-
-    Returns (new_node, was_created).
-    If the new node already exists, returns it untouched (was_created=False).
-    """
-    existing = _require(parent, existing_name)
-    already = parent.op(new_name)
-    if already is not None:
-        return already, False
-
-    new_node = _create_or_get_any(parent, new_type_names, new_name)
-
-    # Gather everything currently connected to existing's output.
-    downstream = []
+def _set_viewer(op_obj, enabled):
     try:
-        for conn in list(existing.outputConnectors[0].connections):
-            downstream.append(conn)
+        op_obj.viewer = enabled
     except Exception:
         pass
 
-    # Wire new_node after existing.
-    new_node.inputConnectors[0].connect(existing)
 
-    # Re-wire downstream nodes: replace their input from existing → new_node.
-    for conn in downstream:
-        target_op = conn.owner
-        idx = conn.index
-        target_op.inputConnectors[idx].connect(new_node)
-
-    # Position slightly to the right of existing.
-    _set_node_pos(new_node, existing.nodeX + 180, existing.nodeY)
-
-    return new_node, True
-
-
-# ── UPDATE SECTIONS ─────────────────────────────────────────────────
-
-def _add_audio_reactivity(live):
-    """Bind audio_env expressions to visual parameters for audio-reactive visuals.
-
-    Targets known parameter names from the user's TD build.
-    Safe to re-run: overwrites expressions but not static values.
-    """
-    env = "abs(op('audio_env')[0])"
-    gamma_expr    = "1.0 + min(2.5, ("  + env + " * " + str(AUDIO_GAMMA_MULT)    + "))"
-    displace_expr = "0.01 + min(0.8, (" + env + " * " + str(AUDIO_DISPLACE_MULT) + "))"
-    blur_expr     = "1.0 + min(120.0, (" + env + " * " + str(AUDIO_BLUR_MULT)    + "))"
-    noise_tx_expr = env + " * " + str(AUDIO_NOISE_TX_MULT)
-    noise_ty_expr = env + " * " + str(AUDIO_NOISE_TY_MULT)
-
-    results = {}
-
-    # Gamma on level_drive
-    level = live.op("level_drive")
-    if level:
-        r = _safe_set_expr_any(level,
-            ["gamma1", "Gamma1", "gamma", "Gamma"],
-            gamma_expr)
-        results["gamma"] = r or "NO MATCHING PAR"
-
-    # Displacement weight (user's build uses displaceweightx)
-    displace = live.op("displace1")
-    if displace:
-        r = _safe_set_expr_any(displace,
-            ["displaceweightx", "Displaceweightx",
-             "displaceweight", "Displaceweight",
-             "displaceweight1", "Displaceweight1"],
-            displace_expr)
-        results["displace"] = r or "NO MATCHING PAR"
-        # Also try Y/Z displacement channels
-        _safe_set_expr(displace, "displaceweighty", displace_expr)
-        _safe_set_expr(displace, "displaceweightz", displace_expr)
-        _safe_set_expr(displace, "Displaceweighty", displace_expr)
-        _safe_set_expr(displace, "Displaceweightz", displace_expr)
-
-    # Blur filter size
-    blur = live.op("blur1")
-    if blur:
-        r = _safe_set_expr_any(blur,
-            ["filtersize", "Filtersize",
-             "filterwidth", "Filterwidth",
-             "size", "Size"],
-            blur_expr)
-        results["blur"] = r or "NO MATCHING PAR"
-
-    # Noise translate (makes noise scroll with beats → animated displacement)
-    noise = live.op("noise1")
-    if noise:
-        rx = _safe_set_expr_any(noise,
-            ["tx", "Tx", "t1", "T1", "translatex", "Translatex"],
-            noise_tx_expr)
-        ry = _safe_set_expr_any(noise,
-            ["ty", "Ty", "t2", "T2", "translatey", "Translatey"],
-            noise_ty_expr)
-        results["noise_tx"] = rx or "NO MATCHING PAR"
-        results["noise_ty"] = ry or "NO MATCHING PAR"
-
-    return results
-
-
-def _probe_params(live):
-    """Print all parameter names for key visual/audio nodes. Diagnostic only."""
-    targets = ["level_drive", "displace1", "blur1", "noise1", "edge1",
-               "logo_over", "title_over", "audio_env", "transform1",
-               "edge_level", "edge_comp"]
-    lines = []
-    for name in targets:
-        node = live.op(name)
-        if node is None:
-            lines.append(name + ": NOT FOUND")
-            continue
-        par_names = [p.name for p in node.pars()]
-        lines.append(name + " (" + node.OPType + ") params:")
-        lines.append("  " + ", ".join(par_names))
-    report = "\n".join(lines)
-    print(report)
-    return report
-
-
-def _add_edge_overlay(live):
-    """Add an audio-reactive edge overlay that flashes on beats.
-
-    Creates:
-    - edge_level (levelTOP): controls edge opacity via audio_env expression
-    - edge_comp (compositeTOP): composites edges over the displace chain
-
-    Wiring: displace1 → edge_comp[0], edge1 → edge_level → edge_comp[1]
-    edge_comp output replaces displace1 in the downstream chain (logo_over).
-    """
-    results = []
-
-    edge1 = live.op("edge1")
-    if edge1 is None:
-        return "edge1 not found"
-
-    displace1 = live.op("displace1")
-    if displace1 is None:
-        return "displace1 not found"
-
-    # Create edge_level to control edge opacity
-    edge_level = live.op("edge_level")
-    created_level = False
-    if edge_level is None:
-        edge_level = _create_or_get_any(live, ["levelTOP"], "edge_level")
-        created_level = True
-        edge_level.inputConnectors[0].connect(edge1)
-        _set_node_pos(edge_level, -140, 110)
-
-    # Bind opacity to audio envelope
-    env = "abs(op('audio_env')[0])"
-    opacity_expr = "min(0.85, " + env + " * " + str(AUDIO_EDGE_OPACITY_MULT) + ")"
-    _safe_set_expr_any(edge_level, ["opacity", "Opacity", "opacity1", "Opacity1"], opacity_expr)
-    results.append("edge_level: " + ("created" if created_level else "updated"))
-
-    # Create edge_comp to composite edges over the main chain
-    edge_comp = live.op("edge_comp")
-    created_comp = False
-    if edge_comp is None:
-        edge_comp = _create_or_get_any(live, ["compositeTOP"], "edge_comp")
-        created_comp = True
-
-        # Splice edge_comp between displace1 and its downstream (logo_over)
-        downstream = []
-        try:
-            for conn in list(displace1.outputConnectors[0].connections):
-                # Don't redirect edge_level's own connection
-                if conn.owner.name != "edge_level" and conn.owner.name != "edge_comp":
-                    downstream.append((conn.owner, conn.index))
-        except Exception:
-            pass
-
-        edge_comp.inputConnectors[0].connect(displace1)
-        edge_comp.inputConnectors[1].connect(edge_level)
-
-        for target_op, idx in downstream:
-            try:
-                target_op.inputConnectors[idx].connect(edge_comp)
-            except Exception:
-                pass
-
-        _set_node_pos(edge_comp, 60, 110)
-
-    # Set composite operation to "add" for glitchy bright-edge look
-    _safe_set_menu_any(edge_comp, ["Operand", "operand", "Operation", "operation"], ["add"])
-    results.append("edge_comp: " + ("created" if created_comp else "exists"))
-
-    return ", ".join(results)
-
-
-def _add_logo_pulse(live):
-    """Bind transform1 scale to audio_env for logo pulsing.
-
-    Adds expressions to sx and sy to pulse around LOGO_BASE_SCALE.
-    """
-    t1 = live.op("transform1")
-    if t1 is None:
-        return "transform1 not found"
-
-    env = "abs(op('audio_env')[0])"
-    pulse_expr = str(LOGO_BASE_SCALE) + " + min(0.08, " + env + " * " + str(LOGO_PULSE_MULT) + ")"
-
-    rx = _safe_set_expr_any(t1, ["sx", "Sx", "scalex", "Scalex"], pulse_expr)
-    ry = _safe_set_expr_any(t1, ["sy", "Sy", "scaley", "Scaley"], pulse_expr)
-
-    return "sx=" + str(rx or "MISS") + " sy=" + str(ry or "MISS") + " base=" + str(LOGO_BASE_SCALE)
-
-
-def _add_pose_overlay(live):
-    """Add a Script TOP for MediaPipe pose skeleton overlay.
-
-    Creates:
-    - pose_script (scriptTOP): runs MediaPipe per frame on src input
-    - pose_comp (compositeTOP): composites pose overlay on chain
-
-    The Script TOP DAT code is written to a Text DAT (pose_script_code).
-    """
-    results = []
-
-    # Write the Script TOP callback code to a Text DAT
-    code_dat = _create_or_get_any(live, ["textDAT"], "pose_script_code")
-    code_dat.text = _pose_script_code()
-    _set_node_pos(code_dat, -520, -620)
-    results.append("pose_script_code DAT written")
-
-    # Create Script TOP
-    pose_script = live.op("pose_script")
-    created_script = False
-    if pose_script is None:
-        pose_script = _create_or_get_any(live, ["scriptTOP"], "pose_script")
-        created_script = True
-        src = live.op("src")
-        if src:
-            pose_script.inputConnectors[0].connect(src)
-        _set_node_pos(pose_script, -320, -620)
-
-    # Point setup DAT to our code
-    _safe_set_par_any(pose_script, ["setupdat", "Setupdat", "callbacks", "Callbacks"], "pose_script_code")
-    results.append("pose_script: " + ("created" if created_script else "exists"))
-
-    # Create composite to layer pose over the chain
-    # Insert after edge_comp if it exists, else after displace1, else after level_drive
-    bg_name = "edge_comp"
-    if live.op(bg_name) is None:
-        bg_name = "displace1"
-    if live.op(bg_name) is None:
-        bg_name = "level_drive"
-
-    pose_comp = live.op("pose_comp")
-    created_comp = False
-    if pose_comp is None:
-        pose_comp, created_comp = _insert_after(live, bg_name, ["compositeTOP"], "pose_comp")
-
-    if created_comp:
-        pose_comp.inputConnectors[1].connect(pose_script)
-        _safe_set_menu_any(pose_comp, ["Operand", "operand"], ["over"])
-
-    results.append("pose_comp: " + ("created" if created_comp else "exists"))
-    return ", ".join(results)
-
-
-def _add_point_track(live):
-    """Add a Script TOP for optical-flow constellation point tracking.
-
-    Creates:
-    - track_script (scriptTOP): runs cv2 feature tracking per frame
-    - track_comp (compositeTOP): composites tracking overlay on chain
-    """
-    results = []
-
-    code_dat = _create_or_get_any(live, ["textDAT"], "track_script_code")
-    code_dat.text = _track_script_code()
-    _set_node_pos(code_dat, -520, -780)
-    results.append("track_script_code DAT written")
-
-    track_script = live.op("track_script")
-    created_script = False
-    if track_script is None:
-        track_script = _create_or_get_any(live, ["scriptTOP"], "track_script")
-        created_script = True
-        src = live.op("src")
-        if src:
-            track_script.inputConnectors[0].connect(src)
-        _set_node_pos(track_script, -320, -780)
-
-    _safe_set_par_any(track_script, ["setupdat", "Setupdat", "callbacks", "Callbacks"], "track_script_code")
-    results.append("track_script: " + ("created" if created_script else "exists"))
-
-    # Insert after pose_comp if it exists, else after edge_comp, else after displace1
-    bg_name = "pose_comp"
-    if live.op(bg_name) is None:
-        bg_name = "edge_comp"
-    if live.op(bg_name) is None:
-        bg_name = "displace1"
-    if live.op(bg_name) is None:
-        bg_name = "level_drive"
-
-    track_comp = live.op("track_comp")
-    created_comp = False
-    if track_comp is None:
-        track_comp, created_comp = _insert_after(live, bg_name, ["compositeTOP"], "track_comp")
-
-    if created_comp:
-        track_comp.inputConnectors[1].connect(track_script)
-        _safe_set_menu_any(track_comp, ["Operand", "operand"], ["over"])
-
-    results.append("track_comp: " + ("created" if created_comp else "exists"))
-    return ", ".join(results)
-
-
-def _pose_script_code():
-    """Return the Python code for the pose detection Script TOP."""
-    return '''# Voidstar pose skeleton overlay for Script TOP.
-# Requires: mediapipe installed in TD's Python environment.
-#   In TD's Textport: import pip; pip.main(["install", "mediapipe"])
-import numpy as np
-try:
-    import mediapipe as mp
-    _MP_OK = True
-except ImportError:
-    _MP_OK = False
-    print("[voidstar] mediapipe not installed - pose overlay disabled")
-
-_pose = None
-_draw = None
-
-# Voidstar color scheme: cyan connections, bright dots
-_CYAN = (255, 255, 0)     # BGR cyan
-_WHITE = (255, 255, 255)
-_GHOST = (180, 120, 40)   # dim blue-ish for secondary connections
-
-def setup():
-    global _pose, _draw
-    if not _MP_OK:
-        return
-    _pose = mp.solutions.pose.Pose(
-        static_image_mode=False,
-        model_complexity=0,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
-    _draw = mp.solutions.drawing_utils
-
-def cook(scriptOP, device, mem):
-    if not _MP_OK or _pose is None:
-        # Pass through input unchanged
-        inp = scriptOP.inputs[0]
-        if inp is not None:
-            scriptOP.copyNumpyArray(inp.numpyArray(delayed=True))
-        return
-
-    inp = scriptOP.inputs[0]
-    if inp is None:
-        return
-    arr = inp.numpyArray(delayed=True)
-    if arr is None:
-        return
-
-    # arr is RGBA float32 0-1 from TD; convert to uint8 RGB for MediaPipe
-    rgb = (arr[:, :, :3] * 255).astype(np.uint8)
-    results = _pose.process(rgb)
-
-    # Create transparent overlay (RGBA)
-    overlay = np.zeros_like(arr)
-
-    if results.pose_landmarks:
-        h, w = rgb.shape[:2]
-        lm = results.pose_landmarks.landmark
-        pts = []
-        for l in lm:
-            if l.visibility > 0.5:
-                pts.append((int(l.x * w), int(l.y * h)))
-            else:
-                pts.append(None)
-
-        # Draw connections (Voidstar style: cyan lines)
-        connections = mp.solutions.pose.POSE_CONNECTIONS
-        for c in connections:
-            p1, p2 = pts[c[0]], pts[c[1]]
-            if p1 is not None and p2 is not None:
-                # Draw on overlay as cyan with alpha
-                import cv2
-                cv2.line(overlay, p1, p2, (0.0, 1.0, 1.0, 0.7), 2, cv2.LINE_AA)
-
-        # Draw landmarks as bright dots
-        for pt in pts:
-            if pt is not None:
-                import cv2
-                cv2.circle(overlay, pt, 4, (1.0, 1.0, 1.0, 0.9), -1, cv2.LINE_AA)
-
-    scriptOP.copyNumpyArray(overlay)
-'''
-
-
-def _track_script_code():
-    """Return the Python code for the point tracking Script TOP."""
-    return '''# Voidstar constellation point tracker for Script TOP.
-# Uses cv2.goodFeaturesToTrack + Lucas-Kanade optical flow.
-import numpy as np
-import cv2
-
-_prev_gray = None
-_prev_pts = None
-_MAX_POINTS = 80
-_DETECT_INTERVAL = 5  # re-detect features every N frames
-_frame_count = 0
-_LINK_RADIUS = 120   # pixels: max distance for constellation links
-
-# Feature detection params
-_FEATURE_PARAMS = dict(
-    maxCorners=_MAX_POINTS,
-    qualityLevel=0.02,
-    minDistance=15,
-    blockSize=7,
-)
-
-# Lucas-Kanade params
-_LK_PARAMS = dict(
-    winSize=(21, 21),
-    maxLevel=2,
-    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03),
-)
-
-def setup():
-    pass
-
-def cook(scriptOP, device, mem):
-    global _prev_gray, _prev_pts, _frame_count
-
-    inp = scriptOP.inputs[0]
-    if inp is None:
-        return
-    arr = inp.numpyArray(delayed=True)
-    if arr is None:
-        return
-
-    # Convert to uint8 grayscale for tracking
-    rgb = (arr[:, :, :3] * 255).astype(np.uint8)
-    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    h, w = gray.shape
-
-    # Create transparent overlay
-    overlay = np.zeros((h, w, 4), dtype=np.float32)
-
-    _frame_count += 1
-
-    if _prev_gray is None or _prev_pts is None or _frame_count % _DETECT_INTERVAL == 0:
-        new_pts = cv2.goodFeaturesToTrack(gray, **_FEATURE_PARAMS)
-        if new_pts is not None:
-            _prev_pts = new_pts
-        _prev_gray = gray
-        if _prev_pts is None:
-            scriptOP.copyNumpyArray(overlay)
-            return
-
-    # Track points
-    cur_pts, status, _ = cv2.calcOpticalFlowPyrLK(
-        _prev_gray, gray, _prev_pts, None, **_LK_PARAMS
+def _layout_children(parent):
+    try:
+        parent.layoutChildren(horizontal=True, vertical=True)
+    except Exception:
+        pass
+
+
+def _disconnect_all_inputs(op_obj):
+    try:
+        for conn in op_obj.inputConnectors:
+            for c in list(conn.connections):
+                c.disconnect()
+    except Exception:
+        pass
+
+
+def _destroy_if_exists(parent, name):
+    op_obj = parent.op(name)
+    if op_obj is None:
+        return False
+    try:
+        op_obj.destroy()
+        return True
+    except Exception:
+        return False
+
+
+def _write_build_log(project, message):
+    log = _create_or_get_any(project, ["textDAT"], "blackhole_build_log")
+    log.text = message
+    _set_node_pos(log, 0, -240)
+    return log
+
+
+# ─── audio diagnostic DAT ────────────────────────────────────────────────────
+
+def _audio_diag_text():
+    return (
+        "\"\"\"Audio diagnostics for /project1/blackhole_live.\"\"\"\n"
+        "\n"
+        "def _absmax(chop_op):\n"
+        "    if chop_op is None:\n"
+        "        return 0.0\n"
+        "    vals = []\n"
+        "    try:\n"
+        "        for ch in chop_op.chans():\n"
+        "            try:\n"
+        "                vals.append(abs(ch.eval()))\n"
+        "            except Exception:\n"
+        "                pass\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    return max(vals) if vals else 0.0\n"
+        "\n"
+        "def report(path='/project1/blackhole_live', threshold=0.001):\n"
+        "    parent = op(path)\n"
+        "    if parent is None:\n"
+        "        print('[RED] Missing ' + path)\n"
+        "        return\n"
+        "    inst   = parent.op('audio_instrument')\n"
+        "    loop   = parent.op('audio_loopback')\n"
+        "    afile  = parent.op('audio_file')\n"
+        "    env    = parent.op('audio_env')\n"
+        "    sw     = parent.op('audio_src_switch')\n"
+        "    src    = 'live' if (sw and sw.par.Index.val == 0) else 'file'\n"
+        "    v_inst = _absmax(inst)\n"
+        "    v_loop = _absmax(loop)\n"
+        "    v_file = _absmax(afile)\n"
+        "    v_env  = _absmax(env)\n"
+        "    ok = lambda v: '[GREEN]' if v > threshold else '[RED]  '\n"
+        "    print('Black hole audio diagnostics  (active source: ' + src + ')')\n"
+        "    print(ok(v_inst) + ' audio_instrument  max=' + ('%.6f' % v_inst))\n"
+        "    print(ok(v_loop) + ' audio_loopback    max=' + ('%.6f' % v_loop))\n"
+        "    print(ok(v_file) + ' audio_file        max=' + ('%.6f' % v_file))\n"
+        "    print(ok(v_env)  + ' audio_env (out)   max=' + ('%.6f' % v_env))\n"
+        "    print(('[GREEN] live OK' if (v_inst > threshold or v_loop > threshold) else '[RED]  live silent'))\n"
+        "\n"
+        "report()\n"
     )
 
-    if cur_pts is not None and status is not None:
-        good_new = cur_pts[status.ravel() == 1]
-        if len(good_new) > 0:
-            pts = good_new.reshape(-1, 2)
 
-            # Draw constellation links (connect nearby points)
-            for i in range(len(pts)):
-                for j in range(i + 1, len(pts)):
-                    dx = pts[i][0] - pts[j][0]
-                    dy = pts[i][1] - pts[j][1]
-                    dist = (dx * dx + dy * dy) ** 0.5
-                    if dist < _LINK_RADIUS:
-                        alpha = 0.6 * (1.0 - dist / _LINK_RADIUS)
-                        p1 = (int(pts[i][0]), int(pts[i][1]))
-                        p2 = (int(pts[j][0]), int(pts[j][1]))
-                        cv2.line(overlay, p1, p2, (0.0, 1.0, 1.0, alpha), 1, cv2.LINE_AA)
+def _try_create_mat(parent, name, rgb=(1.0, 1.0, 1.0)):
+    """Create a Constant MAT in *parent* with the given RGB colour.
 
-            # Draw points as bright dots
-            for pt in pts:
-                cv2.circle(overlay, (int(pt[0]), int(pt[1])), 3, (1.0, 1.0, 1.0, 0.8), -1, cv2.LINE_AA)
-
-            _prev_pts = good_new.reshape(-1, 1, 2)
-        else:
-            _prev_pts = None
+    Returns the MAT op on success, or None on failure (build continues).
+    Tries every known TD type string for the Constant material.
+    """
+    mat_types = ["constantMAT", "constMAT", "phongMAT"]
+    mat = None
+    existing = parent.op(name)
+    if existing is not None:
+        mat = existing
     else:
-        _prev_pts = None
-
-    _prev_gray = gray
-    scriptOP.copyNumpyArray(overlay)
-'''
-
-
-def _update_cam_rotation(live):
-    """Change the Flip TOP rotation index."""
-    cam = live.op("cam_rotate")
-    if cam is None:
-        return "cam_rotate not found"
-    _safe_set_menu_any(cam, ["Rotate", "rotate"], [str(CAM_ROTATION_INDEX)])
-    _safe_set_par_any(cam, ["Rotate", "rotate"], CAM_ROTATION_INDEX)
-    return "set to index " + str(CAM_ROTATION_INDEX)
-
-
-def _update_title_text(live):
-    title = live.op("title_hook")
-    if title is None:
-        return "title_hook not found"
-    _safe_set_par_any(title, ["Text", "text"], TITLE_TEXT)
-    return TITLE_TEXT
-
-
-def _update_logo_path(live):
-    logo = live.op("dvdlogo_png")
-    if logo is None:
-        return "dvdlogo_png not found"
-    _safe_set_par_any(logo, ["File", "file"], LOGO_FILE)
-    return LOGO_FILE
-
-
-def _add_colour_correct(live):
-    """Insert a Colour Correct TOP after level_drive (before the rest of the chain).
-
-    Only creates it if it doesn't already exist; existing nodes are never moved.
-    """
-    node, created = _insert_after(live, "level_drive", ["hsvadjustTOP"], "colour_correct")
-    if created:
-        return "created and wired"
-    return "already exists (untouched)"
-
-
-def _fix_over_tops(live):
-    """Replace Over TOPs with Composite TOPs for reliable compositing.
-
-    Destroys old Over TOPs and creates Composite TOPs in their place,
-    preserving the same wiring.
-    """
-    results = []
-    replacements = [
-        # (name, upstream_input0, upstream_input1)
-        ("logo_over", "displace1", "dvdlogo_png"),
-        ("title_over", "logo_over", "title_hook"),
-    ]
-    for name, in0_name, in1_name in replacements:
-        old = live.op(name)
-        if old is not None:
-            # Gather downstream connections before destroying.
-            downstream = []
+        for t in mat_types:
             try:
-                for conn in list(old.outputConnectors[0].connections):
-                    downstream.append((conn.owner, conn.index))
+                mat = parent.create(t, name)
+                break
             except Exception:
                 pass
-            try:
-                old.destroy()
-            except Exception:
-                results.append(name + ": could not destroy old Over TOP")
-                continue
-
-        new_node = _create_or_get_any(live, ["compositeTOP"], name)
-        in0 = live.op(in0_name)
-        in1 = live.op(in1_name)
-        if in0:
-            new_node.inputConnectors[0].connect(in0)
-        if in1:
-            new_node.inputConnectors[1].connect(in1)
-        # Re-wire downstream.
-        if old is not None:
-            for target_op, idx in downstream:
-                try:
-                    target_op.inputConnectors[idx].connect(new_node)
-                except Exception:
-                    pass
-        _safe_set_menu_any(new_node, ["Operand", "operand", "Operation", "operation"], ["over"])
-        _safe_set_par_any(new_node, ["Operand", "operand", "Operation", "operation"], 0)
-        results.append(name + ": replaced with Composite TOP")
-    return ", ".join(results)
+    if mat is None:
+        return None
+    # Set colour — try every known parameter name variant
+    r, g, b = rgb
+    for par in ["Colorr", "Cr", "Difcolorr", "Color1r", "colorr"]:
+        _safe_set_par(mat, par, r)
+    for par in ["Colorg", "Cg", "Difcolorg", "Color1g", "colorg"]:
+        _safe_set_par(mat, par, g)
+    for par in ["Colorb", "Cb", "Difcolorb", "Color1b", "colorb"]:
+        _safe_set_par(mat, par, b)
+    for par in ["Colora", "Ca", "Difcolora", "Color1a", "colora"]:
+        _safe_set_par(mat, par, 1.0)
+    return mat
 
 
-# ── MAIN ────────────────────────────────────────────────────────────
+def _assign_mat_to_geo(geo_comp, mat):
+    """Point a geometryCOMP at a MAT via its Render-page Material parameter.
 
-def update():
-    live = op(LIVE_PATH)
-    if live is None:
-        msg = (
-            "Cannot find " + LIVE_PATH + ".\n"
-            "Run build_voidstar_project.py first to create the initial network."
-        )
-        print(msg)
-        try:
-            ui.messageBox("Voidstar Updater", msg)
-        except Exception:
-            pass
+    This is more reliable than wiring a materialSOP inside the geo COMP because
+    it doesn't require creating additional operators or knowing the internal
+    materialSOP type string.
+    """
+    if mat is None:
         return
+    for par in ["Material", "material", "Mat", "mat"]:
+        p = getattr(geo_comp.par, par, None)
+        if p is not None:
+            try:
+                p.val = mat.path
+                return
+            except Exception:
+                pass
 
-    log_lines = ["Voidstar updater ran."]
-    any_enabled = False
+
+
+def _build_geo_event_horizon(parent):
+    """Black sphere at the origin — the event horizon."""
+    geo    = _create_or_get_any(parent, ["geometryCOMP"], "geo_event_horizon")
+    sphere = _create_or_get_any(geo, ["sphereSOP"], "sphere1")
+    out    = _create_or_get_any(geo, ["nullSOP"],   "out1")
+
+    _safe_set_par_any(sphere, ["Rows", "rows"], 56)
+    _safe_set_par_any(sphere, ["Cols", "cols"], 56)
+
+    _disconnect_all_inputs(out)
+    out.inputConnectors[0].connect(sphere)
+
+    mat = _try_create_mat(parent, "mat_horizon", rgb=(0.0, 0.0, 0.0))
+    _assign_mat_to_geo(geo, mat)
+
+    a = "abs(op('../audio_env')[0])"
+    radius_expr = "1.4 + min(0.7, {a} * 8.0)".format(a=a)
+    for par in ["Radx", "Radius", "Rad", "rad"]:
+        _safe_set_expr(sphere, par, radius_expr)
+    for par in ["Rady", "Radiusy", "Rady1"]:
+        _safe_set_expr(sphere, par, radius_expr)
+    for par in ["Radz", "Radiusz", "Radz1"]:
+        _safe_set_expr(sphere, par, radius_expr)
+
+    _set_node_pos(sphere, -200, 0)
+    _set_node_pos(out,     200, 0)
+    _set_viewer(out, True)
+    return geo
+
+
+# ─── geometry COMP: accretion disc ───────────────────────────────────────────
+
+def _build_geo_accretion_disc(parent):
+    """Torus SOP with animated noise displacement."""
+    geo   = _create_or_get_any(parent, ["geometryCOMP"], "geo_disc")
+    torus = _create_or_get_any(geo, ["torusSOP"], "torus1")
+    noise = _create_or_get_any(geo, ["noiseSOP"], "noise_disc")
+    out   = _create_or_get_any(geo, ["nullSOP"],  "out1")
+
+    _safe_set_par_any(torus, ["Radx", "Radius",  "Rad",  "rad"],  2.6)
+    _safe_set_par_any(torus, ["Rady", "Radiusy", "Rad2", "rad2"], 0.38)
+    _safe_set_par_any(torus, ["Rows", "Divsu",   "rows"], 120)
+    _safe_set_par_any(torus, ["Cols", "Divsv",   "cols"],  44)
+
+    _safe_set_par_any(noise, ["Period", "period", "Freq", "freq"], 0.65)
+    _safe_set_expr_any(noise, ["Tx", "tx", "Offsetx", "offsetx"],
+                       "absTime.seconds * 0.9")
+    _safe_set_expr_any(noise, ["Ty", "ty", "Offsety", "offsety"],
+                       "absTime.seconds * 0.35")
+    _safe_set_expr_any(noise, ["Tz", "tz", "Offsetz", "offsetz"],
+                       "absTime.seconds * -0.55")
+
+    a = "abs(op('../audio_env')[0])"
+    _safe_set_expr_any(noise, ["Amp", "Amplitude", "amp", "Gain", "gain"],
+                       "0.08 + min(0.9, {a} * 14.0)".format(a=a))
+
+    _disconnect_all_inputs(noise)
+    _disconnect_all_inputs(out)
+    noise.inputConnectors[0].connect(torus)
+    out.inputConnectors[0].connect(noise)
+
+    mat = _try_create_mat(parent, "mat_disc", rgb=(0.92, 0.28, 0.04))
+    if mat is not None:
+        _safe_set_expr_any(mat, ["Colorr", "Cr", "Difcolorr", "Color1r"],
+                           "min(1.0, 0.92 + {a} * 0.5)".format(a=a))
+        _safe_set_expr_any(mat, ["Colorg", "Cg", "Difcolorg", "Color1g"],
+                           "min(1.0, 0.28 + {a} * 8.0)".format(a=a))
+        _safe_set_expr_any(mat, ["Colorb", "Cb", "Difcolorb", "Color1b"],
+                           "min(1.0, 0.04 + {a} * 4.0)".format(a=a))
+    _assign_mat_to_geo(geo, mat)
+
+    _set_node_pos(torus, -320, 0)
+    _set_node_pos(noise, -120, 0)
+    _set_node_pos(out,    280, 0)
+    _set_viewer(out, True)
+    return geo
+
+
+# ─── geometry COMP: infalling particle ring ───────────────────────────────────
+
+def _build_geo_particles(parent):
+    """Ring of infalling matter: circle SOP → noise SOP → point render."""
+    geo    = _create_or_get_any(parent, ["geometryCOMP"], "geo_particles")
+    circle = _create_or_get_any(geo, ["circleSOP"], "circle1")
+    noise  = _create_or_get_any(geo, ["noiseSOP"],  "noise_spiral")
+    out    = _create_or_get_any(geo, ["nullSOP"],   "out1")
+
+    _safe_set_par_any(circle, ["Radius", "Rad", "Radx",     "rad"],  3.5)
+    _safe_set_par_any(circle, ["Divs",   "Divisions", "divs"],       240)
+    _safe_set_menu_any(circle,
+                       ["Orient", "orient", "Orientation", "orientation"],
+                       ["xz", "zx", "0"])
+
+    _safe_set_par_any(noise, ["Period", "period", "Freq", "freq"], 0.9)
+    _safe_set_expr_any(noise, ["Tx", "tx", "Offsetx", "offsetx"],
+                       "absTime.seconds * -1.4")
+    _safe_set_expr_any(noise, ["Ty", "ty", "Offsety", "offsety"],
+                       "absTime.seconds * 0.4")
+    _safe_set_expr_any(noise, ["Tz", "tz", "Offsetz", "offsetz"],
+                       "absTime.seconds * 0.85")
+
+    a = "abs(op('../audio_env')[0])"
+    _safe_set_expr_any(circle, ["Radius", "Rad", "Radx", "rad"],
+                       "3.2 + min(2.0, {a} * 10.0)".format(a=a))
+    _safe_set_expr_any(noise, ["Amp", "Amplitude", "amp", "Gain", "gain"],
+                       "0.22 + min(1.2, {a} * 12.0)".format(a=a))
+
+    _disconnect_all_inputs(noise)
+    _disconnect_all_inputs(out)
+    noise.inputConnectors[0].connect(circle)
+    out.inputConnectors[0].connect(noise)
+
+    mat = _try_create_mat(parent, "mat_particles", rgb=(1.0, 0.88, 0.55))
+    _assign_mat_to_geo(geo, mat)
+
+    _safe_set_par_any(geo, ["Pspritesize", "Pspritesizex", "Pointsize",
+                             "pspritesize", "pointsize"], 6.0)
+
+    _set_node_pos(circle, -420, 0)
+    _set_node_pos(noise,  -220, 0)
+    _set_node_pos(out,     180, 0)
+    _set_viewer(out, True)
+    return geo
+
+
+# ─── full blackhole_live network ─────────────────────────────────────────────
+
+def _build_blackhole(parent_comp):
+    base = _create_or_get_any(parent_comp, ["baseCOMP"], "blackhole_live")
+    base.nodeX = -300
+    base.nodeY =  100
+
+    section_errors = []
+
+    # ── AUDIO CHAIN ──────────────────────────────────────────────────────────
+    #
+    # Live path:  loopback + instrument → live_merge → ─┐
+    #                                                     ├→ src_switch → analyze → math → filter → audio_env
+    # File path:  audio_file ──────────────────────────→ ─┘
+    #
+    audio_env = None
+    try:
+        audio_inst        = _create_or_get_any(base, ["audiodeviceinCHOP", "audiodevinCHOP"], "audio_instrument")
+        audio_loop        = _create_or_get_any(base, ["audiodeviceinCHOP", "audiodevinCHOP"], "audio_loopback")
+        audio_file        = _create_or_get_any(base, ["audiofileinCHOP"],                     "audio_file")
+        audio_live_merge  = _create_or_get_any(base, ["mergeCHOP"],                           "audio_live_merge")
+        audio_src_switch  = _create_or_get_any(base, ["switchCHOP"],                          "audio_src_switch")
+        audio_analyze     = _create_or_get_any(base, ["analyzeCHOP"],                         "audio_analyze")
+        audio_math        = _create_or_get_any(base, ["mathCHOP"],                            "audio_math")
+        audio_filter      = _create_or_get_any(base, ["filterCHOP"],                          "audio_filter")
+        audio_env         = _create_or_get_any(base, ["nullCHOP"],                            "audio_env")
+        audio_diag        = _create_or_get_any(base, ["textDAT"],                             "audio_diag")
+
+        _disconnect_all_inputs(audio_live_merge)
+        _disconnect_all_inputs(audio_src_switch)
+        _disconnect_all_inputs(audio_analyze)
+        _disconnect_all_inputs(audio_math)
+        _disconnect_all_inputs(audio_filter)
+        _disconnect_all_inputs(audio_env)
+
+        audio_live_merge.inputConnectors[0].connect(audio_loop)
+        audio_live_merge.inputConnectors[1].connect(audio_inst)
+        audio_src_switch.inputConnectors[0].connect(audio_live_merge)
+        audio_src_switch.inputConnectors[1].connect(audio_file)
+        audio_analyze.inputConnectors[0].connect(audio_src_switch)
+        audio_math.inputConnectors[0].connect(audio_analyze)
+        audio_filter.inputConnectors[0].connect(audio_math)
+        audio_env.inputConnectors[0].connect(audio_filter)
+
+        _safe_set_menu_any(audio_analyze, ["Function", "function"], ["rms", "root mean"])
+        _safe_set_par(audio_analyze,   "Function",    "rms")
+        _safe_set_par(audio_filter,    "Filterwidth", 0.06)
+        _safe_set_par(audio_env,       "Cooktype",    "always")
+        _safe_set_par_any(audio_loop,        ["Numchans", "numchans", "Chans", "chans"], 2)
+        _safe_set_par_any(audio_src_switch,  ["Index", "index"], 0)
+        audio_diag.text = _audio_diag_text()
+    except Exception:
+        section_errors.append("AUDIO:\n" + traceback.format_exc())
+
+    # ── 3D SCENE ─────────────────────────────────────────────────────────────
+    cam = None
+    try:
+        cam    = _create_or_get_any(base, ["cameraCOMP"], "cam")
+        light1 = _create_or_get_any(base, ["lightCOMP"],  "light_key")
+        light2 = _create_or_get_any(base, ["lightCOMP"],  "light_fill")
+
+        _safe_set_par_any(cam, ["Tx", "tx"],   0.0)
+        _safe_set_par_any(cam, ["Ty", "ty"],   7.0)
+        _safe_set_par_any(cam, ["Tz", "tz"],  14.0)
+        _safe_set_par_any(cam, ["Rx", "rx"], -26.0)
+        _safe_set_par_any(cam, ["Ry", "ry"],   0.0)
+        _safe_set_par_any(cam, ["Rz", "rz"],   0.0)
+        _safe_set_par_any(cam, ["Fov",  "fov",  "Fovx", "fovx"],  55.0)
+        _safe_set_par_any(cam, ["Near", "near", "Clip", "clipn"], 0.01)
+        _safe_set_par_any(cam, ["Far",  "far",  "Clipf"],         500.0)
+
+        _safe_set_par_any(light1, ["Tx", "tx"],   6.0)
+        _safe_set_par_any(light1, ["Ty", "ty"],   9.0)
+        _safe_set_par_any(light1, ["Tz", "tz"],   4.0)
+        _safe_set_par_any(light1, ["Colorr", "Cr", "Lightr"], 1.00)
+        _safe_set_par_any(light1, ["Colorg", "Cg", "Lightg"], 0.88)
+        _safe_set_par_any(light1, ["Colorb", "Cb", "Lightb"], 0.62)
+        _safe_set_par_any(light1, ["Intensity", "intensity", "Dimmer", "dimmer"], 0.90)
+
+        _safe_set_par_any(light2, ["Tx", "tx"],  -5.0)
+        _safe_set_par_any(light2, ["Ty", "ty"],   3.0)
+        _safe_set_par_any(light2, ["Tz", "tz"],  -4.0)
+        _safe_set_par_any(light2, ["Colorr", "Cr", "Lightr"], 0.18)
+        _safe_set_par_any(light2, ["Colorg", "Cg", "Lightg"], 0.22)
+        _safe_set_par_any(light2, ["Colorb", "Cb", "Lightb"], 0.52)
+        _safe_set_par_any(light2, ["Intensity", "intensity", "Dimmer", "dimmer"], 0.30)
+    except Exception:
+        section_errors.append("CAM/LIGHTS:\n" + traceback.format_exc())
+
+    # Each geo COMP is isolated — a SOP/MAT failure in one won't block the others.
+    try:
+        _build_geo_event_horizon(base)
+    except Exception:
+        section_errors.append("GEO_HORIZON:\n" + traceback.format_exc())
 
     try:
-        if UPDATE_CAM_ROTATION:
-            any_enabled = True
-            r = _update_cam_rotation(live)
-            log_lines.append("Cam rotation: " + str(r))
+        _build_geo_accretion_disc(base)
+    except Exception:
+        section_errors.append("GEO_DISC:\n" + traceback.format_exc())
 
-        if UPDATE_TITLE_TEXT:
-            any_enabled = True
-            r = _update_title_text(live)
-            log_lines.append("Title text: " + str(r))
+    try:
+        _build_geo_particles(base)
+    except Exception:
+        section_errors.append("GEO_PARTICLES:\n" + traceback.format_exc())
 
-        if UPDATE_LOGO_PATH:
-            any_enabled = True
-            r = _update_logo_path(live)
-            log_lines.append("Logo path: " + str(r))
+    # ── RENDER TOP ───────────────────────────────────────────────────────────
+    render = None
+    try:
+        render = _create_or_get_any(base, ["renderTOP"], "render1")
+        _safe_set_par_any(render, ["Resolutionw", "resolutionw", "Resx", "resx"], 1920)
+        _safe_set_par_any(render, ["Resolutionh", "resolutionh", "Resy", "resy"], 1080)
+        # Camera parameter: try full path first, then bare name
+        cam_ref = cam.path if cam is not None else "cam"
+        _safe_set_par_any(render, ["Camera", "camera", "Cam", "cam_op"], cam_ref)
+        _safe_set_par_any(render, ["Bgcolorr", "Backgroundcolorr", "Bgr", "bgr"], 0.0)
+        _safe_set_par_any(render, ["Bgcolorg", "Backgroundcolorg", "Bgg", "bgg"], 0.0)
+        _safe_set_par_any(render, ["Bgcolorb", "Backgroundcolorb", "Bgb", "bgb"], 0.0)
+        _safe_set_par_any(render, ["Bgcolora", "Backgroundcolora", "Bga", "bga"], 1.0)
+    except Exception:
+        section_errors.append("RENDER:\n" + traceback.format_exc())
 
-        if ADD_COLOUR_CORRECT:
-            any_enabled = True
-            r = _add_colour_correct(live)
-            log_lines.append("Colour correct: " + str(r))
+    # ── POST-FX CHAIN ─────────────────────────────────────────────────────────
+    #
+    #   render1 ──────────────────────→ comp_fb[0]  (current frame, foreground)
+    #   feedback1 → level_fb_decay ──→ comp_fb[1]  (fading trail,  background)
+    #               comp_fb ──────────→ feedback1   (closes the time-delayed loop)
+    #
+    #   comp_fb → displace_lens ← noise_warp
+    #           → blur_glow → level_final → out1
+    #
+    out1 = None
+    try:
+        feedback1      = _create_or_get_any(base, ["feedbackTOP"],  "feedback1")
+        level_fb_decay = _create_or_get_any(base, ["levelTOP"],     "level_fb_decay")
+        comp_fb        = _create_or_get_any(base, ["compositeTOP"], "comp_fb")
+        noise_warp     = _create_or_get_any(base, ["noiseTOP"],     "noise_warp")
+        displace_lens  = _create_or_get_any(base, ["displaceTOP"],  "displace_lens")
+        blur_glow      = _create_or_get_any(base, ["blurTOP"],      "blur_glow")
+        level_final    = _create_or_get_any(base, ["levelTOP"],     "level_final")
+        out1           = _create_or_get_any(base, ["nullTOP"],      "out1")
 
-        if FIX_OVER_TOPS:
-            any_enabled = True
-            r = _fix_over_tops(live)
-            log_lines.append("Over TOPs: " + str(r))
+        _disconnect_all_inputs(comp_fb)
+        _disconnect_all_inputs(level_fb_decay)
+        _disconnect_all_inputs(feedback1)
+        _disconnect_all_inputs(displace_lens)
+        _disconnect_all_inputs(blur_glow)
+        _disconnect_all_inputs(level_final)
+        _disconnect_all_inputs(out1)
 
-        if ADD_AUDIO_REACTIVITY:
-            any_enabled = True
-            r = _add_audio_reactivity(live)
-            log_lines.append("Audio reactivity: " + str(r))
+        if render is not None:
+            comp_fb.inputConnectors[0].connect(render)
+        level_fb_decay.inputConnectors[0].connect(feedback1)
+        comp_fb.inputConnectors[1].connect(level_fb_decay)
+        feedback1.inputConnectors[0].connect(comp_fb)
 
-        if ADD_EDGE_OVERLAY:
-            any_enabled = True
-            r = _add_edge_overlay(live)
-            log_lines.append("Edge overlay: " + str(r))
+        _safe_set_menu_any(comp_fb,
+                           ["Operand", "operand", "Operation", "operation"], ["over"])
+        _safe_set_par_any(comp_fb,
+                          ["Operand", "operand", "Operation", "operation"], 0)
 
-        if ADD_LOGO_PULSE:
-            any_enabled = True
-            r = _add_logo_pulse(live)
-            log_lines.append("Logo pulse: " + str(r))
+        displace_lens.inputConnectors[0].connect(comp_fb)
+        displace_lens.inputConnectors[1].connect(noise_warp)
+        blur_glow.inputConnectors[0].connect(displace_lens)
+        level_final.inputConnectors[0].connect(blur_glow)
+        out1.inputConnectors[0].connect(level_final)
 
-        if ADD_POSE_OVERLAY:
-            any_enabled = True
-            r = _add_pose_overlay(live)
-            log_lines.append("Pose overlay: " + str(r))
+        # ── AUDIO-REACTIVE EXPRESSIONS ────────────────────────────────────────
+        a = "abs(op('audio_env')[0])"
 
-        if ADD_POINT_TRACK:
-            any_enabled = True
-            r = _add_point_track(live)
-            log_lines.append("Point tracking: " + str(r))
+        _safe_set_expr_any(level_fb_decay,
+                           ["Brightness", "Brightnessx", "Brightnessy", "Brightnessz",
+                            "brightness", "Gamma", "gamma", "Colr", "Colg", "Colb"],
+                           "0.90 - min(0.18, {a} * 2.8)".format(a=a))
 
-        if PROBE_PARAMS:
-            any_enabled = True
-            r = _probe_params(live)
-            log_lines.append("Param probe:\n" + r)
+        _safe_set_par_any(noise_warp, ["Monochrome", "monochrome"], 1)
+        _safe_set_par_any(noise_warp, ["Period", "period", "Freq", "freq"], 4.2)
+        _safe_set_par_any(noise_warp, ["Amp", "amp", "Gain", "gain"], 0.28)
+        _safe_set_par_any(noise_warp, ["Resolutionw", "resolutionw"], 1920)
+        _safe_set_par_any(noise_warp, ["Resolutionh", "resolutionh"], 1080)
+        _safe_set_expr_any(noise_warp,
+                           ["Tx", "tx", "Translatex", "translatex", "Offsetx", "offsetx"],
+                           "absTime.seconds * 0.11")
+        _safe_set_expr_any(noise_warp,
+                           ["Tz", "tz", "Translatez", "translatez", "Offsetz", "offsetz"],
+                           "absTime.seconds * 0.07")
 
-        if not any_enabled:
-            log_lines.append("No update sections enabled. Set UPDATE_* flags to True.")
+        lens_expr = "0.012 + min(0.28, {a} * 5.0)".format(a=a)
+        _safe_set_expr_any(displace_lens,
+                           ["Displaceweight", "Displaceweight1",
+                            "displaceweight", "displaceweight1"],
+                           lens_expr)
+        for par in ["Displaceweight1", "Displaceweight2", "Displaceweight3",
+                    "displaceweight1", "displaceweight2", "displaceweight3"]:
+            _safe_set_expr(displace_lens, par, lens_expr)
+
+        _safe_set_expr_any(blur_glow,
+                           ["Filtersize", "Filterwidth", "Filterw", "Size",
+                            "filtersize", "filterwidth", "filterw", "size"],
+                           "2.0 + min(80.0, {a} * 900.0)".format(a=a))
+
+        _safe_set_expr_any(level_final,
+                           ["Brightness", "Brightnessx", "brightness"],
+                           "0.82 + min(0.45, {a} * 7.0)".format(a=a))
+
+        _set_viewer(out1, True)
+    except Exception:
+        section_errors.append("POST_FX:\n" + traceback.format_exc())
+
+    # ── AUTO-LAYOUT ───────────────────────────────────────────────────────────
+    # layoutChildren on the base COMP so every node is reachable with H (Home).
+    _layout_children(base)
+
+    return base, section_errors
+
+
+# ─── entry point ─────────────────────────────────────────────────────────────
+
+def build():
+    project = op("/project1")
+    if project is None:
+        raise RuntimeError("Could not find /project1")
+
+    try:
+        if CLEAN_REBUILD:
+            _destroy_if_exists(project, "blackhole_live")
+            _destroy_if_exists(project, "blackhole_build_log")
+
+        base, section_errors = _build_blackhole(project)
+        _layout_children(project)
+
+        status = "PARTIAL — see section errors below" if section_errors else "OK (all sections)"
+        error_block = (
+            "\n\n─── SECTION ERRORS ─────────────────────────────────────────────\n"
+            + "\n\n".join(section_errors)
+        ) if section_errors else ""
+
+        _write_build_log(
+            project,
+            "=== Voidstar Black Hole — build {status} ===\n\n"
+            "Network root : /project1/blackhole_live\n"
+            "Press H inside blackhole_live to home/fit the full network.\n"
+            "out1 (final output) is the rightmost TOP node.\n\n"
+            "─── AUDIO ───────────────────────────────────────────────────────\n"
+            "  audio_src_switch  Index=0  → live  (loopback + instrument)\n"
+            "  audio_src_switch  Index=1  → file  (set File param on audio_file)\n"
+            "  Run audio_diag DAT to verify input levels.\n\n"
+            "─── 3D SCENE ────────────────────────────────────────────────────\n"
+            "  cam               Ty=7  Tz=14  Rx=-26  (elevated angled view)\n"
+            "  light_key         warm  (1.0 / 0.88 / 0.62)  intensity 0.9\n"
+            "  light_fill        cool  (0.18 / 0.22 / 0.52)  intensity 0.3\n"
+            "  geo_event_horizon black sphere — radius pulses with audio\n"
+            "  geo_disc          torus with noise turbulence — colour driven by audio\n"
+            "  geo_particles     circle ring — radius + turbulence driven by audio\n"
+            "  render1           black background, camera = cam\n\n"
+            "─── POST FX ─────────────────────────────────────────────────────\n"
+            "  feedback trail    decay driven by audio\n"
+            "  displace_lens     gravitational lensing warp\n"
+            "  blur_glow         bloom corona driven by audio\n"
+            "  out1              ← enable viewer here to see the simulation\n\n"
+            "─── TIPS ────────────────────────────────────────────────────────\n"
+            "  • CLEAN_REBUILD = {cr}\n"
+            "  • Add a kinectCHOP and route hand x/y into cam.Tx / cam.Ty\n"
+            "    to enable spatial interaction.\n"
+            "  • Pipe out1 into a Movie File Out TOP to record."
+            "{err}".format(status=status, cr=str(CLEAN_REBUILD), err=error_block)
+        )
+
+        msg = "Network: /project1/blackhole_live\nPress H to fit view.\nEnable viewer on out1 to see the simulation."
+        if section_errors:
+            msg += "\n\nPartial build — check blackhole_build_log for section errors."
+        try:
+            ui.messageBox("Voidstar Black Hole", msg)
+        except Exception:
+            pass
+
+        return base
 
     except Exception:
         err = traceback.format_exc()
-        log_lines.append("ERROR:\n" + err)
         print(err)
-
-    summary = "\n".join(log_lines)
-    print(summary)
-
-    # Write log to a DAT so it persists.
-    project = op("/project1")
-    if project:
-        log_dat = _create_or_get_any(project, ["textDAT"], "voidstar_update_log")
-        log_dat.text = summary
-        log_dat.nodeX = 120
-        log_dat.nodeY = -220
-
-    try:
-        ui.messageBox("Voidstar Updater", summary)
-    except Exception:
-        pass
+        _write_build_log(project, "BUILD FAILED:\n\n" + err)
+        try:
+            ui.messageBox(
+                "Black hole build failed",
+                "Full traceback written to /project1/blackhole_build_log\n"
+                "(copy directly from the Text DAT).",
+            )
+        except Exception:
+            pass
+        return None
 
 
-update()
+build()
