@@ -122,6 +122,7 @@ def make_default_output_path(input_path: Path, outdir: Path, args: argparse.Name
         f"{input_path.stem}_th"
         f"_d{args.duration:g}"
         f"_f{args.fade_out_duration:g}"
+        f"_w{args.windows}"
         f"_li{args.logo_intensity:g}"
         f"_t{slug(args.title, 8)}"
         f"_s{slug(args.secondary_text, 8)}"
@@ -1005,6 +1006,7 @@ def main() -> None:
     parser.add_argument("--secondary-max-height-ratio", type=float, default=0.66, help="Max secondary block height as frame-height ratio")
     parser.add_argument("--duration", type=float, default=3.2, help="Hook duration in seconds for start and end windows")
     parser.add_argument("--fade-out-duration", type=float, default=1.0, help="Fade-out at start and mirrored fade-in at end")
+    parser.add_argument("--windows", choices=["both", "start", "end"], default="both", help="Which title-hook window(s) to render")
     parser.add_argument("--logo", default="", help="Optional logo file with alpha channel")
     parser.add_argument("--logo-width-ratio", type=float, default=0.94, help="Logo width ratio relative to frame width")
     parser.add_argument("--logo-x-ratio", type=float, default=None, help="Logo center X position [0..1] (default keeps current center behavior)")
@@ -1191,8 +1193,8 @@ def main() -> None:
                 break
 
             t = idx / fps
-            a0 = start_alpha(t, args.duration, args.fade_out_duration)
-            a1 = end_alpha(t, duration, args.duration, args.fade_out_duration)
+            a0 = start_alpha(t, args.duration, args.fade_out_duration) if args.windows in {"both", "start"} else 0.0
+            a1 = end_alpha(t, duration, args.duration, args.fade_out_duration) if args.windows in {"both", "end"} else 0.0
             hook_alpha = max(a0, a1)
 
             audio_level = float(audio_env[idx]) if idx < len(audio_env) else float(audio_env[-1] if len(audio_env) else 0.0)

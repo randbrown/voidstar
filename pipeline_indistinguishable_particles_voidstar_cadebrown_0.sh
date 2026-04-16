@@ -34,15 +34,20 @@ set -euo pipefail
 #    USE_GLITCHFIELD_CACHE_DEFAULT=1
 #    GLITCHFIELD_PRESET="clean"        # clean | gritty | chaos | custom
 #    PIPELINE_MODE_DEFAULT="preview"
+#
+# IG STORIES SEGMENTS (equal chunks, each <= 60s)
+#   python3 divvy/divvy.py split /home/brown/WinVideos/indistinguishable_particles_voidstar_cadebrown_0/indistinguishable_particles_voidstar_cadebrown_0_full.mp4 \
+#     --target-seconds 60 --rounding ceil --cut-accuracy copy \
+#     --out-dir /home/brown/WinVideos/indistinguishable_particles_voidstar_cadebrown_0/segments
 
-# Pipeline mode: all | end-only | preview | custom
+# Pipeline mode: all | end-only | preview | custom | segments-accurate-titlehook
 PIPELINE_MODE_DEFAULT="custom"
 
 # For custom mode, choose exactly which targets run.
-RUN_60S_START=1
-RUN_180S_START=1
-RUN_60S_END=1
-RUN_180S_END=1
+RUN_60S_START=0
+RUN_180S_START=0
+RUN_60S_END=0
+RUN_180S_END=0
 RUN_FULL=1
 
 # Input/output defaults.
@@ -143,8 +148,8 @@ USE_TITLE_HOOK_CACHE_DEFAULT=1
 TITLE_HOOK_DURATION_DEFAULT=4.0
 TITLE_HOOK_DURATION_600_DEFAULT=8.0
 TITLE_HOOK_FADE_OUT_DURATION_DEFAULT=1.3
-TITLE_HOOK_TITLE_DEFAULT='// indistinguishable_particles feat. Cade Brown (hi60t)\n// voidstar'
-TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#livecoding\n#pedalsteel\n#strudel\n#touchdesigner\n#opencvpython'
+TITLE_HOOK_TITLE_DEFAULT='// indistinguishable_particles (hi60t)\n// void* phunction()'
+TITLE_HOOK_SECONDARY_TEXT_DEFAULT='#livecoding\n#pedalsteel\n#ambientmusic\n#strudel\n#opencvpython'
 TITLE_HOOK_LOGO_DEFAULT='~/code/voidstar/art/logos_alpha/voidstar_logo_0.png'
 TITLE_HOOK_LOGO_ALPHA_THRESHOLD_DEFAULT=0.98
 TITLE_HOOK_LOGO_INTENSITY_DEFAULT=1.55
@@ -896,6 +901,7 @@ run_optional_title_hook_on_clip() {
     local stage_label="${3:-clip}"
     local title_token="${4:-hi60t}"
     local hook_duration="${5:-$TITLE_HOOK_DURATION}"
+    local hook_windows="${6:-both}"
 
     [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]] || { echo "$input_clip"; return 0; }
 
@@ -911,7 +917,7 @@ run_optional_title_hook_on_clip() {
     local args_sig
     local resolved_title
     resolved_title="${TITLE_HOOK_TITLE//hi60t/${title_token}}"
-    args_sig="duration=${hook_duration}|fade=${TITLE_HOOK_FADE_OUT_DURATION}|title=${resolved_title}|secondary=${TITLE_HOOK_SECONDARY_TEXT}|logo_alpha_threshold=${TITLE_HOOK_LOGO_ALPHA_THRESHOLD}|logo_intensity=${TITLE_HOOK_LOGO_INTENSITY}|logo_idle_wiggle=${TITLE_HOOK_LOGO_IDLE_WIGGLE}|logo_x=${TITLE_HOOK_LOGO_X_RATIO}|logo_y=${TITLE_HOOK_LOGO_Y_RATIO}|track_scale=${TITLE_HOOK_LOGO_MOTION_TRACK_SCALE}|track_radius=${TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS}|track_neighbors=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS}|track_min_distance=${TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE}|track_pad_px=${TITLE_HOOK_LOGO_MOTION_TRACK_PAD_PX}|track_link_opacity=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_OPACITY}|track_refresh=${TITLE_HOOK_LOGO_MOTION_TRACK_REFRESH}|track_decay=${TITLE_HOOK_LOGO_MOTION_TRACK_DECAY}|logo_opacity=${TITLE_HOOK_LOGO_OPACITY}|logo_rgb_shift_opacity=${TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY}|logo_glow_white=${TITLE_HOOK_LOGO_GLOW_WHITE}|logo_glow_color=${TITLE_HOOK_LOGO_GLOW_COLOR}|background_dim=${TITLE_HOOK_BACKGROUND_DIM}|title_layer_dim=${TITLE_HOOK_TITLE_LAYER_DIM}|text_align=${TITLE_HOOK_TEXT_ALIGN}|title_jitter_audio_multiplier=${TITLE_HOOK_TITLE_JITTER_AUDIO_MULTIPLIER}|sparks=${TITLE_HOOK_SPARKS}|sparks_rate=${TITLE_HOOK_SPARKS_RATE}|sparks_motion_threshold=${TITLE_HOOK_SPARKS_MOTION_THRESHOLD}|sparks_opacity=${TITLE_HOOK_SPARKS_OPACITY}|token=${title_token}"
+    args_sig="duration=${hook_duration}|fade=${TITLE_HOOK_FADE_OUT_DURATION}|windows=${hook_windows}|title=${resolved_title}|secondary=${TITLE_HOOK_SECONDARY_TEXT}|logo_alpha_threshold=${TITLE_HOOK_LOGO_ALPHA_THRESHOLD}|logo_intensity=${TITLE_HOOK_LOGO_INTENSITY}|logo_idle_wiggle=${TITLE_HOOK_LOGO_IDLE_WIGGLE}|logo_x=${TITLE_HOOK_LOGO_X_RATIO}|logo_y=${TITLE_HOOK_LOGO_Y_RATIO}|track_scale=${TITLE_HOOK_LOGO_MOTION_TRACK_SCALE}|track_radius=${TITLE_HOOK_LOGO_MOTION_TRACK_RADIUS}|track_neighbors=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_NEIGHBORS}|track_min_distance=${TITLE_HOOK_LOGO_MOTION_TRACK_MIN_DISTANCE}|track_pad_px=${TITLE_HOOK_LOGO_MOTION_TRACK_PAD_PX}|track_link_opacity=${TITLE_HOOK_LOGO_MOTION_TRACK_LINK_OPACITY}|track_refresh=${TITLE_HOOK_LOGO_MOTION_TRACK_REFRESH}|track_decay=${TITLE_HOOK_LOGO_MOTION_TRACK_DECAY}|logo_opacity=${TITLE_HOOK_LOGO_OPACITY}|logo_rgb_shift_opacity=${TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY}|logo_glow_white=${TITLE_HOOK_LOGO_GLOW_WHITE}|logo_glow_color=${TITLE_HOOK_LOGO_GLOW_COLOR}|background_dim=${TITLE_HOOK_BACKGROUND_DIM}|title_layer_dim=${TITLE_HOOK_TITLE_LAYER_DIM}|text_align=${TITLE_HOOK_TEXT_ALIGN}|title_jitter_audio_multiplier=${TITLE_HOOK_TITLE_JITTER_AUDIO_MULTIPLIER}|sparks=${TITLE_HOOK_SPARKS}|sparks_rate=${TITLE_HOOK_SPARKS_RATE}|sparks_motion_threshold=${TITLE_HOOK_SPARKS_MOTION_THRESHOLD}|sparks_opacity=${TITLE_HOOK_SPARKS_OPACITY}|token=${title_token}"
 
     local titlehook_sig
     titlehook_sig="$(titlehook_cache_signature "$input_clip" "$TITLE_HOOK_LOGO" "$args_sig")"
@@ -932,6 +938,7 @@ run_optional_title_hook_on_clip() {
         --secondary-text "$TITLE_HOOK_SECONDARY_TEXT" \
         --duration "$hook_duration" \
         --fade-out-duration "$TITLE_HOOK_FADE_OUT_DURATION" \
+        --windows "$hook_windows" \
         --logo "$TITLE_HOOK_LOGO" \
         --logo-alpha-threshold "$TITLE_HOOK_LOGO_ALPHA_THRESHOLD" \
         --logo-intensity "$TITLE_HOOK_LOGO_INTENSITY" \
@@ -1046,6 +1053,60 @@ PY
         rm -f "$err_file"
         return $rc
     done
+}
+
+run_segments_accurate_titlehook() {
+    echo "--- Accurate <=60s segments + title hook ---"
+
+    local logo_tag source_clip accurate_segments_dir titlehook_dir
+    logo_tag="$(basename "${LOGO_START%.*}")"
+    source_clip="$(with_logo_suffix "$OUTDIR/${STEM}_full_overlay_logo.mp4" "$logo_tag")"
+    accurate_segments_dir="$OUTDIR/segments_accurate"
+    titlehook_dir="$OUTDIR/segments_accurate_titlehook_phunction"
+
+    require_file "SEGMENT_SOURCE_CLIP" "$source_clip"
+    mkdir -p "$accurate_segments_dir" "$titlehook_dir"
+
+    local -a existing_segments
+    shopt -s nullglob
+    existing_segments=("$accurate_segments_dir"/*.mp4)
+    shopt -u nullglob
+
+    if [[ "$FORCE" -eq 1 || ${#existing_segments[@]} -eq 0 ]]; then
+        run_logged python3 "$DIVVY" split "$source_clip" \
+            --target-seconds 60 \
+            --rounding ceil \
+            --cut-accuracy accurate \
+            --video-encoder "$DIVVY_VIDEO_ENCODER" \
+            --preset "$DIVVY_PRESET" \
+            --out-dir "$accurate_segments_dir"
+    else
+        echo "[segments] using existing accurate segments in: $accurate_segments_dir"
+    fi
+
+    local -a segment_files
+    mapfile -t segment_files < <(find "$accurate_segments_dir" -maxdepth 1 -type f -name '*.mp4' -printf '%f\n' | sort -V)
+    (( ${#segment_files[@]} > 0 )) || die "No accurate segment files found in: $accurate_segments_dir"
+
+    local saved_title saved_secondary idx seg_name input_clip output_clip
+    saved_title="$TITLE_HOOK_TITLE"
+    saved_secondary="$TITLE_HOOK_SECONDARY_TEXT"
+    TITLE_HOOK_SECONDARY_TEXT=$'#livecoding\n#pedalsteel\n#ambientmusic\n#opencvpython'
+
+    for idx in "${!segment_files[@]}"; do
+        seg_name="${segment_files[$idx]}"
+        input_clip="$accurate_segments_dir/$seg_name"
+        output_clip="$titlehook_dir/$seg_name"
+        printf -v TITLE_HOOK_TITLE '// indistinguishable_particles[%s]\n// void* phunction()' "$idx"
+        run_optional_title_hook_on_clip "$input_clip" "$output_clip" "segments-accurate-titlehook-$idx" "$idx" "$TITLE_HOOK_DURATION" "both" >/dev/null
+    done
+
+    TITLE_HOOK_TITLE="$saved_title"
+    TITLE_HOOK_SECONDARY_TEXT="$saved_secondary"
+
+    echo "[segments] accurate_dir=$accurate_segments_dir"
+    echo "[segments] titlehook_dir=$titlehook_dir"
+    echo "[segments] files=${#segment_files[@]}"
 }
 
 # ----------------------------
@@ -1618,6 +1679,8 @@ main() {
         TARGETS=(run_60s_start)
     elif [[ "$PIPELINE_MODE" == "end-only" ]]; then
         TARGETS=(run_60s_end)
+    elif [[ "$PIPELINE_MODE" == "segments-accurate-titlehook" ]]; then
+        TARGETS=(run_segments_accurate_titlehook)
     elif [[ "$PIPELINE_MODE" == "custom" ]]; then
         (( RUN_60S_START == 1 )) && TARGETS+=(run_60s_start)
         (( RUN_60S_END == 1 )) && TARGETS+=(run_60s_end)
