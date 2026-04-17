@@ -541,6 +541,9 @@ def build_title_layer(
     text_align: str,
     title_jitter_audio_multiplier: float,
     font_family: str,
+    title_above_logo: bool = False,
+    logo_y: int = None,
+    logo_h: int = None,
 ) -> tuple[np.ndarray, list[tuple[int, int, int, int]]]:
     layer = np.zeros((height, width, 3), dtype=np.uint8)
     text_line_rects: list[tuple[int, int, int, int]] = []
@@ -597,6 +600,7 @@ def build_title_layer(
         block_h = max(1, (len(lines) - 1) * line_step + max(sz[1] for sz, _ in sizes))
         return scale, thickness, line_step, sizes
 
+
     cx = width // 2
     title_lines = title.split("\n") if title else [""]
     secondary_lines = secondary.split("\n") if secondary else [""]
@@ -604,7 +608,11 @@ def build_title_layer(
     text_margin_px = int(width * float(np.clip(text_margin_ratio, 0.02, 0.25)))
     max_text_w = max(50, width - (2 * text_margin_px))
 
-    title_max_h = max(40, int(height * float(np.clip(title_max_height_ratio, 0.08, 0.40))))
+    # If title_above_logo, restrict title height and adjust layout
+    if title_above_logo:
+        title_max_h = int(height * 0.18)
+    else:
+        title_max_h = max(40, int(height * float(np.clip(title_max_height_ratio, 0.08, 0.40))))
     secondary_max_h = max(30, int(height * float(np.clip(secondary_max_height_ratio, 0.06, 0.45))))
 
     title_scale, title_th, title_line_step, title_sizes = fit_text_block(
@@ -642,38 +650,52 @@ def build_title_layer(
     title_block_w = max(sz[0] for sz, _ in title_sizes)
     secondary_block_w = max(sz[0] for sz, _ in secondary_sizes)
 
-    title_center_y = int(height * 0.48)
-    secondary_center_y = int(height * 0.63)
-    title_top = title_center_y - title_block_h // 2
-    secondary_top = secondary_center_y - secondary_block_h // 2
-
     top_margin = int(height * 0.05)
     bottom_margin = int(height * 0.05)
     min_gap = max(8, int(height * 0.02))
 
-    secondary_top = max(secondary_top, title_top + title_block_h + min_gap)
+    align_mode = text_align if text_align in {"center", "left"} else "center"
+    shared_block_w = max(title_block_w, secondary_block_w)
+    shared_left = max(text_margin_px, min(width - text_margin_px - shared_block_w, cx - shared_block_w // 2))
 
-    bottom_limit = height - bottom_margin
-    overflow = (secondary_top + secondary_block_h) - bottom_limit
-    if overflow > 0:
-        title_top -= overflow
-        secondary_top -= overflow
-
-    if title_top < top_margin:
-        shift = top_margin - title_top
-        title_top += shift
-        secondary_top += shift
-
-    secondary_top = max(secondary_top, title_top + title_block_h + min_gap)
-    secondary_top = min(secondary_top, max(top_margin, bottom_limit - secondary_block_h))
-
-    if secondary_top < title_top + title_block_h + min_gap:
-        need = (title_top + title_block_h + min_gap) - secondary_top
-        title_top = max(top_margin, title_top - need)
-        secondary_top = min(max(top_margin, title_top + title_block_h + min_gap), max(top_margin, bottom_limit - secondary_block_h))
-
-    title_block_y0 = title_top + max(sz[1] for sz, _ in title_sizes)
-    secondary_block_y0 = secondary_top + max(sz[1] for sz, _ in secondary_sizes)
+    if title_above_logo and logo_y is not None and logo_h is not None:
+        # Title block bottom aligns with logo_y - min_gap
+        title_block_y0 = logo_y - min_gap
+        title_top = title_block_y0 - title_block_h
+        # Secondary block top aligns with logo_y + logo_h + min_gap
+        secondary_top = logo_y + logo_h + min_gap
+        secondary_block_y0 = secondary_top + max(sz[1] for sz, _ in secondary_sizes)
+    elif title_above_logo:
+        # Fallback to old behavior if logo position not provided
+        logo_area_h = int(height * 0.32)
+        logo_y_fallback = (height // 2) - (logo_area_h // 2)
+        title_block_y0 = logo_y_fallback - min_gap
+        title_top = title_block_y0 - title_block_h
+        secondary_top = logo_y_fallback + logo_area_h + min_gap
+        secondary_block_y0 = secondary_top + max(sz[1] for sz, _ in secondary_sizes)
+    else:
+        # Default: title and secondary centered as before
+        title_center_y = int(height * 0.48)
+        secondary_center_y = int(height * 0.63)
+        title_top = title_center_y - title_block_h // 2
+        secondary_top = secondary_center_y - secondary_block_h // 2
+        bottom_limit = height - bottom_margin
+        overflow = (secondary_top + secondary_block_h) - bottom_limit
+        if overflow > 0:
+            title_top -= overflow
+            secondary_top -= overflow
+        if title_top < top_margin:
+            shift = top_margin - title_top
+            title_top += shift
+            secondary_top += shift
+        secondary_top = max(secondary_top, title_top + title_block_h + min_gap)
+        secondary_top = min(secondary_top, max(top_margin, bottom_limit - secondary_block_h))
+        if secondary_top < title_top + title_block_h + min_gap:
+            need = (title_top + title_block_h + min_gap) - secondary_top
+            title_top = max(top_margin, title_top - need)
+            secondary_top = min(max(top_margin, title_top + title_block_h + min_gap), max(top_margin, bottom_limit - secondary_block_h))
+        title_block_y0 = title_top + max(sz[1] for sz, _ in title_sizes)
+        secondary_block_y0 = secondary_top + max(sz[1] for sz, _ in secondary_sizes)
 
     jitter_multiplier = max(0.0, float(title_jitter_audio_multiplier))
     jitter_audio = min(2.0, max(0.0, audio_level * jitter_multiplier))
@@ -698,7 +720,11 @@ def build_title_layer(
             title_x = int(shared_left)
         else:
             title_x = cx - line_size[0] // 2
-        title_y = title_block_y0 + i * title_line_step
+        # In above-logo mode, draw from title_top; otherwise, from title_block_y0
+        if title_above_logo:
+            title_y = title_top + i * title_line_step
+        else:
+            title_y = title_block_y0 + i * title_line_step
         cv2.putText(layer, line, (title_x - 3 + ox, title_y + oy), title_font, title_scale, cyan, title_th, cv2.LINE_AA)
         cv2.putText(layer, line, (title_x + 3 + ox, title_y - oy), title_font, title_scale, red, title_th, cv2.LINE_AA)
         cv2.putText(layer, line, (title_x + ox, title_y + oy), title_font, title_scale, white, title_th + 1, cv2.LINE_AA)
@@ -990,6 +1016,8 @@ def mux_original_audio(temp_video: Path, input_path: Path, output_path: Path) ->
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create VoidStar start/end glitch title hooks on a video.")
+    parser.add_argument("--title-above-logo", action="store_true", help="Place the title above the logo and balance layout.")
+    parser.add_argument("--audio-gain", type=float, default=1.0, help="Scale audio reactivity for all effects (default 1.0)")
     parser.add_argument("input_video", help="Input video path")
     parser.add_argument("--output", default="", help="Output video path (optional)")
     parser.add_argument("--outdir", default="", help="Output directory (defaults to input directory)")
@@ -1012,7 +1040,8 @@ def main() -> None:
     parser.add_argument("--logo-x-ratio", type=float, default=None, help="Logo center X position [0..1] (default keeps current center behavior)")
     parser.add_argument("--logo-y-ratio", type=float, default=None, help="Logo center Y position [0..1] (default keeps current title-hook placement)")
     parser.add_argument("--logo-opacity", type=float, default=0.82, help="Base logo opacity")
-    parser.add_argument("--logo-rgb-shift-opacity", type=float, default=0.22, help="Opacity for chromatic red-channel logo offset [0..1]")
+    parser.add_argument("--logo-rgb-shift", action="store_true", help="Enable chromatic RGB shift effect on logo (default: off)")
+    parser.add_argument("--logo-rgb-shift-opacity", type=float, default=0.22, help="Opacity for chromatic red-channel logo offset [0..1], only used if --logo-rgb-shift is set")
     parser.add_argument("--logo-glow-white", action="store_true", help="Use neutral white glow for logo instead of channel-weighted tint")
     parser.add_argument("--logo-glow-color", default="", help="Optional RRGGBB color for logo glow, overrides white/channel-weighted glow")
     parser.add_argument("--logo-alpha-threshold", type=float, default=0.18, help="Alpha cutoff [0..1] for logo content bounds (higher trims faint edges)")
@@ -1198,9 +1227,38 @@ def main() -> None:
             hook_alpha = max(a0, a1)
 
             audio_level = float(audio_env[idx]) if idx < len(audio_env) else float(audio_env[-1] if len(audio_env) else 0.0)
+            audio_level *= float(args.audio_gain)
 
             if hook_alpha > 0.0:
                 motion_boost = min(1.0, (0.4 + audio_level * 0.45) * hook_alpha)
+
+                # Compute logo position first if needed
+                logo_scaled = None
+                logo_x = 0
+                logo_y = 0
+                logo_w = 0
+                logo_h = 0
+                logo_dim_rect = None
+                if logo_rgba is not None:
+                    logo_pulse = 1.0 + (0.025 + 0.03 * args.logo_intensity) * min(2.0, audio_level)
+                    logo_pulse += float(args.logo_idle_wiggle) * math.sin(idx * 0.23)
+                    logo_w = max(1, int(width * args.logo_width_ratio * logo_pulse))
+                    logo_scaled = resize_logo_rgba(logo_rgba, logo_w)
+                    logo_h, logo_w = logo_scaled.shape[:2]
+
+                    cx_ratio = 0.5 if args.logo_x_ratio is None else clamp(float(args.logo_x_ratio), 0.0, 1.0)
+                    cy_ratio = None if args.logo_y_ratio is None else clamp(float(args.logo_y_ratio), 0.0, 1.0)
+                    logo_x = int(round((width * cx_ratio) - (logo_w * 0.5)))
+                    if cy_ratio is None:
+                        logo_y = int(height * 0.50 - logo_h * 0.56)
+                    else:
+                        logo_y = int(round((height * cy_ratio) - (logo_h * 0.5)))
+                    logo_dim_rect = logo_content_rect_in_frame(
+                        logo_scaled,
+                        logo_x,
+                        logo_y,
+                        alpha_threshold=logo_alpha_threshold,
+                    )
 
                 title_layer, text_line_rects = build_title_layer(
                     width=width,
@@ -1218,6 +1276,9 @@ def main() -> None:
                     text_align=text_align,
                     title_jitter_audio_multiplier=title_jitter_audio_multiplier,
                     font_family=font_family,
+                    title_above_logo=getattr(args, "title_above_logo", False),
+                    logo_y=logo_y if logo_scaled is not None else None,
+                    logo_h=logo_h if logo_scaled is not None else None,
                 )
 
                 logo_scaled = None
@@ -1278,18 +1339,19 @@ def main() -> None:
                         glow[:, :, 1] = white_level
                         glow[:, :, 2] = white_level
                     else:
-                        glow[:, :, 0] = np.clip(glow[:, :, 0].astype(np.float32) * (1.05 + 0.35 * audio_level), 0, 255).astype(np.uint8)
-                        glow[:, :, 1] = np.clip(glow[:, :, 1].astype(np.float32) * (1.08 + 0.45 * audio_level), 0, 255).astype(np.uint8)
-                        glow[:, :, 2] = np.clip(glow[:, :, 2].astype(np.float32) * (1.08 + 0.52 * audio_level), 0, 255).astype(np.uint8)
+                        # Default: no chromatic shift, just use logo as-is for glow
+                        pass
                     overlay_rgba(frame, glow, logo_x, logo_y, opacity=float(min(1.0, args.logo_opacity * hook_alpha * (0.70 + 0.45 * audio_level))))
 
-                    ch_x = int(2 + 4 * min(2.0, audio_level) * args.logo_intensity)
-                    rgb_shift_opacity = float(np.clip(args.logo_rgb_shift_opacity, 0.0, 1.0))
-                    if ch_x > 0 and rgb_shift_opacity > 1e-6:
-                        shifted = np.roll(logo_scaled, ch_x, axis=1)
-                        shifted[:, :, 1] = 0
-                        shifted[:, :, 0] = 0
-                        overlay_rgba(frame, shifted, logo_x - ch_x, logo_y, opacity=float(rgb_shift_opacity * hook_alpha))
+                    # Only apply chromatic shift if --logo-rgb-shift is set
+                    if getattr(args, "logo_rgb_shift", False):
+                        ch_x = int(2 + 4 * min(2.0, audio_level) * args.logo_intensity)
+                        rgb_shift_opacity = float(np.clip(args.logo_rgb_shift_opacity, 0.0, 1.0))
+                        if ch_x > 0 and rgb_shift_opacity > 1e-6:
+                            shifted = np.roll(logo_scaled, ch_x, axis=1)
+                            shifted[:, :, 1] = 0
+                            shifted[:, :, 0] = 0
+                            overlay_rgba(frame, shifted, logo_x - ch_x, logo_y, opacity=float(rgb_shift_opacity * hook_alpha))
 
                     overlay_rgba(frame, logo_scaled, logo_x, logo_y, opacity=float(args.logo_opacity * hook_alpha))
                     pulse = float(np.clip(audio_level, 0.0, 1.0))
