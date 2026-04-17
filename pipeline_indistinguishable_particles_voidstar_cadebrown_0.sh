@@ -48,11 +48,26 @@ RUN_60S_START=0
 RUN_180S_START=0
 RUN_60S_END=0
 RUN_180S_END=0
+RUN_HI30=0
+RUN_HI15=0
 RUN_FULL=1
 
 # Input/output defaults.
 INPUT_VIDEO_DEFAULT="/mnt/c/Users/brown/Videos/indistinguishable_particles_voidstar_cadebrown_0.mp4"
 OUTDIR_DEFAULT="/mnt/c/Users/brown/Videos"
+HIGHLIGHT_SOURCE_FULL_DEFAULT="~/WinVideos/indistinguishable_particles_voidstar_cadebrown_0/indistinguishable_particles_voidstar_cadebrown_0_full.mp4"
+
+# Exact highlight targets sourced from the approved full render.
+HI30_START_SECONDS_DEFAULT="717"
+HI30_END_SECONDS_DEFAULT="747"
+HI30_TITLE_HOOK_DURATION_DEFAULT="5.0"
+HI15_START_SECONDS_DEFAULT="807"
+HI15_END_SECONDS_DEFAULT="822"
+HI15_TITLE_HOOK_DURATION_DEFAULT="3.0"
+EXACT_HIGHLIGHT_LOGO_INTENSITY_DEFAULT="1.0"
+EXACT_HIGHLIGHT_LOGO_Y_RATIO_DEFAULT="0.25"
+EXACT_HIGHLIGHT_LOGO_OPACITY_DEFAULT="0.12"
+EXACT_HIGHLIGHT_LOGO_RGB_SHIFT_OPACITY_DEFAULT="0.04"
 
 # Highlight sampling defaults (leave start/full empty for divvy auto defaults).
 # Copied from the Markov Blankets base: CPM 30, patterns of 7 (14s base unit). Start from 11s onward.
@@ -412,6 +427,11 @@ title_hook_duration_for_target_seconds() {
             printf "%.3f", out
         }
     '
+}
+
+video_is_probeable() {
+    local video="$1"
+    ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video" >/dev/null 2>&1
 }
 
 rename_output() {
@@ -1109,9 +1129,80 @@ run_segments_accurate_titlehook() {
     echo "[segments] files=${#segment_files[@]}"
 }
 
+render_exact_highlight_trim() {
+    local source_clip="$1"
+    local target="$2"
+    local start_seconds="$3"
+    local end_seconds="$4"
+
+    local trim_sig
+    trim_sig="exact_trim|input=${source_clip}|input_fp=$(file_fingerprint "$source_clip")|start=${start_seconds}|end=${end_seconds}|video=libx265|crf=14|preset=slow|tag=hvc1|audio=aac320k"
+
+    if [[ -f "$target" ]] && ! video_is_probeable "$target"; then
+        rm -f "$target"
+    fi
+
+    if should_rebuild "$target" --dep "$source_clip" --sig "$trim_sig"; then
+        run_logged ffmpeg -hide_banner -loglevel error -y -i "$source_clip" \
+            -vf "trim=start=${start_seconds}:end=${end_seconds},setpts=PTS-STARTPTS" \
+            -af "atrim=start=${start_seconds}:end=${end_seconds},asetpts=PTS-STARTPTS" \
+            -c:v libx265 -crf 14 -preset slow -tag:v hvc1 \
+            -c:a aac -b:a 320k -movflags +faststart \
+            "$target"
+        write_cache_signature "$target" "$trim_sig"
+    fi
+
+    require_file "EXACT_TRIM_TARGET" "$target"
+    video_is_probeable "$target" || die "Exact trim output is not probeable: $target"
+}
+
+run_exact_highlight_target() {
+    local target_abbrev="$1"
+    local start_seconds="$2"
+    local end_seconds="$3"
+    local hook_duration="$4"
+
+    local source_clip="$HIGHLIGHT_SOURCE_FULL"
+    local trim_dst="$OUTDIR/${STEM}_${target_abbrev}_exact_trim.mp4"
+    local final_target="$OUTDIR/${STEM}_${target_abbrev}.mp4"
+    local title_hook_target="${final_target%.mp4}_titlehook.mp4"
+
+    local saved_secondary saved_intensity saved_y saved_opacity saved_rgb_shift
+    saved_secondary="$TITLE_HOOK_SECONDARY_TEXT"
+    saved_intensity="$TITLE_HOOK_LOGO_INTENSITY"
+    saved_y="$TITLE_HOOK_LOGO_Y_RATIO"
+    saved_opacity="$TITLE_HOOK_LOGO_OPACITY"
+    saved_rgb_shift="$TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY"
+
+    require_file "HIGHLIGHT_SOURCE_FULL" "$source_clip"
+    render_exact_highlight_trim "$source_clip" "$trim_dst" "$start_seconds" "$end_seconds"
+
+    TITLE_HOOK_SECONDARY_TEXT="$TITLE_HOOK_SECONDARY_TEXT_DEFAULT"
+    TITLE_HOOK_LOGO_INTENSITY="$EXACT_HIGHLIGHT_LOGO_INTENSITY"
+    TITLE_HOOK_LOGO_Y_RATIO="$EXACT_HIGHLIGHT_LOGO_Y_RATIO"
+    TITLE_HOOK_LOGO_OPACITY="$EXACT_HIGHLIGHT_LOGO_OPACITY"
+    TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY="$EXACT_HIGHLIGHT_LOGO_RGB_SHIFT_OPACITY"
+
+    final_target="$(run_optional_title_hook_on_clip "$trim_dst" "$title_hook_target" "${target_abbrev}-title-hook" "$target_abbrev" "$hook_duration" "both")"
+    final_target="$(finalize_target_output_name "$final_target" "$target_abbrev")"
+
+    TITLE_HOOK_SECONDARY_TEXT="$saved_secondary"
+    TITLE_HOOK_LOGO_INTENSITY="$saved_intensity"
+    TITLE_HOOK_LOGO_Y_RATIO="$saved_y"
+    TITLE_HOOK_LOGO_OPACITY="$saved_opacity"
+    TITLE_HOOK_LOGO_RGB_SHIFT_OPACITY="$saved_rgb_shift"
+
+    copy_to_gdrive_if_enabled "$final_target"
+}
+
 # ----------------------------
 # Targets
 # ----------------------------
+run_hi30() {
+    echo "--- Exact 30s highlight (HI30) ---"
+    run_exact_highlight_target "hi30" "$HI30_START_SECONDS" "$HI30_END_SECONDS" "$HI30_TITLE_HOOK_DURATION"
+}
+
 run_60s_start() {
     echo "--- 60s highlight (START) ---"
     local divvy_dst="$OUTDIR/${STEM}_highlights_60s_overlay.mp4"
@@ -1164,6 +1255,11 @@ run_60s_start() {
     final_target="$(finalize_target_output_name "$final_target" "hi60s")"
 
     copy_to_gdrive_if_enabled "$final_target"
+}
+
+run_hi15() {
+    echo "--- Exact 15s highlight (HI15) ---"
+    run_exact_highlight_target "hi15" "$HI15_START_SECONDS" "$HI15_END_SECONDS" "$HI15_TITLE_HOOK_DURATION"
 }
 
 
@@ -1502,6 +1598,17 @@ main() {
     TITLE_HOOK_SPARKS_RATE="$TITLE_HOOK_SPARKS_RATE_DEFAULT"
     TITLE_HOOK_SPARKS_MOTION_THRESHOLD="$TITLE_HOOK_SPARKS_MOTION_THRESHOLD_DEFAULT"
     TITLE_HOOK_SPARKS_OPACITY="$TITLE_HOOK_SPARKS_OPACITY_DEFAULT"
+    HIGHLIGHT_SOURCE_FULL="$HIGHLIGHT_SOURCE_FULL_DEFAULT"
+    HI30_START_SECONDS="$HI30_START_SECONDS_DEFAULT"
+    HI30_END_SECONDS="$HI30_END_SECONDS_DEFAULT"
+    HI30_TITLE_HOOK_DURATION="$HI30_TITLE_HOOK_DURATION_DEFAULT"
+    HI15_START_SECONDS="$HI15_START_SECONDS_DEFAULT"
+    HI15_END_SECONDS="$HI15_END_SECONDS_DEFAULT"
+    HI15_TITLE_HOOK_DURATION="$HI15_TITLE_HOOK_DURATION_DEFAULT"
+    EXACT_HIGHLIGHT_LOGO_INTENSITY="$EXACT_HIGHLIGHT_LOGO_INTENSITY_DEFAULT"
+    EXACT_HIGHLIGHT_LOGO_Y_RATIO="$EXACT_HIGHLIGHT_LOGO_Y_RATIO_DEFAULT"
+    EXACT_HIGHLIGHT_LOGO_OPACITY="$EXACT_HIGHLIGHT_LOGO_OPACITY_DEFAULT"
+    EXACT_HIGHLIGHT_LOGO_RGB_SHIFT_OPACITY="$EXACT_HIGHLIGHT_LOGO_RGB_SHIFT_OPACITY_DEFAULT"
     JOBS="$JOBS_DEFAULT"
     PIPELINE_MODE="$PIPELINE_MODE_DEFAULT"
     ENABLE_GDRIVE_COPY="$ENABLE_GDRIVE_COPY_DEFAULT"
@@ -1602,6 +1709,7 @@ main() {
     esac
 
     require_cmd python3
+    require_cmd ffmpeg
     require_cmd ffprobe
     mkdir -p "$OUTDIR"
     require_file "INPUT_VIDEO" "$INPUT_VIDEO"
@@ -1651,6 +1759,7 @@ main() {
     LOGO_START="$(eval echo "$LOGO_START")"
     LOGO_END="$(eval echo "$LOGO_END")"
     TITLE_HOOK_LOGO="$(eval echo "$TITLE_HOOK_LOGO")"
+    HIGHLIGHT_SOURCE_FULL="$(eval echo "$HIGHLIGHT_SOURCE_FULL")"
     require_file "LOGO_START" "$LOGO_START"
     require_file "LOGO_END" "$LOGO_END"
     if [[ "$ENABLE_TITLE_HOOK_STAGE" -eq 1 ]]; then
@@ -1682,6 +1791,8 @@ main() {
     elif [[ "$PIPELINE_MODE" == "segments-accurate-titlehook" ]]; then
         TARGETS=(run_segments_accurate_titlehook)
     elif [[ "$PIPELINE_MODE" == "custom" ]]; then
+        (( RUN_HI30 == 1 )) && TARGETS+=(run_hi30)
+        (( RUN_HI15 == 1 )) && TARGETS+=(run_hi15)
         (( RUN_60S_START == 1 )) && TARGETS+=(run_60s_start)
         (( RUN_60S_END == 1 )) && TARGETS+=(run_60s_end)
         (( RUN_180S_START == 1 )) && TARGETS+=(run_180s_start)
