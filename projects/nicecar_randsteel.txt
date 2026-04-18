@@ -1,0 +1,30 @@
+
+python3 /home/brown/code/voidstar/title_hook/voidstar_title_hook.py \
+  /home/brown/WinVideos/NiceCar/nicecar_randsteel_outtake_1_plain.mp4 \
+  --logo /home/brown/code/voidstar/art/logos_alpha/voidstar_logo_0.png \
+  --output /home/brown/WinVideos/NiceCar/nicecar_randsteel_outtake_1_vshook.mp4 \
+  --title "// nicecar_randsteel_outtake_1|// studio tracking session outtake" \
+  --secondary-text "#pedalsteelguitar|#studiosession|#reaperdaw|#touchdesigner" \
+  --logo-opacity 0.3 \
+  --logo-intensity 0.5 \
+  --logo-idle-wiggle 0.00 \
+  --title-jitter-audio-multiplier 0.0 \
+  --title-hook-sparks \
+  --title-hook-sparks-jitter 0.0 \
+  --title-above-logo \
+  --logo-motion-track-min-distance 512
+  
+  python3 /home/brown/code/voidstar/title_hook/voidstar_title_hook.py \
+  /home/brown/WinVideos/NiceCar/nicecar_randsteel_outtake_2_plain.mp4 \
+  --logo /home/brown/code/voidstar/art/logos_alpha/voidstar_logo_0.png \
+  --output /home/brown/WinVideos/NiceCar/nicecar_randsteel_outtake_2_vshook.mp4 \
+  --title "// nicecar_randsteel_outtake_1|// studio tracking session outtake" \
+  --secondary-text "#pedalsteelguitar|#studiosession|#reaperdaw|#touchdesigner" \
+  --logo-opacity 0.3 \
+  --logo-intensity 0.5 \
+  --logo-idle-wiggle 0.00 \
+  --title-jitter-audio-multiplier 0.0 \
+  --title-hook-sparks \
+  --title-hook-sparks-jitter 0.0 \
+  --title-above-logo \
+  --logo-motion-track-min-distance 512
